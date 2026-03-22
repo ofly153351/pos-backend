@@ -1,0 +1,235 @@
+package product
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"pos-backend/internal/modules/auth"
+)
+
+type Service struct {
+	repo    Repository
+	storage ImageStorage
+}
+
+func NewService(repo Repository, storage ImageStorage) Service {
+	return Service{repo: repo, storage: storage}
+}
+
+func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, input CreateProductRequest) (Product, error) {
+	if err := validateCreate(input); err != nil {
+		return Product{}, err
+	}
+
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Product{}, err
+	}
+	if !allowed {
+		return Product{}, ErrForbiddenStoreAccess
+	}
+
+	ok, err := s.repo.ProductTypeExists(ctx, storeID, strings.TrimSpace(input.ProductTypeID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidProductTypeID
+	}
+
+	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
+	if err != nil {
+		return Product{}, err
+	}
+
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+
+	product := Product{
+		ID:                  newID(),
+		StoreID:             storeID,
+		ProductTypeID:       strings.TrimSpace(input.ProductTypeID),
+		Name:                strings.TrimSpace(input.Name),
+		SKU:                 strings.TrimSpace(input.SKU),
+		UnitType:            normalizeUnitType(input.UnitType),
+		ImageURL:            imageURL,
+		Quantity:            0,
+		BasePrice:           input.BasePrice,
+		SpecialPrice:        input.SpecialPrice,
+		SpecialPriceStartAt: input.SpecialPriceStartAt,
+		SpecialPriceEndAt:   input.SpecialPriceEndAt,
+		IsActive:            isActive,
+		CreatedAt:           time.Now().UTC(),
+	}
+	if input.Quantity != nil {
+		product.Quantity = *input.Quantity
+	}
+
+	return s.repo.Create(ctx, product)
+}
+
+func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Product, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbiddenStoreAccess
+	}
+	return s.repo.ListByStore(ctx, storeID)
+}
+
+func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, productID string) (Product, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Product{}, err
+	}
+	if !allowed {
+		return Product{}, ErrForbiddenStoreAccess
+	}
+	return s.repo.GetByID(ctx, storeID, productID)
+}
+
+func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, productID string, input UpdateProductRequest) (Product, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Product{}, err
+	}
+	if !allowed {
+		return Product{}, ErrForbiddenStoreAccess
+	}
+
+	current, err := s.repo.GetByID(ctx, storeID, productID)
+	if err != nil {
+		return Product{}, err
+	}
+
+	if input.Name != nil {
+		current.Name = strings.TrimSpace(*input.Name)
+	}
+	if input.SKU != nil {
+		current.SKU = strings.TrimSpace(*input.SKU)
+	}
+	if input.ProductTypeID != nil {
+		current.ProductTypeID = strings.TrimSpace(*input.ProductTypeID)
+	}
+	if input.UnitType != nil {
+		current.UnitType = normalizeUnitType(*input.UnitType)
+	}
+	if input.BasePrice != nil {
+		current.BasePrice = *input.BasePrice
+	}
+	if input.Quantity != nil {
+		current.Quantity = *input.Quantity
+	}
+	if input.IsActive != nil {
+		current.IsActive = *input.IsActive
+	}
+	if input.ClearSpecialPrice {
+		current.SpecialPrice = nil
+	}
+	if input.SpecialPrice != nil {
+		current.SpecialPrice = input.SpecialPrice
+	}
+	if input.ClearSpecialWindow {
+		current.SpecialPriceStartAt = nil
+		current.SpecialPriceEndAt = nil
+	}
+	if input.SpecialPriceStartAt != nil {
+		current.SpecialPriceStartAt = input.SpecialPriceStartAt
+	}
+	if input.SpecialPriceEndAt != nil {
+		current.SpecialPriceEndAt = input.SpecialPriceEndAt
+	}
+	if input.ImageFile != nil {
+		imageURL, err := s.storage.SaveProductImage(input.ImageFile)
+		if err != nil {
+			return Product{}, err
+		}
+		current.ImageURL = imageURL
+	}
+
+	if err := validateExisting(current); err != nil {
+		return Product{}, err
+	}
+	ok, err := s.repo.ProductTypeExists(ctx, storeID, strings.TrimSpace(current.ProductTypeID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidProductTypeID
+	}
+
+	current.UpdatedAt = time.Now().UTC()
+	return s.repo.Update(ctx, current)
+}
+
+func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, productID string) error {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbiddenStoreAccess
+	}
+	return s.repo.Delete(ctx, storeID, productID)
+}
+
+func resolveEffectivePrice(product Product, now time.Time) float64 {
+	if product.SpecialPrice == nil {
+		return product.BasePrice
+	}
+	if product.SpecialPriceStartAt != nil && now.Before(*product.SpecialPriceStartAt) {
+		return product.BasePrice
+	}
+	if product.SpecialPriceEndAt != nil && now.After(*product.SpecialPriceEndAt) {
+		return product.BasePrice
+	}
+	return *product.SpecialPrice
+}
+
+func validateCreate(input CreateProductRequest) error {
+	product := Product{
+		Name:                strings.TrimSpace(input.Name),
+		UnitType:            normalizeUnitType(input.UnitType),
+		Quantity:            0,
+		BasePrice:           input.BasePrice,
+		SpecialPrice:        input.SpecialPrice,
+		SpecialPriceStartAt: input.SpecialPriceStartAt,
+		SpecialPriceEndAt:   input.SpecialPriceEndAt,
+	}
+	if input.Quantity != nil {
+		product.Quantity = *input.Quantity
+	}
+	return validateExisting(product)
+}
+
+func validateExisting(product Product) error {
+	if strings.TrimSpace(product.Name) == "" {
+		return ErrInvalidProductName
+	}
+	if product.Quantity < 0 {
+		return ErrInvalidQuantity
+	}
+	if product.BasePrice < 0 {
+		return ErrInvalidBasePrice
+	}
+	if product.SpecialPrice != nil && *product.SpecialPrice > product.BasePrice {
+		return ErrInvalidSpecialPrice
+	}
+	if product.SpecialPriceStartAt != nil && product.SpecialPriceEndAt != nil && product.SpecialPriceEndAt.Before(*product.SpecialPriceStartAt) {
+		return ErrInvalidSpecialPriceDate
+	}
+	return nil
+}
+
+func normalizeUnitType(unitType string) string {
+	text := strings.TrimSpace(unitType)
+	if text == "" {
+		return UnitTypePiece
+	}
+	return text
+}
