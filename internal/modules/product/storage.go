@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -26,6 +27,8 @@ type MinIOImageStorage struct {
 	client    *minio.Client
 	bucket    string
 	publicURL string
+	once      sync.Once
+	onceErr   error
 }
 
 func NewLocalImageStorage(baseDir, publicBasePath string) LocalImageStorage {
@@ -35,7 +38,7 @@ func NewLocalImageStorage(baseDir, publicBasePath string) LocalImageStorage {
 	}
 }
 
-func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) MinIOImageStorage {
+func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *MinIOImageStorage {
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
@@ -44,7 +47,7 @@ func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL 
 		panic(err)
 	}
 
-	return MinIOImageStorage{
+	return &MinIOImageStorage{
 		client:    client,
 		bucket:    bucket,
 		publicURL: strings.TrimRight(publicURL, "/"),
@@ -88,9 +91,12 @@ func (s LocalImageStorage) SaveProductImage(file *multipart.FileHeader) (string,
 	return strings.TrimRight(s.publicBasePath, "/") + "/products/" + filename, nil
 }
 
-func (s MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string, error) {
+func (s *MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string, error) {
 	if file == nil {
 		return "", nil
+	}
+	if err := s.ensureBucket(context.Background()); err != nil {
+		return "", err
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
@@ -124,4 +130,19 @@ func (s MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string,
 	}
 
 	return s.publicURL + "/" + s.bucket + "/" + filename, nil
+}
+
+func (s *MinIOImageStorage) ensureBucket(ctx context.Context) error {
+	s.once.Do(func() {
+		exists, err := s.client.BucketExists(ctx, s.bucket)
+		if err != nil {
+			s.onceErr = err
+			return
+		}
+		if exists {
+			return
+		}
+		s.onceErr = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{})
+	})
+	return s.onceErr
 }

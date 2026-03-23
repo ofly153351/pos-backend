@@ -2,6 +2,7 @@ package product
 
 import (
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -76,6 +77,17 @@ func writeProductError(c *fiber.Ctx, err error) error {
 	case errors.Is(err, ErrProductNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	default:
+		claims := middleware.ClaimsFromContext(c)
+		log.Printf(
+			"[product] internal error: method=%s path=%s store_id=%s product_id=%s user_id=%s role=%s err=%v",
+			c.Method(),
+			c.Path(),
+			c.Params("storeID"),
+			c.Params("productID"),
+			claims.UserID,
+			claims.Role,
+			err,
+		)
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
 }

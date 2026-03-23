@@ -55,7 +55,7 @@ Fields:
 - `is_active` optional, default `true`
 - `image` optional, file
 
-Example:
+ตัวอย่าง (อัปโหลดรูปสินค้า):
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
@@ -68,6 +68,30 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
   -F "base_price=120" \
   -F "special_price=99" \
   -F "image=@/path/to/product.jpg"
+```
+
+Success Response (`201 Created`)
+
+```json
+{
+  "success": true,
+  "message": "product created",
+  "data": {
+    "id": "3f7cbf2b6f9415d4d31811af",
+    "store_id": "65b493e98058f410a890859f",
+    "name": "Coffee Mug",
+    "sku": "MUG-001",
+    "unit_type": "piece",
+    "image_url": "http://127.0.0.1:9000/pos-assets/products/3f7cbf2b6f9415d4d31811af.jpg",
+    "quantity": 24,
+    "base_price": 120,
+    "special_price": 99,
+    "effective_price": 99,
+    "is_active": true,
+    "created_at": "2026-03-23T09:00:00Z",
+    "updated_at": "2026-03-23T09:00:00Z"
+  }
+}
 ```
 
 ## GET /api/v1/stores/:storeID/products
@@ -97,6 +121,38 @@ Fields ที่รองรับ:
 - `is_active`
 - `image`
 
+ตัวอย่าง (เปลี่ยนรูปสินค้า):
+
+```bash
+curl -X PATCH http://localhost:8080/api/v1/stores/{storeID}/products/{productID} \
+  -H "Authorization: Bearer <token>" \
+  -F "name=Coffee Mug 2026" \
+  -F "base_price=129" \
+  -F "image=@/path/to/new-product.jpg"
+```
+
+Success Response (`200 OK`)
+
+```json
+{
+  "success": true,
+  "message": "product updated",
+  "data": {
+    "id": "3f7cbf2b6f9415d4d31811af",
+    "store_id": "65b493e98058f410a890859f",
+    "name": "Coffee Mug 2026",
+    "unit_type": "piece",
+    "image_url": "http://127.0.0.1:9000/pos-assets/products/88b9a45a623ad97f0a7f2121.jpg",
+    "quantity": 24,
+    "base_price": 129,
+    "effective_price": 129,
+    "is_active": true,
+    "created_at": "2026-03-23T09:00:00Z",
+    "updated_at": "2026-03-23T10:15:00Z"
+  }
+}
+```
+
 ## DELETE /api/v1/stores/:storeID/products/:productID
 
 ลบสินค้าออกจากระบบ
@@ -105,6 +161,8 @@ Fields ที่รองรับ:
 
 - ราคาที่ตอบกลับจะมี `effective_price` คำนวณจาก special price window
 - response ของสินค้าแต่ละรายการจะมี `quantity` เป็นจำนวนคงเหลือปัจจุบัน
-- รูปสินค้าจะถูกอัปโหลดไปที่ MinIO และระบบจะเก็บ URL ที่ได้ไว้ในฐานข้อมูล
+- รูปสินค้าจะถูกอัปโหลดไปที่ MinIO path `products/<generated-filename>` และระบบจะคืนค่าในฟิลด์ `image_url`
+- ถ้าไม่ส่ง `image` ตอน `PATCH` ระบบจะคงรูปเดิมไว้
+- ถ้า `image_url` ว่างจะไม่ถูกส่งกลับใน JSON (เพราะ `omitempty`)
 - แนะนำให้สร้าง `product_type` ของร้านก่อนแล้วค่อยสร้างสินค้า
 - สำหรับ `unit_type` เฉพาะร้านอาจสร้างชุดของหน่วยไว้ก่อนด้วย `POST /api/v1/stores/:storeID/product-units` แล้ว fetch list เพื่อผูกกับ dropdown

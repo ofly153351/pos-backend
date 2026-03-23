@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -31,7 +34,11 @@ type Config struct {
 	MinIOPublicURL   string
 }
 
+var dotenvOnce sync.Once
+
 func Load() Config {
+	loadDotEnvFile()
+
 	return Config{
 		AppName:          getEnv("APP_NAME", "pos-backend"),
 		Host:             getEnv("APP_HOST", "0.0.0.0"),
@@ -98,4 +105,39 @@ func getEnvBool(key string, fallback bool) bool {
 	}
 
 	return parsed
+}
+
+func loadDotEnvFile() {
+	dotenvOnce.Do(func() {
+		file, err := os.Open(".env")
+		if err != nil {
+			return
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			key, value, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, exists := os.LookupEnv(key); exists {
+				continue
+			}
+
+			value = strings.TrimSpace(value)
+			value = strings.Trim(value, `"'`)
+			_ = os.Setenv(key, value)
+		}
+	})
 }
