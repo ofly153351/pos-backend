@@ -16,7 +16,7 @@ The backend is a layered Go + Fiber service:
 This project uses PostgreSQL as the source of truth.
 
 - `users`: account identity, password hash, global role (`platform_admin`, `owner`, `manager`, `cashier`)
-- `stores`: merchant storefront metadata, slug, contact data, and `logo_url`
+- `stores`: merchant storefront metadata, contact data, and `logo_url`
 - `store_members`: store-level role mapping so one user can belong to multiple stores
 - `product_types`: store-owned product categories such as coffee, bakery, or retail items
 - `products`: catalog items with `product_type_id`, `unit_type`, `base_price`, and optional special pricing window

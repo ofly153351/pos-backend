@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -53,7 +52,6 @@ func (r PostgresRepository) CreateWithOwner(ctx context.Context, storeModel Stor
 		"id":            storeModel.ID,
 		"owner_user_id": ownerUserID,
 		"name":          storeModel.Name,
-		"slug":          storeModel.Slug,
 		"currency_code": storeModel.CurrencyCode,
 		"created_at":    storeModel.CreatedAt,
 		"updated_at":    storeModel.CreatedAt,
@@ -74,10 +72,6 @@ func (r PostgresRepository) CreateWithOwner(ctx context.Context, storeModel Stor
 		storePayload["address"] = storeModel.Address
 	}
 	if err := tx.Table("stores").Create(storePayload).Error; err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return Store{}, ErrStoreSlugExists
-		}
 		return Store{}, err
 	}
 

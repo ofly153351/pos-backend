@@ -42,7 +42,6 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 		ID:           newHexID(),
 		OwnerUserID:  actor.UserID,
 		Name:         strings.TrimSpace(input.Name),
-		Slug:         buildSlug(input.Name, input.Slug),
 		LogoURL:      logoURL,
 		Phone:        strings.TrimSpace(input.Phone),
 		Address:      strings.TrimSpace(input.Address),

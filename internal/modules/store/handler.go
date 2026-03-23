@@ -20,7 +20,6 @@ func NewHandler(service Service) Handler {
 func (h Handler) Create(c *fiber.Ctx) error {
 	request := CreateStoreRequest{
 		Name:                 c.FormValue("name"),
-		Slug:                 c.FormValue("slug"),
 		Phone:                c.FormValue("phone"),
 		Address:              c.FormValue("address"),
 		CurrencyCode:         c.FormValue("currency_code"),
@@ -58,8 +57,6 @@ func writeStoreError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidStoreName), errors.Is(err, ErrInvalidCurrencyCode), errors.Is(err, ErrInvalidSubscriptionPlan):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-	case errors.Is(err, ErrStoreSlugExists):
-		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrStoreForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrStoreNotFound):

@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS stores (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
     logo_url TEXT,
     phone TEXT,
     address TEXT,

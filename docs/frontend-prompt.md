@@ -7,7 +7,7 @@ Use this summary to build the POS frontend interactions. Every request requires 
 2. `POST /api/v1/auth/login` — send `{email,password}`; receives `{user,store_id,access_token}` when the user already belongs to a store.
 
 ## Store onboarding
-1. `POST /api/v1/stores` (multipart/form-data): fields `name`, `slug`, optionally `logo`, `phone`, `address`, `currency_code`. **Required** `subscription_plan_code`. Response includes `id`.
+1. `POST /api/v1/stores` (multipart/form-data): fields `name`, optionally `logo`, `phone`, `address`, `currency_code`. **Required** `subscription_plan_code`. Response includes `id`.
 2. Frontend should store returned `store_id` for subsequent requests.
 
 ## Product type management

@@ -9,7 +9,6 @@ type Store struct {
 	ID                    string    `json:"id" gorm:"column:id;primaryKey"`
 	OwnerUserID           string    `json:"owner_user_id" gorm:"column:owner_user_id"`
 	Name                  string    `json:"name" gorm:"column:name"`
-	Slug                  string    `json:"slug" gorm:"column:slug"`
 	LogoURL               string    `json:"logo_url,omitempty" gorm:"column:logo_url"`
 	Phone                 string    `json:"phone,omitempty" gorm:"column:phone"`
 	Address               string    `json:"address,omitempty" gorm:"column:address"`
@@ -26,7 +25,6 @@ func (Store) TableName() string {
 
 type CreateStoreRequest struct {
 	Name                 string
-	Slug                 string
 	Phone                string
 	Address              string
 	CurrencyCode         string

@@ -32,7 +32,6 @@ Authorization: Bearer <access_token>
 ### Request Fields
 
 - `name` required
-- `slug` optional
 - `phone` optional
 - `address` optional
 - `currency_code` optional (default `THB`)
@@ -45,7 +44,6 @@ Authorization: Bearer <access_token>
 curl -X POST http://localhost:8080/api/v1/stores \
   -H "Authorization: Bearer <token>" \
   -F "name=Main Branch" \
-  -F "slug=main-branch" \
   -F "phone=021234567" \
   -F "address=Bangkok" \
   -F "currency_code=THB" \
@@ -65,7 +63,6 @@ Status: `201 Created`
     "id": "65b493e98058f410a890859f",
     "owner_user_id": "65b4927f5d58d4a7ed8a4bf1",
     "name": "Main Branch",
-    "slug": "main-branch",
     "logo_url": "http://localhost:9000/pos-assets/stores/logo-xxx.png",
     "phone": "021234567",
     "address": "Bangkok",
@@ -82,7 +79,6 @@ Status: `201 Created`
 
 - `400 Bad Request` ข้อมูลไม่ถูกต้อง
 - `401 Unauthorized` ไม่มี/token ไม่ถูกต้อง
-- `409 Conflict` slug ซ้ำ
 - `500 Internal Server Error`
 
 ## GET /api/v1/stores/:storeID
@@ -115,7 +111,6 @@ Status: `200 OK`
     "id": "65b493e98058f410a890859f",
     "owner_user_id": "65b4927f5d58d4a7ed8a4bf1",
     "name": "Main Branch",
-    "slug": "main-branch",
     "logo_url": "http://localhost:9000/pos-assets/stores/logo-xxx.png",
     "phone": "021234567",
     "address": "Bangkok",
