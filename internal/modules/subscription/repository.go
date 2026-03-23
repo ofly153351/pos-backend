@@ -3,10 +3,11 @@ package subscription
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Repository interface {
@@ -19,163 +20,101 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewPostgresRepository(db *sql.DB) PostgresRepository {
+type storeSubscriptionView struct {
+	ID                 string    `gorm:"column:id"`
+	StoreID            string    `gorm:"column:store_id"`
+	StoreName          string    `gorm:"column:store_name"`
+	OwnerUserID        string    `gorm:"column:owner_user_id"`
+	OwnerEmail         string    `gorm:"column:owner_email"`
+	PlanID             string    `gorm:"column:plan_id"`
+	PlanCode           string    `gorm:"column:plan_code"`
+	PlanName           string    `gorm:"column:plan_name"`
+	Status             string    `gorm:"column:status"`
+	CurrentPeriodStart time.Time `gorm:"column:current_period_start"`
+	CurrentPeriodEnd   time.Time `gorm:"column:current_period_end"`
+	CreatedAt          time.Time `gorm:"column:created_at"`
+}
+
+func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
 }
 
 func (r PostgresRepository) ListPlans(ctx context.Context) ([]Plan, error) {
-	rows, err := r.db.QueryContext(
-		ctx,
-		`SELECT id, code, name, COALESCE(description, ''), duration_days, price_amount, currency_code, is_active, created_at
-		 FROM subscription_plans
-		 WHERE is_active = TRUE
-		 ORDER BY price_amount ASC`,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var plans []Plan
-	for rows.Next() {
-		var plan Plan
-		if err := rows.Scan(
-			&plan.ID,
-			&plan.Code,
-			&plan.Name,
-			&plan.Description,
-			&plan.DurationDays,
-			&plan.PriceAmount,
-			&plan.CurrencyCode,
-			&plan.IsActive,
-			&plan.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		plans = append(plans, plan)
-	}
-
-	return plans, rows.Err()
+	err := r.db.WithContext(ctx).
+		Model(&Plan{}).
+		Where("is_active = TRUE").
+		Order("price_amount ASC").
+		Find(&plans).Error
+	return plans, err
 }
 
 func (r PostgresRepository) ListAll(ctx context.Context) ([]StoreSubscription, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT ss.id, ss.store_id, s.name, s.owner_user_id, COALESCE(u.email, ''), ss.plan_id, sp.code, sp.name, ss.status, ss.current_period_start, ss.current_period_end, ss.created_at
-		FROM store_subscriptions ss
-		JOIN stores s ON s.id = ss.store_id
-		LEFT JOIN users u ON u.id = s.owner_user_id
-		JOIN subscription_plans sp ON sp.id = ss.plan_id
-		ORDER BY ss.created_at DESC
-	`)
+	var rows []storeSubscriptionView
+	err := r.db.WithContext(ctx).
+		Table("store_subscriptions ss").
+		Select("ss.id, ss.store_id, s.name AS store_name, s.owner_user_id, COALESCE(u.email, '') AS owner_email, ss.plan_id, sp.code AS plan_code, sp.name AS plan_name, ss.status, ss.current_period_start, ss.current_period_end, ss.created_at").
+		Joins("JOIN stores s ON s.id = ss.store_id").
+		Joins("LEFT JOIN users u ON u.id = s.owner_user_id").
+		Joins("JOIN subscription_plans sp ON sp.id = ss.plan_id").
+		Order("ss.created_at DESC").
+		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var items []StoreSubscription
-	for rows.Next() {
-		var sub StoreSubscription
-		if err := rows.Scan(
-			&sub.ID,
-			&sub.StoreID,
-			&sub.StoreName,
-			&sub.OwnerUserID,
-			&sub.OwnerEmail,
-			&sub.PlanID,
-			&sub.PlanCode,
-			&sub.PlanName,
-			&sub.Status,
-			&sub.CurrentPeriodStart,
-			&sub.CurrentPeriodEnd,
-			&sub.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, sub)
+	items := make([]StoreSubscription, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, row.toSubscription())
 	}
-
-	return items, rows.Err()
+	return items, nil
 }
 
 func (r PostgresRepository) GetCurrentByStore(ctx context.Context, storeID string) (StoreSubscription, error) {
-	query := `
-		SELECT ss.id, ss.store_id, s.name, s.owner_user_id, COALESCE(u.email, ''), ss.plan_id, sp.code, sp.name, ss.status, ss.current_period_start, ss.current_period_end, ss.created_at
-		FROM store_subscriptions ss
-		JOIN stores s ON s.id = ss.store_id
-		LEFT JOIN users u ON u.id = s.owner_user_id
-		JOIN subscription_plans sp ON sp.id = ss.plan_id
-		WHERE ss.store_id = $1
-		ORDER BY ss.created_at DESC
-		LIMIT 1
-	`
-
-	var sub StoreSubscription
-	err := r.db.QueryRowContext(ctx, query, storeID).Scan(
-		&sub.ID,
-		&sub.StoreID,
-		&sub.StoreName,
-		&sub.OwnerUserID,
-		&sub.OwnerEmail,
-		&sub.PlanID,
-		&sub.PlanCode,
-		&sub.PlanName,
-		&sub.Status,
-		&sub.CurrentPeriodStart,
-		&sub.CurrentPeriodEnd,
-		&sub.CreatedAt,
-	)
+	var row storeSubscriptionView
+	err := r.db.WithContext(ctx).
+		Table("store_subscriptions ss").
+		Select("ss.id, ss.store_id, s.name AS store_name, s.owner_user_id, COALESCE(u.email, '') AS owner_email, ss.plan_id, sp.code AS plan_code, sp.name AS plan_name, ss.status, ss.current_period_start, ss.current_period_end, ss.created_at").
+		Joins("JOIN stores s ON s.id = ss.store_id").
+		Joins("LEFT JOIN users u ON u.id = s.owner_user_id").
+		Joins("JOIN subscription_plans sp ON sp.id = ss.plan_id").
+		Where("ss.store_id = ?", storeID).
+		Order("ss.created_at DESC").
+		Take(&row).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return StoreSubscription{}, ErrSubscriptionNotFound
 		}
 		return StoreSubscription{}, err
 	}
-
-	return sub, nil
+	return row.toSubscription(), nil
 }
 
 func (r PostgresRepository) ChangePlan(ctx context.Context, storeID, planCode string, changedAt time.Time) (StoreSubscription, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return StoreSubscription{}, err
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return StoreSubscription{}, tx.Error
 	}
 	defer tx.Rollback()
 
 	var plan Plan
-	err = tx.QueryRowContext(
-		ctx,
-		`SELECT id, code, name, COALESCE(description, ''), duration_days, price_amount, currency_code, is_active, created_at
-		 FROM subscription_plans WHERE code = $1 AND is_active = TRUE`,
-		planCode,
-	).Scan(
-		&plan.ID,
-		&plan.Code,
-		&plan.Name,
-		&plan.Description,
-		&plan.DurationDays,
-		&plan.PriceAmount,
-		&plan.CurrencyCode,
-		&plan.IsActive,
-		&plan.CreatedAt,
-	)
+	err := tx.
+		Model(&Plan{}).
+		Where("code = ? AND is_active = TRUE", planCode).
+		Take(&plan).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return StoreSubscription{}, ErrPlanNotFound
 		}
 		return StoreSubscription{}, err
 	}
 
-	_, err = tx.ExecContext(
-		ctx,
-		`UPDATE store_subscriptions
-		 SET status = 'cancelled'
-		 WHERE store_id = $1 AND status IN ('trialing', 'active', 'past_due')`,
-		storeID,
-	)
-	if err != nil {
+	if err := tx.Model(&StoreSubscription{}).
+		Where("store_id = ? AND status IN ?", storeID, []string{"trialing", "active", "past_due"}).
+		Update("status", "cancelled").Error; err != nil {
 		return StoreSubscription{}, err
 	}
 
@@ -190,53 +129,34 @@ func (r PostgresRepository) ChangePlan(ctx context.Context, storeID, planCode st
 		CurrentPeriodEnd:   changedAt.Add(time.Duration(plan.DurationDays) * 24 * time.Hour),
 		CreatedAt:          changedAt,
 	}
-
-	_, err = tx.ExecContext(
-		ctx,
-		`INSERT INTO store_subscriptions (id, store_id, plan_id, status, current_period_start, current_period_end, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		sub.ID,
-		sub.StoreID,
-		sub.PlanID,
-		sub.Status,
-		sub.CurrentPeriodStart,
-		sub.CurrentPeriodEnd,
-		sub.CreatedAt,
-	)
-	if err != nil {
+	if err := tx.Omit("Plan").Create(&sub).Error; err != nil {
 		return StoreSubscription{}, err
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return StoreSubscription{}, err
 	}
-
 	return r.GetCurrentByStore(ctx, storeID)
 }
 
 func (r PostgresRepository) UpdateStatus(ctx context.Context, storeID, status string) (StoreSubscription, error) {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE store_subscriptions
-		SET status = $2
-		WHERE id = (
-			SELECT id FROM store_subscriptions
-			WHERE store_id = $1
-			ORDER BY created_at DESC
-			LIMIT 1
-		)
-	`, storeID, status)
-	if err != nil {
-		return StoreSubscription{}, err
-	}
+	latestSubQuery := r.db.WithContext(ctx).
+		Model(&StoreSubscription{}).
+		Select("id").
+		Where("store_id = ?", storeID).
+		Order("created_at DESC").
+		Limit(1)
 
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return StoreSubscription{}, err
+	result := r.db.WithContext(ctx).
+		Model(&StoreSubscription{}).
+		Where("id = (?)", latestSubQuery).
+		Update("status", status)
+	if result.Error != nil {
+		return StoreSubscription{}, result.Error
 	}
-	if affected == 0 {
+	if result.RowsAffected == 0 {
 		return StoreSubscription{}, ErrSubscriptionNotFound
 	}
-
 	return r.GetCurrentByStore(ctx, storeID)
 }
 
@@ -244,22 +164,32 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	if role == "platform_admin" {
 		return true, nil
 	}
-
-	var exists int
-	err := r.db.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM store_members WHERE store_id = $1 AND user_id = $2 AND role IN ('owner', 'manager')`,
-		storeID,
-		userID,
-	).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
+	return count > 0, nil
+}
 
-	return true, nil
+func (row storeSubscriptionView) toSubscription() StoreSubscription {
+	return StoreSubscription{
+		ID:                 row.ID,
+		StoreID:            row.StoreID,
+		StoreName:          row.StoreName,
+		OwnerUserID:        row.OwnerUserID,
+		OwnerEmail:         row.OwnerEmail,
+		PlanID:             row.PlanID,
+		PlanCode:           row.PlanCode,
+		PlanName:           row.PlanName,
+		Status:             row.Status,
+		CurrentPeriodStart: row.CurrentPeriodStart,
+		CurrentPeriodEnd:   row.CurrentPeriodEnd,
+		CreatedAt:          row.CreatedAt,
+	}
 }
 
 func productNewID() string {
@@ -267,6 +197,5 @@ func productNewID() string {
 	if _, err := rand.Read(buf); err != nil {
 		return "generated-id"
 	}
-
 	return hex.EncodeToString(buf)
 }

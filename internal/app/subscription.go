@@ -1,14 +1,13 @@
 package app
 
 import (
-	"database/sql"
-
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 
 	"pos-backend/internal/modules/subscription"
 )
 
-func newSubscriptionHandler(db *sql.DB) subscription.Handler {
+func newSubscriptionHandler(db *gorm.DB) subscription.Handler {
 	repo := subscription.NewPostgresRepository(db)
 	service := subscription.NewService(repo)
 	return subscription.NewHandler(service)

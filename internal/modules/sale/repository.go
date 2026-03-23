@@ -2,9 +2,11 @@ package sale
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository interface {
@@ -15,17 +17,17 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewPostgresRepository(db *sql.DB) PostgresRepository {
+func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
 }
 
 func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Sale{}, err
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return Sale{}, tx.Error
 	}
 	defer tx.Rollback()
 
@@ -64,14 +66,12 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		sale.DiscountAmount += sale.Items[index].LineDiscountTotal
 		sale.TotalAmount += sale.Items[index].LineTotal
 
-		if _, err := tx.ExecContext(
-			ctx,
-			`UPDATE products SET quantity = quantity - $3, updated_at = $4 WHERE store_id = $1 AND id = $2`,
-			sale.StoreID,
-			product.ID,
-			item.Quantity,
-			sale.CreatedAt,
-		); err != nil {
+		if err := tx.Table("products").
+			Where("store_id = ? AND id = ?", sale.StoreID, product.ID).
+			Updates(map[string]any{
+				"quantity":   gorm.Expr("quantity - ?", item.Quantity),
+				"updated_at": sale.CreatedAt,
+			}).Error; err != nil {
 			return Sale{}, err
 		}
 	}
@@ -81,168 +81,101 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		return Sale{}, ErrInvalidPaidAmount
 	}
 
-	if _, err := tx.ExecContext(
-		ctx,
-		`INSERT INTO sales (id, store_id, sale_number, cashier_user_id, status, payment_method, note, total_items, subtotal_amount, discount_amount, total_amount, paid_amount, change_amount, sold_at, created_at)
-		 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $15)`,
-		sale.ID,
-		sale.StoreID,
-		sale.SaleNumber,
-		sale.CashierUserID,
-		sale.Status,
-		sale.PaymentMethod,
-		sale.Note,
-		sale.TotalItems,
-		sale.SubtotalAmount,
-		sale.DiscountAmount,
-		sale.TotalAmount,
-		sale.PaidAmount,
-		sale.ChangeAmount,
-		sale.SoldAt,
-		sale.CreatedAt,
-	); err != nil {
+	salePayload := map[string]any{
+		"id":              sale.ID,
+		"store_id":        sale.StoreID,
+		"sale_number":     sale.SaleNumber,
+		"cashier_user_id": sale.CashierUserID,
+		"status":          sale.Status,
+		"total_items":     sale.TotalItems,
+		"subtotal_amount": sale.SubtotalAmount,
+		"discount_amount": sale.DiscountAmount,
+		"total_amount":    sale.TotalAmount,
+		"paid_amount":     sale.PaidAmount,
+		"change_amount":   sale.ChangeAmount,
+		"sold_at":         sale.SoldAt,
+		"created_at":      sale.CreatedAt,
+	}
+	if sale.PaymentMethod == "" {
+		salePayload["payment_method"] = nil
+	} else {
+		salePayload["payment_method"] = sale.PaymentMethod
+	}
+	if sale.Note == "" {
+		salePayload["note"] = nil
+	} else {
+		salePayload["note"] = sale.Note
+	}
+	if err := tx.Table("sales").Create(salePayload).Error; err != nil {
 		return Sale{}, err
 	}
 
 	for _, item := range sale.Items {
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO sale_items (id, sale_id, product_id, product_name, sku, unit_type, quantity, unit_price, discount_type, discount_value, discount_amount_per_unit, line_subtotal, line_discount_total, line_total, created_at)
-			 VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, NULLIF($9, ''), $10, $11, $12, $13, $14, $15)`,
-			item.ID,
-			item.SaleID,
-			item.ProductID,
-			item.ProductName,
-			item.SKU,
-			item.UnitType,
-			item.Quantity,
-			item.UnitPrice,
-			item.DiscountType,
-			item.DiscountValue,
-			item.DiscountAmountPerUnit,
-			item.LineSubtotal,
-			item.LineDiscountTotal,
-			item.LineTotal,
-			item.CreatedAt,
-		); err != nil {
+		itemPayload := map[string]any{
+			"id":                       item.ID,
+			"sale_id":                  item.SaleID,
+			"product_id":               item.ProductID,
+			"product_name":             item.ProductName,
+			"quantity":                 item.Quantity,
+			"unit_price":               item.UnitPrice,
+			"discount_value":           item.DiscountValue,
+			"discount_amount_per_unit": item.DiscountAmountPerUnit,
+			"line_subtotal":            item.LineSubtotal,
+			"line_discount_total":      item.LineDiscountTotal,
+			"line_total":               item.LineTotal,
+			"created_at":               item.CreatedAt,
+		}
+		if item.SKU == "" {
+			itemPayload["sku"] = nil
+		} else {
+			itemPayload["sku"] = item.SKU
+		}
+		if item.UnitType == "" {
+			itemPayload["unit_type"] = nil
+		} else {
+			itemPayload["unit_type"] = item.UnitType
+		}
+		if item.DiscountType == "" {
+			itemPayload["discount_type"] = nil
+		} else {
+			itemPayload["discount_type"] = item.DiscountType
+		}
+		if err := tx.Table("sale_items").Create(itemPayload).Error; err != nil {
 			return Sale{}, err
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return Sale{}, err
 	}
-
 	return sale, nil
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, store_id, sale_number, cashier_user_id, status, COALESCE(payment_method, ''), COALESCE(note, ''), total_items, subtotal_amount, discount_amount, total_amount, paid_amount, change_amount, sold_at, created_at
-		FROM sales
-		WHERE store_id = $1
-		ORDER BY sold_at DESC, created_at DESC
-	`, storeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var sales []Sale
-	for rows.Next() {
-		var item Sale
-		if err := rows.Scan(
-			&item.ID,
-			&item.StoreID,
-			&item.SaleNumber,
-			&item.CashierUserID,
-			&item.Status,
-			&item.PaymentMethod,
-			&item.Note,
-			&item.TotalItems,
-			&item.SubtotalAmount,
-			&item.DiscountAmount,
-			&item.TotalAmount,
-			&item.PaidAmount,
-			&item.ChangeAmount,
-			&item.SoldAt,
-			&item.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		sales = append(sales, item)
-	}
-	return sales, rows.Err()
+	err := r.db.WithContext(ctx).
+		Model(&Sale{}).
+		Where("store_id = ?", storeID).
+		Order("sold_at DESC, created_at DESC").
+		Find(&sales).Error
+	return sales, err
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string) (Sale, error) {
 	var sale Sale
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, store_id, sale_number, cashier_user_id, status, COALESCE(payment_method, ''), COALESCE(note, ''), total_items, subtotal_amount, discount_amount, total_amount, paid_amount, change_amount, sold_at, created_at
-		FROM sales
-		WHERE store_id = $1 AND id = $2
-	`, storeID, saleID).Scan(
-		&sale.ID,
-		&sale.StoreID,
-		&sale.SaleNumber,
-		&sale.CashierUserID,
-		&sale.Status,
-		&sale.PaymentMethod,
-		&sale.Note,
-		&sale.TotalItems,
-		&sale.SubtotalAmount,
-		&sale.DiscountAmount,
-		&sale.TotalAmount,
-		&sale.PaidAmount,
-		&sale.ChangeAmount,
-		&sale.SoldAt,
-		&sale.CreatedAt,
-	)
+	err := r.db.WithContext(ctx).
+		Model(&Sale{}).
+		Preload("Items", func(tx *gorm.DB) *gorm.DB {
+			return tx.Order("created_at ASC")
+		}).
+		Where("store_id = ? AND id = ?", storeID, saleID).
+		Take(&sale).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Sale{}, ErrSaleNotFound
 		}
 		return Sale{}, err
 	}
-
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, sale_id, product_id, product_name, COALESCE(sku, ''), COALESCE(unit_type, ''), quantity, unit_price, COALESCE(discount_type, ''), discount_value, discount_amount_per_unit, line_subtotal, line_discount_total, line_total, created_at
-		FROM sale_items
-		WHERE sale_id = $1
-		ORDER BY created_at ASC
-	`, sale.ID)
-	if err != nil {
-		return Sale{}, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var item SaleItem
-		if err := rows.Scan(
-			&item.ID,
-			&item.SaleID,
-			&item.ProductID,
-			&item.ProductName,
-			&item.SKU,
-			&item.UnitType,
-			&item.Quantity,
-			&item.UnitPrice,
-			&item.DiscountType,
-			&item.DiscountValue,
-			&item.DiscountAmountPerUnit,
-			&item.LineSubtotal,
-			&item.LineDiscountTotal,
-			&item.LineTotal,
-			&item.CreatedAt,
-		); err != nil {
-			return Sale{}, err
-		}
-		sale.Items = append(sale.Items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return Sale{}, err
-	}
-
 	return sale, nil
 }
 
@@ -250,43 +183,27 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	if role == "platform_admin" {
 		return true, nil
 	}
-	var exists int
-	err := r.db.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM store_members WHERE store_id = $1 AND user_id = $2 AND role IN ('owner', 'manager', 'cashier')`,
-		storeID,
-		userID,
-	).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }
 
-func (r PostgresRepository) lockProductForSale(ctx context.Context, tx *sql.Tx, storeID, productID string) (productSnapshot, error) {
+func (r PostgresRepository) lockProductForSale(ctx context.Context, tx *gorm.DB, storeID, productID string) (productSnapshot, error) {
 	var product productSnapshot
-	err := tx.QueryRowContext(ctx, `
-		SELECT id, name, COALESCE(sku, ''), COALESCE(unit_type, ''), quantity, is_active, base_price, special_price, special_price_start_at, special_price_end_at
-		FROM products
-		WHERE store_id = $1 AND id = $2
-		FOR UPDATE
-	`, storeID, productID).Scan(
-		&product.ID,
-		&product.Name,
-		&product.SKU,
-		&product.UnitType,
-		&product.Quantity,
-		&product.IsActive,
-		&product.BasePrice,
-		&product.SpecialPrice,
-		&product.SpecialPriceStartAt,
-		&product.SpecialPriceEndAt,
-	)
+	err := tx.WithContext(ctx).
+		Table("products").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id, name, COALESCE(sku, '') AS sku, COALESCE(unit_type, '') AS unit_type, quantity, is_active, base_price, special_price, special_price_start_at, special_price_end_at").
+		Where("store_id = ? AND id = ?", storeID, productID).
+		Take(&product).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return productSnapshot{}, ErrProductNotFound
 		}
 		return productSnapshot{}, err

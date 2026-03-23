@@ -1,12 +1,11 @@
 package app
 
 import (
-	"database/sql"
-
+	"gorm.io/gorm"
 	"pos-backend/internal/config"
 )
 
-func newDependencies(cfg config.Config, db *sql.DB) appDependencies {
+func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 	tokenManager, authHandler := newAuthDependencies(cfg, db)
 
 	return appDependencies{

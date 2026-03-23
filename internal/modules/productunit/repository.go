@@ -2,8 +2,9 @@ package productunit
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+
+	"gorm.io/gorm"
 )
 
 type Repository interface {
@@ -16,16 +17,26 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewPostgresRepository(db *sql.DB) PostgresRepository { return PostgresRepository{db: db} }
+func NewPostgresRepository(db *gorm.DB) PostgresRepository { return PostgresRepository{db: db} }
 
 func (r PostgresRepository) Create(ctx context.Context, unit ProductUnit) (ProductUnit, error) {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO product_units (id, store_id, name, description, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $6)
-	`, unit.ID, unit.StoreID, unit.Name, unit.Description, unit.IsActive, unit.CreatedAt)
+	payload := map[string]any{
+		"id":         unit.ID,
+		"store_id":   unit.StoreID,
+		"name":       unit.Name,
+		"is_active":  unit.IsActive,
+		"created_at": unit.CreatedAt,
+		"updated_at": unit.CreatedAt,
+	}
+	if unit.Description == "" {
+		payload["description"] = nil
+	} else {
+		payload["description"] = unit.Description
+	}
+	err := r.db.WithContext(ctx).Table("product_units").Create(payload).Error
 	if err != nil {
 		return ProductUnit{}, err
 	}
@@ -34,36 +45,23 @@ func (r PostgresRepository) Create(ctx context.Context, unit ProductUnit) (Produ
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]ProductUnit, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, store_id, name, COALESCE(description, ''), is_active, created_at, updated_at
-		FROM product_units
-		WHERE store_id = $1
-		ORDER BY name ASC
-	`, storeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var list []ProductUnit
-	for rows.Next() {
-		var unit ProductUnit
-		if err := rows.Scan(&unit.ID, &unit.StoreID, &unit.Name, &unit.Description, &unit.IsActive, &unit.CreatedAt, &unit.UpdatedAt); err != nil {
-			return nil, err
-		}
-		list = append(list, unit)
-	}
-	return list, rows.Err()
+	err := r.db.WithContext(ctx).
+		Model(&ProductUnit{}).
+		Where("store_id = ?", storeID).
+		Order("name ASC").
+		Find(&list).Error
+	return list, err
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, id string) (ProductUnit, error) {
 	var unit ProductUnit
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, store_id, name, COALESCE(description, ''), is_active, created_at, updated_at
-		FROM product_units
-		WHERE store_id = $1 AND id = $2
-	`, storeID, id).Scan(&unit.ID, &unit.StoreID, &unit.Name, &unit.Description, &unit.IsActive, &unit.CreatedAt, &unit.UpdatedAt)
+	err := r.db.WithContext(ctx).
+		Model(&ProductUnit{}).
+		Where("store_id = ? AND id = ?", storeID, id).
+		First(&unit).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ProductUnit{}, ErrProductUnitNotFound
 		}
 		return ProductUnit{}, err
@@ -72,34 +70,37 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, id string) (Pr
 }
 
 func (r PostgresRepository) Update(ctx context.Context, unit ProductUnit) (ProductUnit, error) {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE product_units
-		SET name = $3, description = NULLIF($4, ''), is_active = $5, updated_at = $6
-		WHERE store_id = $1 AND id = $2
-	`, unit.StoreID, unit.ID, unit.Name, unit.Description, unit.IsActive, unit.UpdatedAt)
-	if err != nil {
-		return ProductUnit{}, err
+	updates := map[string]any{
+		"name":       unit.Name,
+		"is_active":  unit.IsActive,
+		"updated_at": unit.UpdatedAt,
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return ProductUnit{}, err
+	if unit.Description == "" {
+		updates["description"] = nil
+	} else {
+		updates["description"] = unit.Description
 	}
-	if affected == 0 {
+	result := r.db.WithContext(ctx).
+		Model(&ProductUnit{}).
+		Where("store_id = ? AND id = ?", unit.StoreID, unit.ID).
+		Updates(updates)
+	if result.Error != nil {
+		return ProductUnit{}, result.Error
+	}
+	if result.RowsAffected == 0 {
 		return ProductUnit{}, ErrProductUnitNotFound
 	}
 	return unit, nil
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM product_units WHERE store_id = $1 AND id = $2`, storeID, id)
-	if err != nil {
-		return err
+	result := r.db.WithContext(ctx).
+		Where("store_id = ? AND id = ?", storeID, id).
+		Delete(&ProductUnit{})
+	if result.Error != nil {
+		return result.Error
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
+	if result.RowsAffected == 0 {
 		return ErrProductUnitNotFound
 	}
 	return nil
@@ -109,13 +110,13 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	if role == "platform_admin" {
 		return true, nil
 	}
-	var exists int
-	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM store_members WHERE store_id = $1 AND user_id = $2 AND role IN ('owner', 'manager')`, storeID, userID).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }

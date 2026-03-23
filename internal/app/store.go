@@ -1,15 +1,14 @@
 package app
 
 import (
-	"database/sql"
-
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 
 	"pos-backend/internal/config"
 	"pos-backend/internal/modules/store"
 )
 
-func newStoreHandler(cfg config.Config, db *sql.DB) store.Handler {
+func newStoreHandler(cfg config.Config, db *gorm.DB) store.Handler {
 	repo := store.NewPostgresRepository(db)
 	storage := store.NewMinIOLogoStorage(
 		cfg.MinIOEndpoint,
@@ -26,4 +25,5 @@ func newStoreHandler(cfg config.Config, db *sql.DB) store.Handler {
 func registerStoreRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.storeHandler.(store.Handler)
 	protected.Post("/stores", handler.Create)
+	protected.Get("/stores/:storeID", handler.GetByID)
 }

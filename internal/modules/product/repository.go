@@ -2,9 +2,10 @@ package product
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Repository interface {
@@ -18,40 +19,64 @@ type Repository interface {
 }
 
 type PostgresRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewPostgresRepository(db *sql.DB) PostgresRepository {
+type productQueryRow struct {
+	ID                  string     `gorm:"column:id"`
+	StoreID             string     `gorm:"column:store_id"`
+	ProductTypeID       *string    `gorm:"column:product_type_id"`
+	ProductTypeName     *string    `gorm:"column:product_type_name"`
+	Name                string     `gorm:"column:name"`
+	SKU                 *string    `gorm:"column:sku"`
+	UnitType            string     `gorm:"column:unit_type"`
+	ImageURL            *string    `gorm:"column:image_url"`
+	Quantity            int        `gorm:"column:quantity"`
+	BasePrice           float64    `gorm:"column:base_price"`
+	SpecialPrice        *float64   `gorm:"column:special_price"`
+	SpecialPriceStartAt *time.Time `gorm:"column:special_price_start_at"`
+	SpecialPriceEndAt   *time.Time `gorm:"column:special_price_end_at"`
+	IsActive            bool       `gorm:"column:is_active"`
+	CreatedAt           time.Time  `gorm:"column:created_at"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at"`
+}
+
+func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
 }
 
 func (r PostgresRepository) Create(ctx context.Context, product Product) (Product, error) {
-	query := `
-		INSERT INTO products (
-			id, store_id, product_type_id, name, sku, unit_type, image_url, quantity, base_price, special_price, special_price_start_at, special_price_end_at, is_active, created_at, updated_at
-		)
-		VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, ''), $6, NULLIF($7, ''), $8, $9, $10, $11, $12, $13, $14, $14)
-	`
+	payload := map[string]any{
+		"id":                     product.ID,
+		"store_id":               product.StoreID,
+		"name":                   product.Name,
+		"unit_type":              product.UnitType,
+		"quantity":               product.Quantity,
+		"base_price":             product.BasePrice,
+		"special_price":          product.SpecialPrice,
+		"special_price_start_at": product.SpecialPriceStartAt,
+		"special_price_end_at":   product.SpecialPriceEndAt,
+		"is_active":              product.IsActive,
+		"created_at":             product.CreatedAt,
+		"updated_at":             product.CreatedAt,
+	}
+	if product.ProductTypeID == "" {
+		payload["product_type_id"] = nil
+	} else {
+		payload["product_type_id"] = product.ProductTypeID
+	}
+	if product.SKU == "" {
+		payload["sku"] = nil
+	} else {
+		payload["sku"] = product.SKU
+	}
+	if product.ImageURL == "" {
+		payload["image_url"] = nil
+	} else {
+		payload["image_url"] = product.ImageURL
+	}
 
-	_, err := r.db.ExecContext(
-		ctx,
-		query,
-		product.ID,
-		product.StoreID,
-		product.ProductTypeID,
-		product.Name,
-		product.SKU,
-		product.UnitType,
-		product.ImageURL,
-		product.Quantity,
-		product.BasePrice,
-		product.SpecialPrice,
-		product.SpecialPriceStartAt,
-		product.SpecialPriceEndAt,
-		product.IsActive,
-		product.CreatedAt,
-	)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Table("products").Create(payload).Error; err != nil {
 		return Product{}, err
 	}
 
@@ -61,100 +86,84 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Product, error) {
-	query := `
-		SELECT p.id, p.store_id, COALESCE(p.product_type_id, ''), COALESCE(pt.name, ''), p.name, COALESCE(p.sku, ''), p.unit_type, COALESCE(p.image_url, ''), p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at
-		FROM products p
-		LEFT JOIN product_types pt ON pt.id = p.product_type_id
-		WHERE p.store_id = $1
-		ORDER BY p.created_at DESC
-	`
-
-	rows, err := r.db.QueryContext(ctx, query, storeID)
+	var rows []productQueryRow
+	err := r.db.WithContext(ctx).
+		Table("products AS p").
+		Select("p.id, p.store_id, p.product_type_id, pt.name AS product_type_name, p.name, p.sku, p.unit_type, p.image_url, p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at").
+		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
+		Where("p.store_id = ?", storeID).
+		Order("p.created_at DESC").
+		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var products []Product
 	now := time.Now().UTC()
-	for rows.Next() {
-		product, err := scanProduct(rows)
-		if err != nil {
-			return nil, err
-		}
-		product.EffectivePrice = resolveEffectivePrice(product, now)
-		products = append(products, product)
+	products := make([]Product, 0, len(rows))
+	for _, row := range rows {
+		item := row.toProduct()
+		item.EffectivePrice = resolveEffectivePrice(item, now)
+		products = append(products, item)
 	}
-
-	return products, rows.Err()
+	return products, nil
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID string) (Product, error) {
-	query := `
-		SELECT p.id, p.store_id, COALESCE(p.product_type_id, ''), COALESCE(pt.name, ''), p.name, COALESCE(p.sku, ''), p.unit_type, COALESCE(p.image_url, ''), p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at
-		FROM products p
-		LEFT JOIN product_types pt ON pt.id = p.product_type_id
-		WHERE p.store_id = $1 AND p.id = $2
-	`
-
-	row := r.db.QueryRowContext(ctx, query, storeID, productID)
-	product, err := scanProduct(row)
+	var row productQueryRow
+	err := r.db.WithContext(ctx).
+		Table("products AS p").
+		Select("p.id, p.store_id, p.product_type_id, pt.name AS product_type_name, p.name, p.sku, p.unit_type, p.image_url, p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at").
+		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
+		Where("p.store_id = ? AND p.id = ?", storeID, productID).
+		Take(&row).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Product{}, ErrProductNotFound
 		}
 		return Product{}, err
 	}
 
+	product := row.toProduct()
 	product.EffectivePrice = resolveEffectivePrice(product, time.Now().UTC())
 	return product, nil
 }
 
 func (r PostgresRepository) Update(ctx context.Context, product Product) (Product, error) {
-	query := `
-		UPDATE products
-		SET product_type_id = NULLIF($3, ''),
-		    name = $4,
-		    sku = NULLIF($5, ''),
-		    unit_type = $6,
-		    image_url = NULLIF($7, ''),
-		    quantity = $8,
-		    base_price = $9,
-		    special_price = $10,
-		    special_price_start_at = $11,
-		    special_price_end_at = $12,
-		    is_active = $13,
-		    updated_at = $14
-		WHERE store_id = $1 AND id = $2
-	`
-
-	result, err := r.db.ExecContext(
-		ctx,
-		query,
-		product.StoreID,
-		product.ID,
-		product.ProductTypeID,
-		product.Name,
-		product.SKU,
-		product.UnitType,
-		product.ImageURL,
-		product.Quantity,
-		product.BasePrice,
-		product.SpecialPrice,
-		product.SpecialPriceStartAt,
-		product.SpecialPriceEndAt,
-		product.IsActive,
-		product.UpdatedAt,
-	)
-	if err != nil {
-		return Product{}, err
+	updates := map[string]any{
+		"name":                   product.Name,
+		"unit_type":              product.UnitType,
+		"quantity":               product.Quantity,
+		"base_price":             product.BasePrice,
+		"special_price":          product.SpecialPrice,
+		"special_price_start_at": product.SpecialPriceStartAt,
+		"special_price_end_at":   product.SpecialPriceEndAt,
+		"is_active":              product.IsActive,
+		"updated_at":             product.UpdatedAt,
+	}
+	if product.ProductTypeID == "" {
+		updates["product_type_id"] = nil
+	} else {
+		updates["product_type_id"] = product.ProductTypeID
+	}
+	if product.SKU == "" {
+		updates["sku"] = nil
+	} else {
+		updates["sku"] = product.SKU
+	}
+	if product.ImageURL == "" {
+		updates["image_url"] = nil
+	} else {
+		updates["image_url"] = product.ImageURL
 	}
 
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return Product{}, err
+	result := r.db.WithContext(ctx).
+		Model(&Product{}).
+		Where("store_id = ? AND id = ?", product.StoreID, product.ID).
+		Updates(updates)
+	if result.Error != nil {
+		return Product{}, result.Error
 	}
-	if affected == 0 {
+	if result.RowsAffected == 0 {
 		return Product{}, ErrProductNotFound
 	}
 
@@ -163,15 +172,13 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, productID string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM products WHERE store_id = $1 AND id = $2`, storeID, productID)
-	if err != nil {
-		return err
+	result := r.db.WithContext(ctx).
+		Where("store_id = ? AND id = ?", storeID, productID).
+		Delete(&Product{})
+	if result.Error != nil {
+		return result.Error
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
+	if result.RowsAffected == 0 {
 		return ErrProductNotFound
 	}
 	return nil
@@ -181,63 +188,58 @@ func (r PostgresRepository) ProductTypeExists(ctx context.Context, storeID, prod
 	if productTypeID == "" {
 		return true, nil
 	}
-	var exists int
-	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM product_types WHERE store_id = $1 AND id = $2`, storeID, productTypeID).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("product_types").
+		Where("store_id = ? AND id = ?", storeID, productTypeID).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }
 
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
 	}
-	var exists int
-	err := r.db.QueryRowContext(
-		ctx,
-		`SELECT 1 FROM store_members WHERE store_id = $1 AND user_id = $2 AND role IN ('owner', 'manager')`,
-		storeID,
-		userID,
-	).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }
 
-type scanner interface {
-	Scan(dest ...any) error
-}
-
-func scanProduct(row scanner) (Product, error) {
-	var product Product
-	err := row.Scan(
-		&product.ID,
-		&product.StoreID,
-		&product.ProductTypeID,
-		&product.ProductTypeName,
-		&product.Name,
-		&product.SKU,
-		&product.UnitType,
-		&product.ImageURL,
-		&product.Quantity,
-		&product.BasePrice,
-		&product.SpecialPrice,
-		&product.SpecialPriceStartAt,
-		&product.SpecialPriceEndAt,
-		&product.IsActive,
-		&product.CreatedAt,
-		&product.UpdatedAt,
-	)
-	if err != nil {
-		return Product{}, err
+func (row productQueryRow) toProduct() Product {
+	product := Product{
+		ID:                  row.ID,
+		StoreID:             row.StoreID,
+		Name:                row.Name,
+		UnitType:            row.UnitType,
+		Quantity:            row.Quantity,
+		BasePrice:           row.BasePrice,
+		SpecialPrice:        row.SpecialPrice,
+		SpecialPriceStartAt: row.SpecialPriceStartAt,
+		SpecialPriceEndAt:   row.SpecialPriceEndAt,
+		IsActive:            row.IsActive,
+		CreatedAt:           row.CreatedAt,
+		UpdatedAt:           row.UpdatedAt,
 	}
-	return product, nil
+	if row.ProductTypeID != nil {
+		product.ProductTypeID = *row.ProductTypeID
+	}
+	if row.ProductTypeName != nil {
+		product.ProductTypeName = *row.ProductTypeName
+	}
+	if row.SKU != nil {
+		product.SKU = *row.SKU
+	}
+	if row.ImageURL != nil {
+		product.ImageURL = *row.ImageURL
+	}
+	return product
 }

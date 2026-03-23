@@ -1,13 +1,14 @@
 package database
 
 import (
-	"database/sql"
 	"os"
 	"path/filepath"
 	"sort"
+
+	"gorm.io/gorm"
 )
 
-func RunMigrations(db *sql.DB, migrationsDir string) error {
+func RunMigrations(db *gorm.DB, migrationsDir string) error {
 	entries, err := filepath.Glob(filepath.Join(migrationsDir, "*.sql"))
 	if err != nil {
 		return err
@@ -21,7 +22,7 @@ func RunMigrations(db *sql.DB, migrationsDir string) error {
 			return err
 		}
 
-		if _, err := db.Exec(string(sqlBytes)); err != nil {
+		if err := db.Exec(string(sqlBytes)).Error; err != nil {
 			return err
 		}
 	}

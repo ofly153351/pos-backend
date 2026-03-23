@@ -1,15 +1,14 @@
 package app
 
 import (
-	"database/sql"
-
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 
 	"pos-backend/internal/config"
 	"pos-backend/internal/modules/product"
 )
 
-func newProductHandler(cfg config.Config, db *sql.DB) product.Handler {
+func newProductHandler(cfg config.Config, db *gorm.DB) product.Handler {
 	repo := product.NewPostgresRepository(db)
 	storage := product.NewMinIOImageStorage(
 		cfg.MinIOEndpoint,

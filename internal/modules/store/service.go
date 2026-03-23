@@ -53,6 +53,18 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 	return s.repo.CreateWithOwner(ctx, storeModel, actor.UserID, strings.TrimSpace(input.SubscriptionPlanCode))
 }
 
+func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID string) (Store, error) {
+	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Store{}, err
+	}
+	if !ok {
+		return Store{}, ErrStoreForbidden
+	}
+
+	return s.repo.GetByID(ctx, storeID)
+}
+
 func (s Service) CanManageStore(ctx context.Context, actor auth.Claims, storeID string) (bool, error) {
 	return s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 }

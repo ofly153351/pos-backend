@@ -2,8 +2,9 @@ package producttype
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+
+	"gorm.io/gorm"
 )
 
 type Repository interface {
@@ -15,15 +16,25 @@ type Repository interface {
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
-type PostgresRepository struct{ db *sql.DB }
+type PostgresRepository struct{ db *gorm.DB }
 
-func NewPostgresRepository(db *sql.DB) PostgresRepository { return PostgresRepository{db: db} }
+func NewPostgresRepository(db *gorm.DB) PostgresRepository { return PostgresRepository{db: db} }
 
 func (r PostgresRepository) Create(ctx context.Context, item ProductType) (ProductType, error) {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO product_types (id, store_id, name, description, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $6)
-	`, item.ID, item.StoreID, item.Name, item.Description, item.IsActive, item.CreatedAt)
+	payload := map[string]any{
+		"id":         item.ID,
+		"store_id":   item.StoreID,
+		"name":       item.Name,
+		"is_active":  item.IsActive,
+		"created_at": item.CreatedAt,
+		"updated_at": item.CreatedAt,
+	}
+	if item.Description == "" {
+		payload["description"] = nil
+	} else {
+		payload["description"] = item.Description
+	}
+	err := r.db.WithContext(ctx).Table("product_types").Create(payload).Error
 	if err != nil {
 		return ProductType{}, err
 	}
@@ -32,36 +43,23 @@ func (r PostgresRepository) Create(ctx context.Context, item ProductType) (Produ
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]ProductType, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, store_id, name, COALESCE(description, ''), is_active, created_at, updated_at
-		FROM product_types
-		WHERE store_id = $1
-		ORDER BY name ASC
-	`, storeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var items []ProductType
-	for rows.Next() {
-		var item ProductType
-		if err := rows.Scan(&item.ID, &item.StoreID, &item.Name, &item.Description, &item.IsActive, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	err := r.db.WithContext(ctx).
+		Model(&ProductType{}).
+		Where("store_id = ?", storeID).
+		Order("name ASC").
+		Find(&items).Error
+	return items, err
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, id string) (ProductType, error) {
 	var item ProductType
-	err := r.db.QueryRowContext(ctx, `
-		SELECT id, store_id, name, COALESCE(description, ''), is_active, created_at, updated_at
-		FROM product_types
-		WHERE store_id = $1 AND id = $2
-	`, storeID, id).Scan(&item.ID, &item.StoreID, &item.Name, &item.Description, &item.IsActive, &item.CreatedAt, &item.UpdatedAt)
+	err := r.db.WithContext(ctx).
+		Model(&ProductType{}).
+		Where("store_id = ? AND id = ?", storeID, id).
+		First(&item).Error
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ProductType{}, ErrProductTypeNotFound
 		}
 		return ProductType{}, err
@@ -70,34 +68,37 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, id string) (Pr
 }
 
 func (r PostgresRepository) Update(ctx context.Context, item ProductType) (ProductType, error) {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE product_types
-		SET name = $3, description = NULLIF($4, ''), is_active = $5, updated_at = $6
-		WHERE store_id = $1 AND id = $2
-	`, item.StoreID, item.ID, item.Name, item.Description, item.IsActive, item.UpdatedAt)
-	if err != nil {
-		return ProductType{}, err
+	updates := map[string]any{
+		"name":       item.Name,
+		"is_active":  item.IsActive,
+		"updated_at": item.UpdatedAt,
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return ProductType{}, err
+	if item.Description == "" {
+		updates["description"] = nil
+	} else {
+		updates["description"] = item.Description
 	}
-	if affected == 0 {
+	result := r.db.WithContext(ctx).
+		Model(&ProductType{}).
+		Where("store_id = ? AND id = ?", item.StoreID, item.ID).
+		Updates(updates)
+	if result.Error != nil {
+		return ProductType{}, result.Error
+	}
+	if result.RowsAffected == 0 {
 		return ProductType{}, ErrProductTypeNotFound
 	}
 	return item, nil
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM product_types WHERE store_id = $1 AND id = $2`, storeID, id)
-	if err != nil {
-		return err
+	result := r.db.WithContext(ctx).
+		Where("store_id = ? AND id = ?", storeID, id).
+		Delete(&ProductType{})
+	if result.Error != nil {
+		return result.Error
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
+	if result.RowsAffected == 0 {
 		return ErrProductTypeNotFound
 	}
 	return nil
@@ -107,13 +108,13 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	if role == "platform_admin" {
 		return true, nil
 	}
-	var exists int
-	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM store_members WHERE store_id = $1 AND user_id = $2 AND role IN ('owner', 'manager')`, storeID, userID).Scan(&exists)
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Count(&count).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return count > 0, nil
 }

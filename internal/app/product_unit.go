@@ -1,14 +1,13 @@
 package app
 
 import (
-	"database/sql"
-
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 
 	"pos-backend/internal/modules/productunit"
 )
 
-func newProductUnitHandler(db *sql.DB) productunit.Handler {
+func newProductUnitHandler(db *gorm.DB) productunit.Handler {
 	repo := productunit.NewPostgresRepository(db)
 	service := productunit.NewService(repo)
 	return productunit.NewHandler(service)

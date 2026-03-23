@@ -1,16 +1,16 @@
 package app
 
 import (
-	"database/sql"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 
 	"pos-backend/internal/config"
 	"pos-backend/internal/modules/auth"
 )
 
-func newAuthDependencies(cfg config.Config, db *sql.DB) (auth.TokenManager, auth.Handler) {
+func newAuthDependencies(cfg config.Config, db *gorm.DB) (auth.TokenManager, auth.Handler) {
 	tokenManager := auth.NewTokenManager(cfg.TokenKey, time.Duration(cfg.TokenTTL)*time.Hour)
 	repo := auth.NewPostgresUserRepository(db)
 	service := auth.NewService(repo, tokenManager)

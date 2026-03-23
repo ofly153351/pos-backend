@@ -10,23 +10,27 @@ const (
 )
 
 type Product struct {
-	ID                  string     `json:"id"`
-	StoreID             string     `json:"store_id"`
-	ProductTypeID       string     `json:"product_type_id,omitempty"`
-	ProductTypeName     string     `json:"product_type_name,omitempty"`
-	Name                string     `json:"name"`
-	SKU                 string     `json:"sku,omitempty"`
-	UnitType            string     `json:"unit_type"`
-	ImageURL            string     `json:"image_url,omitempty"`
-	Quantity            int        `json:"quantity"`
-	BasePrice           float64    `json:"base_price"`
-	SpecialPrice        *float64   `json:"special_price,omitempty"`
-	SpecialPriceStartAt *time.Time `json:"special_price_start_at,omitempty"`
-	SpecialPriceEndAt   *time.Time `json:"special_price_end_at,omitempty"`
-	EffectivePrice      float64    `json:"effective_price"`
-	IsActive            bool       `json:"is_active"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                  string     `json:"id" gorm:"column:id;primaryKey"`
+	StoreID             string     `json:"store_id" gorm:"column:store_id"`
+	ProductTypeID       string     `json:"product_type_id,omitempty" gorm:"column:product_type_id"`
+	ProductTypeName     string     `json:"product_type_name,omitempty" gorm:"-"`
+	Name                string     `json:"name" gorm:"column:name"`
+	SKU                 string     `json:"sku,omitempty" gorm:"column:sku"`
+	UnitType            string     `json:"unit_type" gorm:"column:unit_type"`
+	ImageURL            string     `json:"image_url,omitempty" gorm:"column:image_url"`
+	Quantity            int        `json:"quantity" gorm:"column:quantity"`
+	BasePrice           float64    `json:"base_price" gorm:"column:base_price"`
+	SpecialPrice        *float64   `json:"special_price,omitempty" gorm:"column:special_price"`
+	SpecialPriceStartAt *time.Time `json:"special_price_start_at,omitempty" gorm:"column:special_price_start_at"`
+	SpecialPriceEndAt   *time.Time `json:"special_price_end_at,omitempty" gorm:"column:special_price_end_at"`
+	EffectivePrice      float64    `json:"effective_price" gorm:"-"`
+	IsActive            bool       `json:"is_active" gorm:"column:is_active"`
+	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt           time.Time  `json:"updated_at" gorm:"column:updated_at"`
+}
+
+func (Product) TableName() string {
+	return "products"
 }
 
 type CreateProductRequest struct {

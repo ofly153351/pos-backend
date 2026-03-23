@@ -40,12 +40,30 @@ func (h Handler) Create(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "store created", result)
 }
 
+func (h Handler) GetByID(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	if storeID == "" {
+		return httpx.Error(c, fiber.StatusBadRequest, "storeID is required", nil)
+	}
+
+	result, err := h.service.GetByID(c.UserContext(), middleware.ClaimsFromContext(c), storeID)
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+
+	return httpx.Success(c, fiber.StatusOK, "store fetched", result)
+}
+
 func writeStoreError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidStoreName), errors.Is(err, ErrInvalidCurrencyCode), errors.Is(err, ErrInvalidSubscriptionPlan):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrStoreSlugExists):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrStoreForbidden):
+		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+	case errors.Is(err, ErrStoreNotFound):
+		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, ErrSubscriptionPlanNotFound):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:

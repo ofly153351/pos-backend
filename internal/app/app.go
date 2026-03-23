@@ -28,8 +28,11 @@ func registerBaseRoutes(app *fiber.App, cfg config.Config) {
 }
 
 func registerAPIRoutes(app *fiber.App, deps appDependencies) {
-	api := app.Group("/api/v1")
+	registerVersionedAPIRoutes(app.Group("/api/v1"), deps)
+	registerVersionedAPIRoutes(app.Group("/api"), deps)
+}
 
+func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerAuthRoutes(api, deps)
 
 	protected := api.Group("", middleware.AuthRequired(deps.tokenManager))
