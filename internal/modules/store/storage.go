@@ -1,12 +1,16 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 type LogoStorage interface {
@@ -18,10 +22,32 @@ type LocalLogoStorage struct {
 	publicBasePath string
 }
 
+type MinIOLogoStorage struct {
+	client    *minio.Client
+	bucket    string
+	publicURL string
+}
+
 func NewLocalLogoStorage(baseDir, publicBasePath string) LocalLogoStorage {
 	return LocalLogoStorage{
 		baseDir:        baseDir,
 		publicBasePath: publicBasePath,
+	}
+}
+
+func NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) MinIOLogoStorage {
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useSSL,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return MinIOLogoStorage{
+		client:    client,
+		bucket:    bucket,
+		publicURL: strings.TrimRight(publicURL, "/"),
 	}
 }
 
@@ -60,4 +86,42 @@ func (s LocalLogoStorage) SaveStoreLogo(file *multipart.FileHeader) (string, err
 	}
 
 	return strings.TrimRight(s.publicBasePath, "/") + "/logos/" + filename, nil
+}
+
+func (s MinIOLogoStorage) SaveStoreLogo(file *multipart.FileHeader) (string, error) {
+	if file == nil {
+		return "", nil
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == "" {
+		ext = ".bin"
+	}
+
+	filename := fmt.Sprintf("logos/%s%s", newHexID(), ext)
+
+	src, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	_, err = s.client.PutObject(
+		context.Background(),
+		s.bucket,
+		filename,
+		src,
+		file.Size,
+		minio.PutObjectOptions{ContentType: contentType},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return s.publicURL + "/" + s.bucket + "/" + filename, nil
 }

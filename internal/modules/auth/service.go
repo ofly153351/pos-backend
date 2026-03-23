@@ -76,8 +76,14 @@ func (s Service) Login(ctx context.Context, input LoginRequest) (AuthResponse, e
 		return AuthResponse{}, err
 	}
 
+	storeID, err := s.repo.FindPrimaryStoreIDByUserID(ctx, user.ID)
+	if err != nil {
+		return AuthResponse{}, err
+	}
+
 	return AuthResponse{
 		User:        sanitizeUser(user),
+		StoreID:     storeID,
 		AccessToken: token,
 		TokenType:   "Bearer",
 	}, nil

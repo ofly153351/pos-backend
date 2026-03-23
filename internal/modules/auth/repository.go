@@ -14,6 +14,7 @@ var ErrUserNotFound = errors.New("user not found")
 type UserRepository interface {
 	Create(ctx context.Context, user User) (User, error)
 	FindByEmail(ctx context.Context, email string) (User, error)
+	FindPrimaryStoreIDByUserID(ctx context.Context, userID string) (string, error)
 }
 
 type PostgresUserRepository struct {
@@ -73,6 +74,27 @@ func (r PostgresUserRepository) FindByEmail(ctx context.Context, email string) (
 	}
 
 	return user, nil
+}
+
+func (r PostgresUserRepository) FindPrimaryStoreIDByUserID(ctx context.Context, userID string) (string, error) {
+	query := `
+		SELECT store_id
+		FROM store_members
+		WHERE user_id = $1
+		ORDER BY created_at ASC
+		LIMIT 1
+	`
+
+	var storeID string
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(&storeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	return storeID, nil
 }
 
 func normalizeEmail(email string) string {

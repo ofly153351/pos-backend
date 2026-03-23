@@ -7,6 +7,7 @@ import (
 
 type fakeUserRepository struct {
 	created map[string]User
+	stores  map[string]string
 }
 
 func (r *fakeUserRepository) Create(_ context.Context, user User) (User, error) {
@@ -25,8 +26,15 @@ func (r *fakeUserRepository) FindByEmail(_ context.Context, email string) (User,
 	return user, nil
 }
 
+func (r *fakeUserRepository) FindPrimaryStoreIDByUserID(_ context.Context, userID string) (string, error) {
+	return r.stores[userID], nil
+}
+
 func TestRegisterAndLogin(t *testing.T) {
-	repo := &fakeUserRepository{created: make(map[string]User)}
+	repo := &fakeUserRepository{
+		created: make(map[string]User),
+		stores:  make(map[string]string),
+	}
 	service := NewService(repo, NewTokenManager("test-secret", 24))
 
 	registerRes, err := service.Register(context.Background(), RegisterRequest{
@@ -43,6 +51,8 @@ func TestRegisterAndLogin(t *testing.T) {
 		t.Fatalf("unexpected role: %s", registerRes.User.Role)
 	}
 
+	repo.stores[registerRes.User.ID] = "store_123"
+
 	loginRes, err := service.Login(context.Background(), LoginRequest{
 		Email:    "admin@example.com",
 		Password: "password123",
@@ -53,5 +63,8 @@ func TestRegisterAndLogin(t *testing.T) {
 
 	if loginRes.AccessToken == "" {
 		t.Fatal("expected access token")
+	}
+	if loginRes.StoreID != "store_123" {
+		t.Fatalf("unexpected store id: %s", loginRes.StoreID)
 	}
 }

@@ -28,7 +28,7 @@ Subscription is modeled at the store level because POS access is tenant-oriented
 ## Backend Rules
 - Auth issues bearer tokens with user identity and role claims.
 - Store creation must create the store, owner membership, and first subscription in one transaction.
-- Store logos are uploaded as multipart files and stored on disk under `storage/logos/`; only the path is persisted in PostgreSQL.
+- Store logos and product images are uploaded as multipart files to MinIO; only the object URL/path is persisted in PostgreSQL.
 - Product pricing must support `base_price` and optional `special_price`, `special_price_start_at`, and `special_price_end_at`.
 - Product type ownership is store-scoped. Do not attach product categories to `user_id`; use `store_id`.
 - New write flows should be transaction-safe and should validate role access before mutating store data.

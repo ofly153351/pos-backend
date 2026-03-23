@@ -1,12 +1,16 @@
 package product
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
 type ImageStorage interface {
@@ -18,10 +22,32 @@ type LocalImageStorage struct {
 	publicBasePath string
 }
 
+type MinIOImageStorage struct {
+	client    *minio.Client
+	bucket    string
+	publicURL string
+}
+
 func NewLocalImageStorage(baseDir, publicBasePath string) LocalImageStorage {
 	return LocalImageStorage{
 		baseDir:        baseDir,
 		publicBasePath: publicBasePath,
+	}
+}
+
+func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) MinIOImageStorage {
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useSSL,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return MinIOImageStorage{
+		client:    client,
+		bucket:    bucket,
+		publicURL: strings.TrimRight(publicURL, "/"),
 	}
 }
 
@@ -60,4 +86,42 @@ func (s LocalImageStorage) SaveProductImage(file *multipart.FileHeader) (string,
 	}
 
 	return strings.TrimRight(s.publicBasePath, "/") + "/products/" + filename, nil
+}
+
+func (s MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string, error) {
+	if file == nil {
+		return "", nil
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext == "" {
+		ext = ".bin"
+	}
+
+	filename := fmt.Sprintf("products/%s%s", newID(), ext)
+
+	src, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	_, err = s.client.PutObject(
+		context.Background(),
+		s.bucket,
+		filename,
+		src,
+		file.Size,
+		minio.PutObjectOptions{ContentType: contentType},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return s.publicURL + "/" + s.bucket + "/" + filename, nil
 }

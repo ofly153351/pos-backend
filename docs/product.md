@@ -105,6 +105,6 @@ Fields ที่รองรับ:
 
 - ราคาที่ตอบกลับจะมี `effective_price` คำนวณจาก special price window
 - response ของสินค้าแต่ละรายการจะมี `quantity` เป็นจำนวนคงเหลือปัจจุบัน
-- รูปสินค้าจะถูกเก็บไว้ใต้ `/uploads/products/*`
+- รูปสินค้าจะถูกอัปโหลดไปที่ MinIO และระบบจะเก็บ URL ที่ได้ไว้ในฐานข้อมูล
 - แนะนำให้สร้าง `product_type` ของร้านก่อนแล้วค่อยสร้างสินค้า
 - สำหรับ `unit_type` เฉพาะร้านอาจสร้างชุดของหน่วยไว้ก่อนด้วย `POST /api/v1/stores/:storeID/product-units` แล้ว fetch list เพื่อผูกกับ dropdown

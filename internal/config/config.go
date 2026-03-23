@@ -23,6 +23,12 @@ type Config struct {
 	AutoMigrate      bool
 	MigrationsDir    string
 	UploadDir        string
+	MinIOEndpoint    string
+	MinIOAccessKey   string
+	MinIOSecretKey   string
+	MinIOBucketName  string
+	MinIOUseSSL      bool
+	MinIOPublicURL   string
 }
 
 func Load() Config {
@@ -43,6 +49,12 @@ func Load() Config {
 		AutoMigrate:      getEnvBool("APP_AUTO_MIGRATE", true),
 		MigrationsDir:    getEnv("APP_MIGRATIONS_DIR", "init-db"),
 		UploadDir:        getEnv("APP_UPLOAD_DIR", "storage"),
+		MinIOEndpoint:    getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
+		MinIOAccessKey:   getEnv("MINIO_ROOT_USER", "minioadmin"),
+		MinIOSecretKey:   getEnv("MINIO_ROOT_PASSWORD", "minioadmin"),
+		MinIOBucketName:  getEnv("MINIO_BUCKET_NAME", "pos-assets"),
+		MinIOUseSSL:      getEnvBool("MINIO_USE_SSL", false),
+		MinIOPublicURL:   getEnv("MINIO_PUBLIC_URL", "http://127.0.0.1:9000"),
 	}
 }
 

@@ -81,6 +81,7 @@ Status: `201 Created`
       "email": "admin@example.com",
       "created_at": "2026-03-22T13:00:00Z"
     },
+    "store_id": "generated-store-id",
     "access_token": "jwt-token",
     "token_type": "Bearer"
   }
@@ -92,6 +93,9 @@ Status: `201 Created`
 - `400 Bad Request` ข้อมูลไม่ถูกต้อง
 - `409 Conflict` email ถูกใช้งานแล้ว
 - `500 Internal Server Error` server error
+
+หมายเหตุ:
+- `store_id` จะถูกส่งกลับเมื่อ user คนนี้มีร้านอยู่แล้วใน `store_members`
 
 ## POST /api/v1/auth/login
 
@@ -132,6 +136,7 @@ Status: `200 OK`
       "email": "admin@example.com",
       "created_at": "2026-03-22T13:00:00Z"
     },
+    "store_id": "generated-store-id",
     "access_token": "jwt-token",
     "token_type": "Bearer"
   }
@@ -165,5 +170,6 @@ Response:
 ## Notes
 
 - token ที่ส่งกลับอยู่ใน field `access_token`
+- หลัง login ระบบจะพยายามส่ง `store_id` แรกของ user กลับมาด้วย ถ้ามี membership อยู่แล้ว
 - token type ปัจจุบันคือ `Bearer`
 - auth data ตอนนี้เก็บแบบ in-memory จึงจะหายเมื่อ restart service

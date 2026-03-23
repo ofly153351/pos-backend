@@ -33,6 +33,7 @@ type LoginRequest struct {
 
 type AuthResponse struct {
 	User        User   `json:"user"`
+	StoreID     string `json:"store_id,omitempty"`
 	AccessToken string `json:"access_token"`
 	TokenType   string `json:"token_type"`
 }
