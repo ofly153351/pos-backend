@@ -18,6 +18,7 @@ type appDependencies struct {
 	productHandler      any
 	customerHandler     any
 	saleHandler         any
+	invoiceHandler      any
 	subscriptionHandler any
 }
 
@@ -45,6 +46,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerProductRoutes(protected, deps)
 	registerCustomerRoutes(protected, deps)
 	registerSaleRoutes(protected, deps)
+	registerInvoiceRoutes(protected, deps)
 	registerSubscriptionRoutes(protected, deps)
 
 	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo), middleware.RequireRoles(auth.RolePlatformAdmin))

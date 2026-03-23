@@ -166,9 +166,12 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
 	var sales []Sale
 	err := r.db.WithContext(ctx).
-		Model(&Sale{}).
-		Where("store_id = ?", storeID).
-		Order("sold_at DESC, created_at DESC").
+		Table("sales s").
+		Select("s.id, s.store_id, st.name AS store_name, s.sale_number, s.cashier_user_id, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Joins("JOIN stores st ON st.id = s.store_id").
+		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
+		Where("s.store_id = ?", storeID).
+		Order("s.sold_at DESC, s.created_at DESC").
 		Find(&sales).Error
 	return sales, err
 }
@@ -176,16 +179,23 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string) (Sale, error) {
 	var sale Sale
 	err := r.db.WithContext(ctx).
-		Model(&Sale{}).
-		Preload("Items", func(tx *gorm.DB) *gorm.DB {
-			return tx.Order("created_at ASC")
-		}).
-		Where("store_id = ? AND id = ?", storeID, saleID).
+		Table("sales s").
+		Select("s.id, s.store_id, st.name AS store_name, s.sale_number, s.cashier_user_id, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Joins("JOIN stores st ON st.id = s.store_id").
+		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
+		Where("s.store_id = ? AND s.id = ?", storeID, saleID).
 		Take(&sale).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Sale{}, ErrSaleNotFound
 		}
+		return Sale{}, err
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&SaleItem{}).
+		Where("sale_id = ?", sale.ID).
+		Order("created_at ASC").
+		Find(&sale.Items).Error; err != nil {
 		return Sale{}, err
 	}
 	return sale, nil

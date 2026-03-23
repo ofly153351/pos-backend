@@ -11,6 +11,8 @@ type Sale struct {
 	PaymentMethod          string     `json:"payment_method" gorm:"column:payment_method"`
 	Note                   string     `json:"note,omitempty" gorm:"column:note"`
 	CustomerID             string     `json:"customer_id,omitempty" gorm:"column:customer_id"`
+	CustomerName           string     `json:"customer_name,omitempty" gorm:"column:customer_name"`
+	StoreName              string     `json:"store_name,omitempty" gorm:"column:store_name"`
 	CustomerLevel          *int       `json:"customer_level,omitempty" gorm:"column:customer_level"`
 	NetworkDiscountPercent float64    `json:"network_discount_percent" gorm:"column:network_discount_percent"`
 	TotalItems             int        `json:"total_items" gorm:"column:total_items"`

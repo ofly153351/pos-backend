@@ -55,6 +55,13 @@ POST /api/v1/stores/:storeID/sales
 GET  /api/v1/stores/:storeID/sales
 GET  /api/v1/stores/:storeID/sales/:saleID
 
+# Outstanding Invoices
+POST /api/v1/stores/:storeID/invoices
+GET  /api/v1/stores/:storeID/invoices
+GET  /api/v1/stores/:storeID/invoices/:invoiceID
+POST /api/v1/stores/:storeID/invoices/:invoiceID/payments
+GET  /api/v1/stores/:storeID/invoices/:invoiceID/pdf
+
 # Subscription
 GET  /api/v1/subscriptions/plans
 GET  /api/v1/stores/:storeID/subscription
@@ -76,6 +83,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - Store API guide: `docs/store.md`
 - Product API guide: `docs/product.md`
 - Sales API guide: `docs/sales.md`
+- Invoice API guide: `docs/invoice.md`
 - Subscription API guide: `docs/subscription.md`
 - Customer network status guide: `docs/customer-network.md`
 - Product Unit API guide: `docs/product-units.md`
