@@ -15,6 +15,7 @@ GOCACHE=$(pwd)/.cache/go-build GOMODCACHE=$(pwd)/.cache/go-mod go run ./cmd/api.
 # Auth
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+POST /api/v1/auth/logout
 
 # Store
 POST /api/v1/stores
@@ -38,6 +39,16 @@ GET  /api/v1/stores/:storeID/products
 GET  /api/v1/stores/:storeID/products/:productID
 PATCH /api/v1/stores/:storeID/products/:productID
 DELETE /api/v1/stores/:storeID/products/:productID
+
+# Customer Network
+POST /api/v1/stores/:storeID/customers
+GET  /api/v1/stores/:storeID/customers
+GET  /api/v1/stores/:storeID/customers/:customerID
+PATCH /api/v1/stores/:storeID/customers/:customerID
+DELETE /api/v1/stores/:storeID/customers/:customerID
+GET  /api/v1/stores/:storeID/customer-level-discounts
+PUT  /api/v1/stores/:storeID/customer-level-discounts/:level
+DELETE /api/v1/stores/:storeID/customer-level-discounts/:level
 
 # Sales
 POST /api/v1/stores/:storeID/sales
@@ -66,6 +77,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - Product API guide: `docs/product.md`
 - Sales API guide: `docs/sales.md`
 - Subscription API guide: `docs/subscription.md`
+- Customer network status guide: `docs/customer-network.md`
 - Product Unit API guide: `docs/product-units.md`
 - Product structure guide (types & units): `docs/product-structure.md`
 - Admin subscription API guide: `docs/admin-subscription.md`

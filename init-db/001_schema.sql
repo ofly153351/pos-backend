@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
     full_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    token_version BIGINT NOT NULL DEFAULT 0,
     role TEXT NOT NULL CHECK (role IN ('platform_admin', 'owner', 'manager', 'cashier')),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -89,10 +90,25 @@ CREATE TABLE IF NOT EXISTS products (
     )
 );
 
+CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    customer_level INTEGER NOT NULL DEFAULT 1 CHECK (customer_level > 0),
+    full_name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    note TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_store_members_user_id ON store_members (user_id);
 CREATE INDEX IF NOT EXISTS idx_store_subscriptions_store_id ON store_subscriptions (store_id);
 CREATE INDEX IF NOT EXISTS idx_product_types_store_id ON product_types (store_id);
 CREATE INDEX IF NOT EXISTS idx_products_store_id ON products (store_id);
+CREATE INDEX IF NOT EXISTS idx_customers_store_id ON customers (store_id);
 
 INSERT INTO subscription_plans (id, code, name, description, duration_days, price_amount, currency_code)
 VALUES

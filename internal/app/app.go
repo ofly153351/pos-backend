@@ -10,11 +10,13 @@ import (
 
 type appDependencies struct {
 	tokenManager        auth.TokenManager
+	authUserRepo        auth.UserRepository
 	authHandler         auth.Handler
 	storeHandler        any
 	productTypeHandler  any
 	productUnitHandler  any
 	productHandler      any
+	customerHandler     any
 	saleHandler         any
 	subscriptionHandler any
 }
@@ -35,14 +37,16 @@ func registerAPIRoutes(app *fiber.App, deps appDependencies) {
 func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerAuthRoutes(api, deps)
 
-	protected := api.Group("", middleware.AuthRequired(deps.tokenManager))
+	protected := api.Group("", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo))
+	registerProtectedAuthRoutes(protected, deps)
 	registerStoreRoutes(protected, deps)
 	registerProductTypeRoutes(protected, deps)
 	registerProductUnitRoutes(protected, deps)
 	registerProductRoutes(protected, deps)
+	registerCustomerRoutes(protected, deps)
 	registerSaleRoutes(protected, deps)
 	registerSubscriptionRoutes(protected, deps)
 
-	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager), middleware.RequireRoles(auth.RolePlatformAdmin))
+	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo), middleware.RequireRoles(auth.RolePlatformAdmin))
 	registerAdminSubscriptionRoutes(admin, deps)
 }

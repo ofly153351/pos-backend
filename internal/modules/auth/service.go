@@ -89,6 +89,13 @@ func (s Service) Login(ctx context.Context, input LoginRequest) (AuthResponse, e
 	}, nil
 }
 
+func (s Service) Logout(ctx context.Context, actor Claims) error {
+	if actor.UserID == "" {
+		return ErrInvalidCredentials
+	}
+	return s.repo.IncrementTokenVersion(ctx, actor.UserID)
+}
+
 func sanitizeUser(user User) User {
 	user.PasswordHash = ""
 	return user

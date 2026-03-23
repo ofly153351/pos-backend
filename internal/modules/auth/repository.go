@@ -15,6 +15,8 @@ type UserRepository interface {
 	Create(ctx context.Context, user User) (User, error)
 	FindByEmail(ctx context.Context, email string) (User, error)
 	FindPrimaryStoreIDByUserID(ctx context.Context, userID string) (string, error)
+	FindTokenVersionByUserID(ctx context.Context, userID string) (int64, error)
+	IncrementTokenVersion(ctx context.Context, userID string) error
 }
 
 type PostgresUserRepository struct {
@@ -74,6 +76,41 @@ func (r PostgresUserRepository) FindPrimaryStoreIDByUserID(ctx context.Context, 
 	}
 
 	return member.StoreID, nil
+}
+
+func (r PostgresUserRepository) FindTokenVersionByUserID(ctx context.Context, userID string) (int64, error) {
+	type userTokenVersion struct {
+		TokenVersion int64 `gorm:"column:token_version"`
+	}
+
+	var user userTokenVersion
+	err := r.db.WithContext(ctx).
+		Model(&User{}).
+		Select("token_version").
+		Where("id = ?", userID).
+		Take(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, ErrUserNotFound
+		}
+		return 0, err
+	}
+
+	return user.TokenVersion, nil
+}
+
+func (r PostgresUserRepository) IncrementTokenVersion(ctx context.Context, userID string) error {
+	result := r.db.WithContext(ctx).
+		Model(&User{}).
+		Where("id = ?", userID).
+		Update("token_version", gorm.Expr("token_version + 1"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 func normalizeEmail(email string) string {

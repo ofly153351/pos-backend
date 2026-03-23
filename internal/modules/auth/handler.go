@@ -44,11 +44,20 @@ func (h Handler) Login(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "login success", result)
 }
 
+func (h Handler) Logout(c *fiber.Ctx) error {
+	claims, _ := c.Locals("auth_claims").(Claims)
+	if err := h.service.Logout(c.UserContext(), claims); err != nil {
+		return writeAuthError(c, err)
+	}
+
+	return httpx.Success(c, fiber.StatusOK, "logout success", nil)
+}
+
 func writeAuthError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrEmailExists):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
-	case errors.Is(err, ErrInvalidCredentials):
+	case errors.Is(err, ErrInvalidCredentials), errors.Is(err, ErrUserNotFound):
 		return httpx.Error(c, fiber.StatusUnauthorized, err.Error(), nil)
 	case errors.Is(err, ErrInvalidName), errors.Is(err, ErrInvalidEmail), errors.Is(err, ErrInvalidPassword), errors.Is(err, ErrInvalidRole):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)

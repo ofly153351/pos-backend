@@ -16,6 +16,7 @@ type User struct {
 	Role         string    `json:"role" gorm:"column:role"`
 	Status       string    `json:"status" gorm:"column:status"`
 	PasswordHash string    `json:"-" gorm:"column:password_hash"`
+	TokenVersion int64     `json:"-" gorm:"column:token_version"`
 	CreatedAt    time.Time `json:"created_at" gorm:"column:created_at"`
 }
 

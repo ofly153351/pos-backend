@@ -17,4 +17,5 @@ var (
 	ErrProductInactive            = errors.New("product is inactive")
 	ErrInsufficientStock          = errors.New("insufficient product quantity")
 	ErrSaleNotFound               = errors.New("sale not found")
+	ErrCustomerNotFound           = errors.New("customer not found")
 )

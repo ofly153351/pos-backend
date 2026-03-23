@@ -149,6 +149,27 @@ Status: `200 OK`
 - `401 Unauthorized` email หรือ password ไม่ถูกต้อง
 - `500 Internal Server Error` server error
 
+## POST /api/v1/auth/logout
+
+ใช้สำหรับออกจากระบบแบบ full logout (revoke token)
+
+Endpoint นี้ต้องส่ง Bearer token ที่ยังใช้งานได้:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/logout \
+  -H "Authorization: Bearer <token>"
+```
+
+Success:
+
+- Status `200 OK`
+- token ปัจจุบันและ token เก่าของ user เดียวกันจะถูกยกเลิกทั้งหมดทันที
+
+หมายเหตุ:
+
+- หลัง logout ต้อง login ใหม่เพื่อรับ token เวอร์ชันใหม่
+- ระบบรองรับทั้ง `/api/v1/auth/logout` และ `/api/auth/logout`
+
 ## Health Check
 
 ใช้ตรวจสอบว่า API ยังทำงานอยู่

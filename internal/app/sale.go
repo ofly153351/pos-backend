@@ -4,12 +4,14 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
+	"pos-backend/internal/modules/customer"
 	"pos-backend/internal/modules/sale"
 )
 
 func newSaleHandler(db *gorm.DB) sale.Handler {
-	repo := sale.NewPostgresRepository(db)
-	service := sale.NewService(repo)
+	saleRepo := sale.NewPostgresRepository(db)
+	customerRepo := customer.NewPostgresRepository(db)
+	service := sale.NewService(saleRepo, customer.NewSaleBenefitResolver(customerRepo))
 	return sale.NewHandler(service)
 }
 

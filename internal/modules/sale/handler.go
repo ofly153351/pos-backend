@@ -6,6 +6,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"pos-backend/internal/middleware"
+	"pos-backend/internal/modules/customer"
 	"pos-backend/internal/platform/httpx"
 )
 
@@ -52,7 +53,7 @@ func writeSaleError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	case errors.Is(err, ErrSaleNotFound):
+	case errors.Is(err, ErrSaleNotFound), errors.Is(err, ErrCustomerNotFound), errors.Is(err, customer.ErrCustomerNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)

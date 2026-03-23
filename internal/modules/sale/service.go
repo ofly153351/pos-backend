@@ -9,11 +9,16 @@ import (
 )
 
 type Service struct {
-	repo Repository
+	repo     Repository
+	resolver CustomerBenefitResolver
 }
 
-func NewService(repo Repository) Service {
-	return Service{repo: repo}
+type CustomerBenefitResolver interface {
+	Resolve(ctx context.Context, storeID, customerID string) (level int, discountPercent float64, err error)
+}
+
+func NewService(repo Repository, resolver CustomerBenefitResolver) Service {
+	return Service{repo: repo, resolver: resolver}
 }
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateSaleRequest) (Sale, error) {
@@ -39,8 +44,21 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		PaymentMethod: strings.TrimSpace(req.PaymentMethod),
 		PaidAmount:    req.PaidAmount,
 		Note:          strings.TrimSpace(req.Note),
+		CustomerID:    strings.TrimSpace(req.CustomerID),
 		SoldAt:        now,
 		CreatedAt:     now,
+	}
+
+	if sale.CustomerID != "" {
+		if s.resolver == nil {
+			return Sale{}, ErrCustomerNotFound
+		}
+		level, discountPercent, err := s.resolver.Resolve(ctx, storeID, sale.CustomerID)
+		if err != nil {
+			return Sale{}, err
+		}
+		sale.CustomerLevel = &level
+		sale.NetworkDiscountPercent = discountPercent
 	}
 
 	for _, item := range req.Items {

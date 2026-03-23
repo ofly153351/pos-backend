@@ -19,6 +19,7 @@ Base: `Authorization: Bearer <token>`
   "payment_method": "cash",
   "paid_amount": 500,
   "note": "walk-in customer",
+  "customer_id": "cust_lv2_001",
   "items": [
     {
       "product_id": "prod_coffee_001",
@@ -42,6 +43,8 @@ Behavior:
 - ถ้าไม่ส่ง `discount_type` และ `discount_value` จะถือว่าไม่มีส่วนลด
 - `discount_value` ของ `amount` คือส่วนลดต่อหน่วย
 - `discount_value` ของ `percent` ต้องอยู่ในช่วง `0-100`
+- ถ้าส่ง `customer_id` ระบบจะคำนวณส่วนลดเครือข่ายเพิ่มตาม level ของลูกค้า (LV1/LV2/...) โดยอิงจาก `customer_level_discounts`
+- ส่วนลดเครือข่ายคำนวณต่อหน่วยบนยอดหลังหักส่วนลด manual ของรายการนั้น
 - ถ้าสต็อกไม่พอจะไม่สร้างบิล
 - ถ้าสินค้า inactive จะไม่ขาย
 - ถ้า `paid_amount < total_amount` จะ reject
@@ -56,6 +59,9 @@ Response shape หลัก:
   "data": {
     "id": "sale_xxx",
     "payment_method": "cash",
+    "customer_id": "cust_lv2_001",
+    "customer_level": 2,
+    "network_discount_percent": 10,
     "paid_amount": 500,
     "subtotal_amount": 255,
     "discount_amount": 35,

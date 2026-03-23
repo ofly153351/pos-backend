@@ -69,6 +69,7 @@ type Claims struct {
 	Email     string
 	Name      string
 	Role      string
+	TokenVer  int64
 	ExpiresAt int64
 }
 
@@ -87,6 +88,7 @@ func (m TokenManager) Issue(user User) (string, error) {
 		"email": user.Email,
 		"name":  user.Name,
 		"role":  user.Role,
+		"tv":    user.TokenVersion,
 		"exp":   time.Now().Add(m.ttl).Unix(),
 	}
 
@@ -144,6 +146,7 @@ func (m TokenManager) Parse(token string) (Claims, error) {
 		Email:     asString(claims["email"]),
 		Name:      asString(claims["name"]),
 		Role:      asString(claims["role"]),
+		TokenVer:  asInt64(claims["tv"]),
 		ExpiresAt: int64(exp),
 	}, nil
 }
@@ -151,4 +154,17 @@ func (m TokenManager) Parse(token string) (Claims, error) {
 func asString(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func asInt64(value any) int64 {
+	switch v := value.(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	default:
+		return 0
+	}
 }

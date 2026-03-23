@@ -11,7 +11,7 @@ import (
 
 const claimsKey = "auth_claims"
 
-func AuthRequired(tokens auth.TokenManager) fiber.Handler {
+func AuthRequired(tokens auth.TokenManager, users auth.UserRepository) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		header := strings.TrimSpace(c.Get("Authorization"))
 		if header == "" {
@@ -25,6 +25,13 @@ func AuthRequired(tokens auth.TokenManager) fiber.Handler {
 
 		claims, err := tokens.Parse(parts[1])
 		if err != nil {
+			return httpx.Error(c, fiber.StatusUnauthorized, "invalid or expired token", nil)
+		}
+		currentTokenVer, err := users.FindTokenVersionByUserID(c.UserContext(), claims.UserID)
+		if err != nil {
+			return httpx.Error(c, fiber.StatusUnauthorized, "invalid or expired token", nil)
+		}
+		if currentTokenVer != claims.TokenVer {
 			return httpx.Error(c, fiber.StatusUnauthorized, "invalid or expired token", nil)
 		}
 

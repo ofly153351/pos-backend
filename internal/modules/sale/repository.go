@@ -44,9 +44,14 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		}
 
 		unitPrice := resolveEffectivePrice(product, sale.SoldAt)
-		discountAmountPerUnit, err := calculateDiscount(item.DiscountType, item.DiscountValue, unitPrice)
+		manualDiscountPerUnit, err := calculateDiscount(item.DiscountType, item.DiscountValue, unitPrice)
 		if err != nil {
 			return Sale{}, err
+		}
+		networkDiscountPerUnit := calculateNetworkDiscount(sale.NetworkDiscountPercent, unitPrice, manualDiscountPerUnit)
+		discountAmountPerUnit := manualDiscountPerUnit + networkDiscountPerUnit
+		if discountAmountPerUnit > unitPrice {
+			discountAmountPerUnit = unitPrice
 		}
 
 		sale.Items[index].ID = newID()
@@ -82,19 +87,22 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 	}
 
 	salePayload := map[string]any{
-		"id":              sale.ID,
-		"store_id":        sale.StoreID,
-		"sale_number":     sale.SaleNumber,
-		"cashier_user_id": sale.CashierUserID,
-		"status":          sale.Status,
-		"total_items":     sale.TotalItems,
-		"subtotal_amount": sale.SubtotalAmount,
-		"discount_amount": sale.DiscountAmount,
-		"total_amount":    sale.TotalAmount,
-		"paid_amount":     sale.PaidAmount,
-		"change_amount":   sale.ChangeAmount,
-		"sold_at":         sale.SoldAt,
-		"created_at":      sale.CreatedAt,
+		"id":                       sale.ID,
+		"store_id":                 sale.StoreID,
+		"sale_number":              sale.SaleNumber,
+		"cashier_user_id":          sale.CashierUserID,
+		"status":                   sale.Status,
+		"customer_id":              sale.CustomerID,
+		"customer_level":           sale.CustomerLevel,
+		"network_discount_percent": sale.NetworkDiscountPercent,
+		"total_items":              sale.TotalItems,
+		"subtotal_amount":          sale.SubtotalAmount,
+		"discount_amount":          sale.DiscountAmount,
+		"total_amount":             sale.TotalAmount,
+		"paid_amount":              sale.PaidAmount,
+		"change_amount":            sale.ChangeAmount,
+		"sold_at":                  sale.SoldAt,
+		"created_at":               sale.CreatedAt,
 	}
 	if sale.PaymentMethod == "" {
 		salePayload["payment_method"] = nil
@@ -105,6 +113,10 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		salePayload["note"] = nil
 	} else {
 		salePayload["note"] = sale.Note
+	}
+	if sale.CustomerID == "" {
+		salePayload["customer_id"] = nil
+		salePayload["customer_level"] = nil
 	}
 	if err := tx.Table("sales").Create(salePayload).Error; err != nil {
 		return Sale{}, err
@@ -240,4 +252,15 @@ func calculateDiscount(discountType string, discountValue *float64, unitPrice fl
 	default:
 		return 0, ErrInvalidDiscountType
 	}
+}
+
+func calculateNetworkDiscount(percent, unitPrice, manualDiscount float64) float64 {
+	if percent <= 0 {
+		return 0
+	}
+	base := unitPrice - manualDiscount
+	if base <= 0 {
+		return 0
+	}
+	return base * (percent / 100)
 }
