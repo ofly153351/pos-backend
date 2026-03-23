@@ -104,6 +104,21 @@
 
 แปลว่า user จาก token ไม่มีสิทธิ์ใน `store_id` นั้น หรือไม่ได้อยู่ใน `store_members`
 
+## 8. หน้าขาย POS
+
+เมื่อมีสินค้าในระบบแล้ว `cashier`, `manager`, `owner` สามารถเปิดหน้าขายเพื่อสร้างบิล
+
+ลำดับ:
+1. `GET /api/v1/stores/:storeID/products`
+2. เลือกสินค้าและจำนวนที่ต้องขาย
+3. `POST /api/v1/stores/:storeID/sales`
+4. ถ้าต้องการเปิดใบเสร็จย้อนหลังใช้ `GET /api/v1/stores/:storeID/sales/:saleID`
+
+ข้อมูลสำคัญ:
+- ระบบจะหัก `product.quantity` ทันทีเมื่อขายสำเร็จ
+- ระบบจะเก็บ snapshot ของชื่อสินค้า, ราคา, จำนวน ที่ขายใน `sale_items`
+- หน้าขายสามารถโหลดประวัติด้วย `GET /api/v1/stores/:storeID/sales`
+
 ## Recommended Flow
 
 สำหรับร้านใหม่:

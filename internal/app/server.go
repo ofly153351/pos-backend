@@ -14,6 +14,7 @@ import (
 	"pos-backend/internal/modules/product"
 	"pos-backend/internal/modules/producttype"
 	"pos-backend/internal/modules/productunit"
+	"pos-backend/internal/modules/sale"
 	"pos-backend/internal/modules/store"
 	"pos-backend/internal/modules/subscription"
 )
@@ -57,6 +58,9 @@ func NewServer(cfg config.Config) (*Server, error) {
 	productStorage := product.NewLocalImageStorage(cfg.UploadDir, "/uploads")
 	productService := product.NewService(productRepo, productStorage)
 	productHandler := product.NewHandler(productService)
+	saleRepo := sale.NewPostgresRepository(db)
+	saleService := sale.NewService(saleRepo)
+	saleHandler := sale.NewHandler(saleService)
 	subscriptionRepo := subscription.NewPostgresRepository(db)
 	subscriptionService := subscription.NewService(subscriptionRepo)
 	subscriptionHandler := subscription.NewHandler(subscriptionService)
@@ -98,6 +102,9 @@ func NewServer(cfg config.Config) (*Server, error) {
 	protected.Get("/stores/:storeID/products/:productID", productHandler.GetByID)
 	protected.Patch("/stores/:storeID/products/:productID", productHandler.Update)
 	protected.Delete("/stores/:storeID/products/:productID", productHandler.Delete)
+	protected.Post("/stores/:storeID/sales", saleHandler.Create)
+	protected.Get("/stores/:storeID/sales", saleHandler.ListByStore)
+	protected.Get("/stores/:storeID/sales/:saleID", saleHandler.GetByID)
 	protected.Get("/stores/:storeID/subscription", subscriptionHandler.GetCurrentByStore)
 	protected.Put("/stores/:storeID/subscription", subscriptionHandler.ChangePlan)
 	admin := api.Group("/admin", middleware.AuthRequired(tokenManager), middleware.RequireRoles(auth.RolePlatformAdmin))

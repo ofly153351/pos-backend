@@ -28,6 +28,9 @@ GET  /api/v1/stores/:storeID/products
 GET  /api/v1/stores/:storeID/products/:productID
 PATCH /api/v1/stores/:storeID/products/:productID
 DELETE /api/v1/stores/:storeID/products/:productID
+POST /api/v1/stores/:storeID/sales
+GET  /api/v1/stores/:storeID/sales
+GET  /api/v1/stores/:storeID/sales/:saleID
 GET  /api/v1/subscriptions/plans
 GET  /api/v1/stores/:storeID/subscription
 PUT  /api/v1/stores/:storeID/subscription
@@ -44,6 +47,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - System flow guide: `docs/flow.md`
 - Admin guide: `docs/admin.md`
 - Product API guide: `docs/product.md`
+- Sales API guide: `docs/sales.md`
 - Subscription API guide: `docs/subscription.md`
 - Product Unit API guide: `docs/product-units.md`
 - Product structure guide (types & units): `docs/product-structure.md`
