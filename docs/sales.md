@@ -18,6 +18,8 @@ Base: `Authorization: Bearer <token>`
 {
   "payment_method": "cash",
   "paid_amount": 500,
+  "vat_included": false,
+  "vat_percent": 7,
   "note": "walk-in customer",
   "customer_id": "cust_lv2_001",
   "items": [
@@ -48,7 +50,10 @@ Behavior:
 - ถ้าสต็อกไม่พอจะไม่สร้างบิล
 - ถ้าสินค้า inactive จะไม่ขาย
 - ถ้า `paid_amount < total_amount` จะ reject
-- บันทึก `subtotal_amount`, `discount_amount`, `total_amount`, `change_amount`
+- รองรับ VAT ด้วย `vat_included` และ `vat_percent` (default `true` และ `7`)
+- บันทึก `subtotal_amount`, `discount_amount`, `vat_amount`, `total_amount`, `change_amount`
+- ถ้า `vat_included=true`: `total_amount` คือยอดรวมที่มี VAT อยู่แล้ว
+- ถ้า `vat_included=false`: `total_amount` คือยอดหลังหักส่วนลด + VAT เพิ่ม
 
 Response shape หลัก:
 
@@ -65,6 +70,9 @@ Response shape หลัก:
     "paid_amount": 500,
     "subtotal_amount": 255,
     "discount_amount": 35,
+    "vat_included": false,
+    "vat_percent": 7,
+    "vat_amount": 15.4,
     "total_amount": 220,
     "change_amount": 280,
     "items": [
@@ -90,6 +98,9 @@ Response shape หลัก:
 ดึงประวัติการขายของร้าน เรียงล่าสุดก่อน พร้อมยอด:
 - `subtotal_amount`
 - `discount_amount`
+- `vat_included`
+- `vat_percent`
+- `vat_amount`
 - `total_amount`
 - `paid_amount`
 - `change_amount`

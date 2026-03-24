@@ -67,3 +67,4 @@ Example success response:
 - When `vat_included` is `true`, the backend treats `after_discount` as the VAT-inclusive `grand_total` and derives `vat_amount = grand_total * vat_percent / (100 + vat_percent)`  
 - When `vat_included` is `false`, the API adds VAT on top of the provided `after_discount`  
 - Use this endpoint before showing the receipt so the frontend and receipt generator share the same numbers
+- For sale creation, send the same VAT mode to `POST /api/v1/stores/:storeID/sales` via `vat_included` and `vat_percent`

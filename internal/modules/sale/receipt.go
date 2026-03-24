@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"html/template"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -233,12 +232,17 @@ func (s Service) GenerateReceiptPreviewHTML(ctx context.Context, actor auth.Clai
 }
 
 func buildReceiptPayload(s Sale) map[string]any {
-	const vatPercent = 7.0
-	vatIncluded := true
-
+	vatPercent := s.VATPercent
+	if vatPercent < 0 {
+		vatPercent = 0
+	}
+	vatIncluded := s.VATIncluded
+	vatAmount := roundMoney(s.VATAmount)
 	grandTotal := roundMoney(s.TotalAmount)
-	vatAmount := roundMoney(grandTotal * vatPercent / (100 + vatPercent))
-	afterDiscount := roundMoney(grandTotal - vatAmount)
+	afterDiscount := roundMoney(s.SubtotalAmount - s.DiscountAmount)
+	if afterDiscount < 0 {
+		afterDiscount = 0
+	}
 	subtotal := roundMoney(s.SubtotalAmount)
 	discountBill := roundMoney(s.DiscountAmount)
 	if discountBill < 0 {
@@ -301,7 +305,7 @@ func buildReceiptPayload(s Sale) map[string]any {
 			"discount_item":  0.0,
 			"discount_bill":  discountBill,
 			"after_discount": afterDiscount,
-			"vat_percent":    int(vatPercent),
+			"vat_percent":    roundMoney(vatPercent),
 			"vat_amount":     vatAmount,
 			"grand_total":    grandTotal,
 		},
@@ -317,10 +321,6 @@ func buildReceiptPayload(s Sale) map[string]any {
 			"contact":    contact,
 		},
 	}
-}
-
-func roundMoney(v float64) float64 {
-	return math.Round(v*100) / 100
 }
 
 func formatMoney(v float64) string {

@@ -45,8 +45,16 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		PaidAmount:    req.PaidAmount,
 		Note:          strings.TrimSpace(req.Note),
 		CustomerID:    strings.TrimSpace(req.CustomerID),
+		VATIncluded:   true,
+		VATPercent:    7,
 		SoldAt:        now,
 		CreatedAt:     now,
+	}
+	if req.VATIncluded != nil {
+		sale.VATIncluded = *req.VATIncluded
+	}
+	if req.VATPercent != nil {
+		sale.VATPercent = *req.VATPercent
 	}
 
 	if sale.CustomerID != "" {
@@ -105,6 +113,9 @@ func validateCreateRequest(req CreateSaleRequest) error {
 	}
 	if len(req.Items) == 0 {
 		return ErrInvalidSaleItems
+	}
+	if req.VATPercent != nil && (*req.VATPercent < 0 || *req.VATPercent > 100) {
+		return ErrInvalidVATPercent
 	}
 	for _, item := range req.Items {
 		if strings.TrimSpace(item.ProductID) == "" || item.Quantity <= 0 {

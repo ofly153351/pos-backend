@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -41,4 +42,8 @@ func resolveEffectivePrice(product productSnapshot, now time.Time) float64 {
 
 func normalizeDiscountType(value string) string {
 	return strings.TrimSpace(strings.ToLower(value))
+}
+
+func roundMoney(v float64) float64 {
+	return math.Round(v*100) / 100
 }

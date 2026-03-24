@@ -1,11 +1,29 @@
 package vat
 
-import "math"
+import (
+	"context"
+	"math"
 
-type Service struct{}
+	"pos-backend/internal/modules/auth"
+)
 
-func NewService() Service {
-	return Service{}
+type Service struct {
+	repo Repository
+}
+
+func NewService(repo Repository) Service {
+	return Service{repo: repo}
+}
+
+func (s Service) CalculateForStore(ctx context.Context, actor auth.Claims, storeID string, req CalculateVATRequest) (VATSummary, error) {
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return VATSummary{}, err
+	}
+	if !allowed {
+		return VATSummary{}, ErrForbiddenStoreAccess
+	}
+	return s.Calculate(req)
 }
 
 func (s Service) Calculate(req CalculateVATRequest) (VATSummary, error) {

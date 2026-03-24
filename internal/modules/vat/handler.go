@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"pos-backend/internal/middleware"
 	"pos-backend/internal/platform/httpx"
 )
 
@@ -22,7 +23,7 @@ func (h Handler) Calculate(c *fiber.Ctx) error {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
 
-	result, err := h.service.Calculate(req)
+	result, err := h.service.CalculateForStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), req)
 	if err != nil {
 		return writeVATError(c, err)
 	}
@@ -33,6 +34,9 @@ func (h Handler) Calculate(c *fiber.Ctx) error {
 func writeVATError(c *fiber.Ctx, err error) error {
 	if errors.Is(err, ErrNoItemsProvided) {
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	}
+	if errors.Is(err, ErrForbiddenStoreAccess) {
+		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	}
 	return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 }
