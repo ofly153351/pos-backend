@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -15,6 +16,8 @@ type Repository interface {
 	ListByStore(ctx context.Context, storeID string) ([]Invoice, error)
 	GetByID(ctx context.Context, storeID, invoiceID string) (Invoice, error)
 	AddPayment(ctx context.Context, storeID, invoiceID string, payment InvoicePayment) (Invoice, error)
+	MarkUnpaid(ctx context.Context, storeID, invoiceID, actorUserID, reason string, atTime time.Time) (Invoice, error)
+	GetPaymentProof(ctx context.Context, storeID, invoiceID, paymentID string) (InvoicePayment, error)
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -253,16 +256,20 @@ func (r PostgresRepository) AddPayment(ctx context.Context, storeID, invoiceID s
 	}
 
 	paymentPayload := map[string]any{
-		"id":              payment.ID,
-		"invoice_id":      inv.ID,
-		"paid_amount":     payment.PaidAmount,
-		"payment_method":  payment.PaymentMethod,
-		"note":            payment.Note,
-		"proof_url":       nil,
-		"proof_mime_type": nil,
-		"proof_file_name": nil,
-		"paid_at":         payment.PaidAt,
-		"created_at":      payment.CreatedAt,
+		"id":                payment.ID,
+		"invoice_id":        inv.ID,
+		"paid_amount":       payment.PaidAmount,
+		"payment_method":    payment.PaymentMethod,
+		"note":              payment.Note,
+		"proof_url":         nil,
+		"proof_mime_type":   nil,
+		"proof_file_name":   nil,
+		"is_voided":         false,
+		"voided_at":         nil,
+		"voided_by_user_id": nil,
+		"void_reason":       nil,
+		"paid_at":           payment.PaidAt,
+		"created_at":        payment.CreatedAt,
 	}
 	if strings.TrimSpace(payment.ProofURL) != "" {
 		paymentPayload["proof_url"] = payment.ProofURL
@@ -281,6 +288,82 @@ func (r PostgresRepository) AddPayment(ctx context.Context, storeID, invoiceID s
 		return Invoice{}, err
 	}
 	return r.GetByID(ctx, storeID, invoiceID)
+}
+
+func (r PostgresRepository) MarkUnpaid(ctx context.Context, storeID, invoiceID, actorUserID, reason string, atTime time.Time) (Invoice, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return Invoice{}, tx.Error
+	}
+	defer tx.Rollback()
+
+	type lockedInvoice struct {
+		ID              string  `gorm:"column:id"`
+		StoreID         string  `gorm:"column:store_id"`
+		Status          string  `gorm:"column:status"`
+		TotalAmount     float64 `gorm:"column:total_amount"`
+		PaidAmount      float64 `gorm:"column:paid_amount"`
+		RemainingAmount float64 `gorm:"column:remaining_amount"`
+	}
+	var inv lockedInvoice
+	err := tx.Table("invoices").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("store_id = ? AND id = ?", storeID, invoiceID).
+		Take(&inv).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Invoice{}, ErrInvoiceNotFound
+		}
+		return Invoice{}, err
+	}
+	if inv.Status == StatusUnpaid && inv.PaidAmount == 0 {
+		return Invoice{}, ErrInvoiceAlreadyUnpaid
+	}
+
+	if err := tx.Table("invoice_payments").
+		Where("invoice_id = ? AND is_voided = FALSE", inv.ID).
+		Updates(map[string]any{
+			"is_voided":         true,
+			"voided_at":         atTime,
+			"voided_by_user_id": actorUserID,
+			"void_reason":       reason,
+		}).Error; err != nil {
+		return Invoice{}, err
+	}
+
+	if err := tx.Table("invoices").
+		Where("id = ?", inv.ID).
+		Updates(map[string]any{
+			"status":           StatusUnpaid,
+			"paid_amount":      0,
+			"remaining_amount": inv.TotalAmount,
+			"payment_method":   nil,
+			"updated_at":       atTime,
+		}).Error; err != nil {
+		return Invoice{}, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return Invoice{}, err
+	}
+	return r.GetByID(ctx, storeID, invoiceID)
+}
+
+func (r PostgresRepository) GetPaymentProof(ctx context.Context, storeID, invoiceID, paymentID string) (InvoicePayment, error) {
+	var payment InvoicePayment
+	err := r.db.WithContext(ctx).
+		Table("invoice_payments ip").
+		Select("ip.id, ip.invoice_id, ip.paid_amount, ip.payment_method, ip.note, ip.proof_url, ip.proof_mime_type, ip.proof_file_name, ip.is_voided, ip.voided_at, ip.voided_by_user_id, ip.void_reason, ip.paid_at, ip.created_at").
+		Joins("JOIN invoices i ON i.id = ip.invoice_id").
+		Where("i.store_id = ? AND i.id = ? AND ip.id = ?", storeID, invoiceID, paymentID).
+		Take(&payment).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return InvoicePayment{}, ErrInvoiceNotFound
+		}
+		return InvoicePayment{}, err
+	}
+	return payment, nil
 }
 
 func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {

@@ -57,16 +57,20 @@ type InvoiceItem struct {
 }
 
 type InvoicePayment struct {
-	ID            string    `json:"id" gorm:"column:id;primaryKey"`
-	InvoiceID     string    `json:"invoice_id" gorm:"column:invoice_id"`
-	PaidAmount    float64   `json:"paid_amount" gorm:"column:paid_amount"`
-	PaymentMethod string    `json:"payment_method" gorm:"column:payment_method"`
-	Note          string    `json:"note,omitempty" gorm:"column:note"`
-	ProofURL      string    `json:"proof_url,omitempty" gorm:"column:proof_url"`
-	ProofMimeType string    `json:"proof_mime_type,omitempty" gorm:"column:proof_mime_type"`
-	ProofFileName string    `json:"proof_file_name,omitempty" gorm:"column:proof_file_name"`
-	PaidAt        time.Time `json:"paid_at" gorm:"column:paid_at"`
-	CreatedAt     time.Time `json:"created_at" gorm:"column:created_at"`
+	ID             string     `json:"id" gorm:"column:id;primaryKey"`
+	InvoiceID      string     `json:"invoice_id" gorm:"column:invoice_id"`
+	PaidAmount     float64    `json:"paid_amount" gorm:"column:paid_amount"`
+	PaymentMethod  string     `json:"payment_method" gorm:"column:payment_method"`
+	Note           string     `json:"note,omitempty" gorm:"column:note"`
+	ProofURL       string     `json:"proof_url,omitempty" gorm:"column:proof_url"`
+	ProofMimeType  string     `json:"proof_mime_type,omitempty" gorm:"column:proof_mime_type"`
+	ProofFileName  string     `json:"proof_file_name,omitempty" gorm:"column:proof_file_name"`
+	IsVoided       bool       `json:"is_voided" gorm:"column:is_voided"`
+	VoidedAt       *time.Time `json:"voided_at,omitempty" gorm:"column:voided_at"`
+	VoidedByUserID string     `json:"voided_by_user_id,omitempty" gorm:"column:voided_by_user_id"`
+	VoidReason     string     `json:"void_reason,omitempty" gorm:"column:void_reason"`
+	PaidAt         time.Time  `json:"paid_at" gorm:"column:paid_at"`
+	CreatedAt      time.Time  `json:"created_at" gorm:"column:created_at"`
 }
 
 func (Invoice) TableName() string        { return "invoices" }
@@ -92,6 +96,10 @@ type CreateInvoicePaymentRequest struct {
 	PaymentMethod string                `json:"payment_method"`
 	Note          string                `json:"note"`
 	ProofFile     *multipart.FileHeader `json:"-"`
+}
+
+type MarkInvoiceUnpaidRequest struct {
+	Reason string `json:"reason"`
 }
 
 type productSnapshot struct {

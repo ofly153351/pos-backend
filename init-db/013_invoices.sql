@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
     proof_url TEXT,
     proof_mime_type TEXT,
     proof_file_name TEXT,
+    is_voided BOOLEAN NOT NULL DEFAULT FALSE,
+    voided_at TIMESTAMPTZ,
+    voided_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    void_reason TEXT,
     paid_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

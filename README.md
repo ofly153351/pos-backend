@@ -64,6 +64,8 @@ POST /api/v1/stores/:storeID/invoices
 GET  /api/v1/stores/:storeID/invoices
 GET  /api/v1/stores/:storeID/invoices/:invoiceID
 POST /api/v1/stores/:storeID/invoices/:invoiceID/payments
+GET  /api/v1/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof
+POST /api/v1/stores/:storeID/invoices/:invoiceID/unpay
 GET  /api/v1/stores/:storeID/invoices/:invoiceID/pdf
 
 # Subscription

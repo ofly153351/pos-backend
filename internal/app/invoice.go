@@ -30,5 +30,7 @@ func registerInvoiceRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Get("/stores/:storeID/invoices", handler.ListByStore)
 	protected.Get("/stores/:storeID/invoices/:invoiceID", handler.GetByID)
 	protected.Post("/stores/:storeID/invoices/:invoiceID/payments", handler.AddPayment)
+	protected.Get("/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof", handler.ViewPaymentProof)
+	protected.Post("/stores/:storeID/invoices/:invoiceID/unpay", handler.MarkUnpaid)
 	protected.Get("/stores/:storeID/invoices/:invoiceID/pdf", handler.ExportPDF)
 }

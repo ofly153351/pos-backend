@@ -144,6 +144,42 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, inv
 	return s.repo.AddPayment(ctx, storeID, invoiceID, payment)
 }
 
+func (s Service) MarkUnpaid(ctx context.Context, actor auth.Claims, storeID, invoiceID string, req MarkInvoiceUnpaidRequest) (Invoice, error) {
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return Invoice{}, ErrInvalidUnpayReason
+	}
+
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Invoice{}, err
+	}
+	if !allowed {
+		return Invoice{}, ErrForbiddenStoreAccess
+	}
+
+	return s.repo.MarkUnpaid(ctx, storeID, invoiceID, actor.UserID, reason, time.Now().UTC())
+}
+
+func (s Service) GetPaymentProof(ctx context.Context, actor auth.Claims, storeID, invoiceID, paymentID string) (InvoicePayment, error) {
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return InvoicePayment{}, err
+	}
+	if !allowed {
+		return InvoicePayment{}, ErrForbiddenStoreAccess
+	}
+
+	payment, err := s.repo.GetPaymentProof(ctx, storeID, invoiceID, paymentID)
+	if err != nil {
+		return InvoicePayment{}, err
+	}
+	if strings.TrimSpace(payment.ProofURL) == "" {
+		return InvoicePayment{}, ErrPaymentProofNotFound
+	}
+	return payment, nil
+}
+
 func (s Service) GeneratePDF(ctx context.Context, actor auth.Claims, storeID, invoiceID string) ([]byte, error) {
 	inv, err := s.GetByID(ctx, actor, storeID, invoiceID)
 	if err != nil {

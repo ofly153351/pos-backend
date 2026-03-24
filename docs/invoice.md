@@ -88,6 +88,41 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/
 Status transition:
 - `unpaid` -> `partially_paid` -> `paid`
 
+## GET /api/v1/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof
+
+เปิดดูหลักฐานการชำระเงินของ payment รายการนั้น (redirect ไปไฟล์ใน MinIO)
+
+```bash
+curl -L http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/payments/{paymentID}/proof \
+  -H "Authorization: Bearer <token>"
+```
+
+หมายเหตุ:
+- `paymentID` เอาจาก `payments[].id` ใน `GET /invoices/:invoiceID`
+- ถ้า payment นั้นไม่มีหลักฐาน จะได้ `404 payment proof not found`
+
+## POST /api/v1/stores/:storeID/invoices/:invoiceID/unpay
+
+ใช้เมื่อชำระผิดพลาดจาก user error แล้วต้องการย้อนสถานะกลับเป็น `unpaid`
+
+```json
+{
+  "reason": "บันทึกชำระผิดใบแจ้งหนี้"
+}
+```
+
+Behavior:
+- ต้องส่ง `reason` ทุกครั้ง (เก็บ audit)
+- ระบบจะ mark payment ที่เคยบันทึกไว้ทั้งหมดเป็น `is_voided=true` (ไม่ลบทิ้ง)
+- รีเซ็ต invoice เป็น:
+  - `status = unpaid`
+  - `paid_amount = 0`
+  - `remaining_amount = total_amount`
+  - `payment_method = null`
+
+หมายเหตุ:
+- ใน `payments[]` จะเห็นข้อมูล audit เพิ่ม เช่น `is_voided`, `voided_at`, `voided_by_user_id`, `void_reason`
+
 ## GET /api/v1/stores/:storeID/invoices/:invoiceID/pdf
 
 สร้างเอกสาร PDF ของ invoice แล้วส่งกลับเป็น `application/pdf`

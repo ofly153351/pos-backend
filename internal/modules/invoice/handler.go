@@ -60,6 +60,32 @@ func (h Handler) AddPayment(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "invoice payment recorded", result)
 }
 
+func (h Handler) MarkUnpaid(c *fiber.Ctx) error {
+	var req MarkInvoiceUnpaidRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.MarkUnpaid(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("invoiceID"), req)
+	if err != nil {
+		return writeInvoiceError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "invoice marked unpaid", result)
+}
+
+func (h Handler) ViewPaymentProof(c *fiber.Ctx) error {
+	payment, err := h.service.GetPaymentProof(
+		c.UserContext(),
+		middleware.ClaimsFromContext(c),
+		c.Params("storeID"),
+		c.Params("invoiceID"),
+		c.Params("paymentID"),
+	)
+	if err != nil {
+		return writeInvoiceError(c, err)
+	}
+	return c.Redirect(payment.ProofURL, fiber.StatusFound)
+}
+
 func (h Handler) ExportPDF(c *fiber.Ctx) error {
 	content, err := h.service.GeneratePDF(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("invoiceID"))
 	if err != nil {
@@ -72,11 +98,11 @@ func (h Handler) ExportPDF(c *fiber.Ctx) error {
 
 func writeInvoiceError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidInvoiceItems), errors.Is(err, ErrInvalidInvoiceItem), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidProofFileType), errors.Is(err, ErrInvalidProofFileSize), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceeds), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvoiceAlreadyPaid), errors.Is(err, ErrPaymentExceedsRemaining):
+	case errors.Is(err, ErrInvalidInvoiceItems), errors.Is(err, ErrInvalidInvoiceItem), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidProofFileType), errors.Is(err, ErrInvalidProofFileSize), errors.Is(err, ErrInvalidUnpayReason), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceeds), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvoiceAlreadyPaid), errors.Is(err, ErrInvoiceAlreadyUnpaid), errors.Is(err, ErrPaymentExceedsRemaining):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	case errors.Is(err, ErrInvoiceNotFound), errors.Is(err, ErrCustomerNotFound):
+	case errors.Is(err, ErrInvoiceNotFound), errors.Is(err, ErrCustomerNotFound), errors.Is(err, ErrPaymentProofNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
