@@ -17,6 +17,7 @@ type appDependencies struct {
 	productUnitHandler  any
 	productHandler      any
 	customerHandler     any
+	vatHandler          any
 	saleHandler         any
 	invoiceHandler      any
 	subscriptionHandler any
@@ -45,6 +46,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerProductUnitRoutes(protected, deps)
 	registerProductRoutes(protected, deps)
 	registerCustomerRoutes(protected, deps)
+	registerVATRoutes(protected, deps)
 	registerSaleRoutes(protected, deps)
 	registerInvoiceRoutes(protected, deps)
 	registerSubscriptionRoutes(protected, deps)

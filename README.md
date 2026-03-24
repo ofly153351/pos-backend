@@ -54,6 +54,10 @@ DELETE /api/v1/stores/:storeID/customer-level-discounts/:level
 POST /api/v1/stores/:storeID/sales
 GET  /api/v1/stores/:storeID/sales
 GET  /api/v1/stores/:storeID/sales/:saleID
+GET  /api/v1/stores/:storeID/sales/:saleID/receipt
+GET  /api/v1/stores/:storeID/sales/:saleID/receipt/preview
+# VAT
+POST /api/v1/stores/:storeID/vat/calculate
 
 # Outstanding Invoices
 POST /api/v1/stores/:storeID/invoices

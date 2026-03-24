@@ -107,6 +107,64 @@ Response shape หลัก:
 - `line_discount_total`
 - `line_total`
 
+## GET /api/v1/stores/:storeID/sales/:saleID/receipt
+
+สร้างใบเสร็จแบบ HTML สำหรับพิมพ์ (thermal style) ตาม template:
+- `store` (name/address/tax_id/vat_included)
+- `order` (order_no/staff/datetime)
+- `customer`
+- `items`
+- `summary` (`subtotal`, `discount_bill`, `vat_amount`, `grand_total`)
+- `payment`
+- `footer`
+
+Response:
+- `200 OK`
+- `Content-Type: text/html; charset=utf-8`
+
+ตัวอย่าง:
+
+```bash
+curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt \
+  -H "Authorization: Bearer <token>"
+```
+
+## GET /api/v1/stores/:storeID/sales/:saleID/receipt/preview
+
+คืนหน้า HTML preview พร้อมปุ่ม `Print` ในตัว (เหมาะกับ browser flow)
+
+Response:
+- `200 OK`
+- `Content-Type: text/html; charset=utf-8`
+
+```bash
+curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt/preview \
+  -H "Authorization: Bearer <token>"
+```
+
+แนวทาง frontend ที่ไม่เจอ `about:blank`:
+- เรียก endpoint ด้วย `fetch` และแนบ `Authorization` header
+- เอา HTML response ไป `document.write()` ลงหน้าต่างใหม่ แล้วค่อยกด `Print`
+
+ตัวอย่าง:
+
+```javascript
+const res = await fetch(`/api/v1/stores/${storeID}/sales/${saleID}/receipt/preview`, {
+  headers: { Authorization: `Bearer ${token}` }
+});
+const html = await res.text();
+const popup = window.open("", "_blank");
+if (popup) {
+  popup.document.open();
+  popup.document.write(html);
+  popup.document.close();
+}
+```
+
+หมายเหตุ VAT:
+- ใบเสร็จนี้คำนวณ `VAT 7%` แบบ `Vat Included` จากยอด `grand_total`
+- สูตร VAT included: `vat_amount = grand_total * 7 / 107`
+
 ## Notes
 
 - หน้าขายควรใช้ `GET /api/v1/stores/:storeID/products` เพื่อดึงสินค้าที่เหลือก่อนเริ่มขาย

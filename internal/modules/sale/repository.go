@@ -167,8 +167,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var sales []Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("s.id, s.store_id, st.name AS store_name, s.sale_number, s.cashier_user_id, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
 		Joins("JOIN stores st ON st.id = s.store_id").
+		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
 		Where("s.store_id = ?", storeID).
 		Order("s.sold_at DESC, s.created_at DESC").
@@ -180,8 +181,9 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string)
 	var sale Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("s.id, s.store_id, st.name AS store_name, s.sale_number, s.cashier_user_id, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
 		Joins("JOIN stores st ON st.id = s.store_id").
+		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
 		Where("s.store_id = ? AND s.id = ?", storeID, saleID).
 		Take(&sale).Error

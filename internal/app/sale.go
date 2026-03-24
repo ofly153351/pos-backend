@@ -20,4 +20,6 @@ func registerSaleRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/sales", handler.Create)
 	protected.Get("/stores/:storeID/sales", handler.ListByStore)
 	protected.Get("/stores/:storeID/sales/:saleID", handler.GetByID)
+	protected.Get("/stores/:storeID/sales/:saleID/receipt", handler.Receipt)
+	protected.Get("/stores/:storeID/sales/:saleID/receipt/preview", handler.ReceiptPreview)
 }

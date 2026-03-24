@@ -47,6 +47,26 @@ func (h Handler) GetByID(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "sale fetched", result)
 }
 
+func (h Handler) Receipt(c *fiber.Ctx) error {
+	content, err := h.service.GenerateReceiptHTML(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"))
+	if err != nil {
+		return writeSaleError(c, err)
+	}
+
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	return c.Status(fiber.StatusOK).Send(content)
+}
+
+func (h Handler) ReceiptPreview(c *fiber.Ctx) error {
+	content, err := h.service.GenerateReceiptPreviewHTML(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"))
+	if err != nil {
+		return writeSaleError(c, err)
+	}
+
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	return c.Status(fiber.StatusOK).Send(content)
+}
+
 func writeSaleError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceedsPrice), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
