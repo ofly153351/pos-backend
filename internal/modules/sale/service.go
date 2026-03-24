@@ -36,19 +36,20 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 
 	now := time.Now().UTC()
 	sale := Sale{
-		ID:            newID(),
-		StoreID:       storeID,
-		SaleNumber:    newSaleNumber(now),
-		CashierUserID: actor.UserID,
-		Status:        saleStatusCompleted,
-		PaymentMethod: strings.TrimSpace(req.PaymentMethod),
-		PaidAmount:    req.PaidAmount,
-		Note:          strings.TrimSpace(req.Note),
-		CustomerID:    strings.TrimSpace(req.CustomerID),
-		VATIncluded:   true,
-		VATPercent:    7,
-		SoldAt:        now,
-		CreatedAt:     now,
+		ID:                 newID(),
+		StoreID:            storeID,
+		SaleNumber:         newSaleNumber(now),
+		CashierUserID:      actor.UserID,
+		Status:             saleStatusCompleted,
+		PaymentMethod:      strings.TrimSpace(req.PaymentMethod),
+		PaidAmount:         req.PaidAmount,
+		BillDiscountAmount: roundMoney(req.DiscountBill),
+		Note:               strings.TrimSpace(req.Note),
+		CustomerID:         strings.TrimSpace(req.CustomerID),
+		VATIncluded:        true,
+		VATPercent:         7,
+		SoldAt:             now,
+		CreatedAt:          now,
 	}
 	if req.VATIncluded != nil {
 		sale.VATIncluded = *req.VATIncluded
@@ -110,6 +111,9 @@ func validateCreateRequest(req CreateSaleRequest) error {
 	}
 	if req.PaidAmount < 0 {
 		return ErrInvalidPaidAmount
+	}
+	if req.DiscountBill < 0 {
+		return ErrInvalidBillDiscount
 	}
 	if len(req.Items) == 0 {
 		return ErrInvalidSaleItems

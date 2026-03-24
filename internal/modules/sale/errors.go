@@ -7,6 +7,8 @@ var (
 	ErrInvalidSaleItem            = errors.New("each sale item must include product_id and quantity greater than zero")
 	ErrInvalidPaymentMethod       = errors.New("payment method is required")
 	ErrInvalidPaidAmount          = errors.New("paid amount is less than total amount")
+	ErrInvalidBillDiscount        = errors.New("bill discount must be greater than or equal to zero")
+	ErrBillDiscountExceedsAmount  = errors.New("bill discount cannot exceed payable amount")
 	ErrInvalidDiscountType        = errors.New("discount_type must be amount or percent")
 	ErrDiscountValueRequired      = errors.New("discount_value is required when discount_type is provided")
 	ErrInvalidDiscountValue       = errors.New("discount_value must be greater than or equal to zero")

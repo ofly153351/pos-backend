@@ -9,6 +9,7 @@ var (
 	ErrInvalidPaymentMethod    = errors.New("payment method is required")
 	ErrInvalidProofFileType    = errors.New("proof file must be image/jpeg, image/png, image/webp, or application/pdf")
 	ErrInvalidProofFileSize    = errors.New("proof file size must be between 1 byte and 10MB")
+	ErrInvalidVATPercent       = errors.New("vat_percent must be between 0 and 100")
 	ErrInvalidDiscountType     = errors.New("discount_type must be amount or percent")
 	ErrDiscountValueRequired   = errors.New("discount_value is required when discount_type is provided")
 	ErrInvalidDiscountValue    = errors.New("discount_value must be greater than or equal to zero")

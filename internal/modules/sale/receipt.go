@@ -244,9 +244,13 @@ func buildReceiptPayload(s Sale) map[string]any {
 		afterDiscount = 0
 	}
 	subtotal := roundMoney(s.SubtotalAmount)
-	discountBill := roundMoney(s.DiscountAmount)
+	discountBill := roundMoney(s.BillDiscountAmount)
 	if discountBill < 0 {
 		discountBill = 0
+	}
+	discountItem := roundMoney(s.DiscountAmount - discountBill)
+	if discountItem < 0 {
+		discountItem = 0
 	}
 
 	items := make([]map[string]any, 0, len(s.Items))
@@ -302,7 +306,7 @@ func buildReceiptPayload(s Sale) map[string]any {
 		"items": items,
 		"summary": map[string]any{
 			"subtotal":       subtotal,
-			"discount_item":  0.0,
+			"discount_item":  discountItem,
 			"discount_bill":  discountBill,
 			"after_discount": afterDiscount,
 			"vat_percent":    roundMoney(vatPercent),

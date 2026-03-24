@@ -68,10 +68,18 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		Status:                 StatusUnpaid,
 		Note:                   strings.TrimSpace(req.Note),
 		DueAt:                  req.DueAt,
+		VATIncluded:            true,
+		VATPercent:             7,
 		CustomerLevel:          &level,
 		NetworkDiscountPercent: networkDiscountPercent,
 		CreatedAt:              now,
 		UpdatedAt:              now,
+	}
+	if req.VATIncluded != nil {
+		invoice.VATIncluded = *req.VATIncluded
+	}
+	if req.VATPercent != nil {
+		invoice.VATPercent = *req.VATPercent
 	}
 
 	for _, item := range req.Items {
@@ -195,6 +203,9 @@ func validateCreateRequest(req CreateInvoiceRequest) error {
 	if len(req.Items) == 0 {
 		return ErrInvalidInvoiceItems
 	}
+	if req.VATPercent != nil && (*req.VATPercent < 0 || *req.VATPercent > 100) {
+		return ErrInvalidVATPercent
+	}
 	for _, item := range req.Items {
 		if strings.TrimSpace(item.ProductID) == "" || item.Quantity <= 0 {
 			return ErrInvalidInvoiceItem
@@ -274,6 +285,16 @@ func renderInvoicePDF(inv Invoice) ([]byte, error) {
 	pdf.SetX(x)
 	pdf.CellFormat(40, 7, "Discount", "1", 0, "L", false, 0, "")
 	pdf.CellFormat(50, 7, fmt.Sprintf("%.2f", inv.DiscountAmount), "1", 1, "R", false, 0, "")
+	pdf.SetX(x)
+	pdf.CellFormat(40, 7, fmt.Sprintf("VAT %.2f%%", inv.VATPercent), "1", 0, "L", false, 0, "")
+	pdf.CellFormat(50, 7, fmt.Sprintf("%.2f", inv.VATAmount), "1", 1, "R", false, 0, "")
+	pdf.SetX(x)
+	vatMode := "Included"
+	if !inv.VATIncluded {
+		vatMode = "Excluded"
+	}
+	pdf.CellFormat(40, 7, "VAT Mode", "1", 0, "L", false, 0, "")
+	pdf.CellFormat(50, 7, vatMode, "1", 1, "R", false, 0, "")
 	pdf.SetX(x)
 	pdf.CellFormat(40, 7, "Total", "1", 0, "L", false, 0, "")
 	pdf.CellFormat(50, 7, fmt.Sprintf("%.2f", inv.TotalAmount), "1", 1, "R", false, 0, "")

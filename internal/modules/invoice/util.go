@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -82,4 +83,8 @@ func calculateNetworkDiscount(percent, unitPrice, manualDiscount float64) float6
 		return 0
 	}
 	return base * (percent / 100)
+}
+
+func roundMoney(v float64) float64 {
+	return math.Round(v*100) / 100
 }

@@ -69,7 +69,7 @@ func (h Handler) ReceiptPreview(c *fiber.Ctx) error {
 
 func writeSaleError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrInvalidVATPercent), errors.Is(err, ErrAmountDiscountExceedsPrice), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
+	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidBillDiscount), errors.Is(err, ErrBillDiscountExceedsAmount), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrInvalidVATPercent), errors.Is(err, ErrAmountDiscountExceedsPrice), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)

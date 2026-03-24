@@ -16,6 +16,8 @@ API สำหรับออกบิลค้างชำระให้ลู�
   "customer_id": "7e9d5ccccf930438e6ba0d0f",
   "due_at": "2026-04-30T00:00:00Z",
   "note": "เครดิต 30 วัน",
+  "vat_included": false,
+  "vat_percent": 7,
   "items": [
     {
       "product_id": "prod_001",
@@ -31,6 +33,10 @@ Behavior:
 - ต้องเป็นลูกค้าในเครือ (`customer_id`) เท่านั้น
 - คำนวณส่วนลดเครือข่ายอัตโนมัติตาม `customer_level_discounts`
 - ตัดสต็อกสินค้าใน transaction เดียวกับการสร้าง invoice
+- รองรับ VAT ด้วย `vat_included` และ `vat_percent` (default `true` และ `7`)
+- บันทึก `vat_amount` ลง invoice และใช้ยอดนี้ทั้งตอนชำระและตอนออก PDF
+- ถ้า `vat_included=true`: `total_amount` คือยอดที่มี VAT อยู่แล้ว
+- ถ้า `vat_included=false`: `total_amount` คือยอดหลังหักส่วนลด + VAT เพิ่ม
 
 ## GET /api/v1/stores/:storeID/invoices
 
@@ -128,6 +134,9 @@ Behavior:
 สร้างเอกสาร PDF ของ invoice แล้วส่งกลับเป็น `application/pdf`
 
 สามารถเปิดตรงใน browser หรือดาวน์โหลดได้ทันที
+
+หมายเหตุ VAT ใน PDF:
+- แสดง `VAT %`, `VAT amount`, และ `VAT mode (Included/Excluded)` จากค่าที่บันทึกจริงใน invoice
 
 ## Error ที่พบบ่อย
 

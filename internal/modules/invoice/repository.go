@@ -70,6 +70,9 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 		invoice.Items[index].LineSubtotal = unitPrice * float64(item.Quantity)
 		invoice.Items[index].LineDiscountTotal = discountAmountPerUnit * float64(item.Quantity)
 		invoice.Items[index].LineTotal = invoice.Items[index].LineSubtotal - invoice.Items[index].LineDiscountTotal
+		invoice.Items[index].LineSubtotal = roundMoney(invoice.Items[index].LineSubtotal)
+		invoice.Items[index].LineDiscountTotal = roundMoney(invoice.Items[index].LineDiscountTotal)
+		invoice.Items[index].LineTotal = roundMoney(invoice.Items[index].LineTotal)
 		invoice.Items[index].CreatedAt = invoice.CreatedAt
 		invoice.SubtotalAmount += invoice.Items[index].LineSubtotal
 		invoice.DiscountAmount += invoice.Items[index].LineDiscountTotal
@@ -85,6 +88,23 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 		}
 	}
 
+	invoice.SubtotalAmount = roundMoney(invoice.SubtotalAmount)
+	invoice.DiscountAmount = roundMoney(invoice.DiscountAmount)
+	afterDiscount := roundMoney(invoice.TotalAmount)
+	if invoice.VATPercent < 0 {
+		invoice.VATPercent = 0
+	}
+	if invoice.VATIncluded {
+		if invoice.VATPercent > 0 {
+			invoice.VATAmount = roundMoney(afterDiscount * invoice.VATPercent / (100 + invoice.VATPercent))
+		}
+		invoice.TotalAmount = afterDiscount
+	} else {
+		if invoice.VATPercent > 0 {
+			invoice.VATAmount = roundMoney(afterDiscount * invoice.VATPercent / 100)
+		}
+		invoice.TotalAmount = roundMoney(afterDiscount + invoice.VATAmount)
+	}
 	invoice.RemainingAmount = invoice.TotalAmount
 	invoice.PaidAmount = 0
 	invoice.Status = StatusUnpaid
@@ -104,6 +124,9 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 		"total_items":              invoice.TotalItems,
 		"subtotal_amount":          invoice.SubtotalAmount,
 		"discount_amount":          invoice.DiscountAmount,
+		"vat_included":             invoice.VATIncluded,
+		"vat_percent":              invoice.VATPercent,
+		"vat_amount":               invoice.VATAmount,
 		"total_amount":             invoice.TotalAmount,
 		"paid_amount":              invoice.PaidAmount,
 		"remaining_amount":         invoice.RemainingAmount,
@@ -162,7 +185,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var invoices []Invoice
 	err := r.db.WithContext(ctx).
 		Table("invoices i").
-		Select("i.id, i.store_id, st.name AS store_name, i.invoice_number, i.customer_id, COALESCE(c.full_name, '') AS customer_name, i.cashier_user_id, i.status, i.payment_method, i.note, i.due_at, i.customer_level, i.network_discount_percent, i.total_items, i.subtotal_amount, i.discount_amount, i.total_amount, i.paid_amount, i.remaining_amount, i.created_at, i.updated_at").
+		Select("i.id, i.store_id, st.name AS store_name, i.invoice_number, i.customer_id, COALESCE(c.full_name, '') AS customer_name, i.cashier_user_id, i.status, i.payment_method, i.note, i.due_at, i.customer_level, i.network_discount_percent, i.total_items, i.subtotal_amount, i.discount_amount, COALESCE(i.vat_included, TRUE) AS vat_included, COALESCE(i.vat_percent, 7) AS vat_percent, COALESCE(i.vat_amount, 0) AS vat_amount, i.total_amount, i.paid_amount, i.remaining_amount, i.created_at, i.updated_at").
 		Joins("JOIN stores st ON st.id = i.store_id").
 		Joins("LEFT JOIN customers c ON c.id = i.customer_id").
 		Where("i.store_id = ?", storeID).
@@ -175,7 +198,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, invoiceID stri
 	var invoice Invoice
 	err := r.db.WithContext(ctx).
 		Table("invoices i").
-		Select("i.id, i.store_id, st.name AS store_name, i.invoice_number, i.customer_id, COALESCE(c.full_name, '') AS customer_name, i.cashier_user_id, i.status, i.payment_method, i.note, i.due_at, i.customer_level, i.network_discount_percent, i.total_items, i.subtotal_amount, i.discount_amount, i.total_amount, i.paid_amount, i.remaining_amount, i.created_at, i.updated_at").
+		Select("i.id, i.store_id, st.name AS store_name, i.invoice_number, i.customer_id, COALESCE(c.full_name, '') AS customer_name, i.cashier_user_id, i.status, i.payment_method, i.note, i.due_at, i.customer_level, i.network_discount_percent, i.total_items, i.subtotal_amount, i.discount_amount, COALESCE(i.vat_included, TRUE) AS vat_included, COALESCE(i.vat_percent, 7) AS vat_percent, COALESCE(i.vat_amount, 0) AS vat_amount, i.total_amount, i.paid_amount, i.remaining_amount, i.created_at, i.updated_at").
 		Joins("JOIN stores st ON st.id = i.store_id").
 		Joins("LEFT JOIN customers c ON c.id = i.customer_id").
 		Where("i.store_id = ? AND i.id = ?", storeID, invoiceID).

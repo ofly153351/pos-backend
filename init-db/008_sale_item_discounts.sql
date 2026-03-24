@@ -19,6 +19,9 @@ ADD COLUMN IF NOT EXISTS subtotal_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
 ALTER TABLE sales
 ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
 
+ALTER TABLE sales
+ADD COLUMN IF NOT EXISTS bill_discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+
 UPDATE sales
 SET subtotal_amount = total_amount,
     discount_amount = 0

@@ -85,8 +85,17 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 	}
 
 	sale.SubtotalAmount = roundMoney(sale.SubtotalAmount)
-	sale.DiscountAmount = roundMoney(sale.DiscountAmount)
-	afterDiscount := roundMoney(sale.TotalAmount)
+	itemDiscountAmount := roundMoney(sale.DiscountAmount)
+	payableBeforeBillDiscount := roundMoney(sale.TotalAmount)
+	if sale.BillDiscountAmount < 0 {
+		return Sale{}, ErrInvalidBillDiscount
+	}
+	if sale.BillDiscountAmount > payableBeforeBillDiscount {
+		return Sale{}, ErrBillDiscountExceedsAmount
+	}
+	sale.BillDiscountAmount = roundMoney(sale.BillDiscountAmount)
+	sale.DiscountAmount = roundMoney(itemDiscountAmount + sale.BillDiscountAmount)
+	afterDiscount := roundMoney(payableBeforeBillDiscount - sale.BillDiscountAmount)
 	if sale.VATPercent < 0 {
 		sale.VATPercent = 0
 	}
@@ -118,6 +127,7 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		"total_items":              sale.TotalItems,
 		"subtotal_amount":          sale.SubtotalAmount,
 		"discount_amount":          sale.DiscountAmount,
+		"bill_discount_amount":     sale.BillDiscountAmount,
 		"vat_included":             sale.VATIncluded,
 		"vat_percent":              sale.VATPercent,
 		"vat_amount":               sale.VATAmount,
@@ -190,7 +200,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var sales []Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -204,7 +214,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string)
 	var sale Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
+		Select("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at").
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").

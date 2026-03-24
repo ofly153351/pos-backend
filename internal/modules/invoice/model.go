@@ -29,6 +29,9 @@ type Invoice struct {
 	TotalItems             int              `json:"total_items" gorm:"column:total_items"`
 	SubtotalAmount         float64          `json:"subtotal_amount" gorm:"column:subtotal_amount"`
 	DiscountAmount         float64          `json:"discount_amount" gorm:"column:discount_amount"`
+	VATIncluded            bool             `json:"vat_included" gorm:"column:vat_included"`
+	VATPercent             float64          `json:"vat_percent" gorm:"column:vat_percent"`
+	VATAmount              float64          `json:"vat_amount" gorm:"column:vat_amount"`
 	TotalAmount            float64          `json:"total_amount" gorm:"column:total_amount"`
 	PaidAmount             float64          `json:"paid_amount" gorm:"column:paid_amount"`
 	RemainingAmount        float64          `json:"remaining_amount" gorm:"column:remaining_amount"`
@@ -78,10 +81,12 @@ func (InvoiceItem) TableName() string    { return "invoice_items" }
 func (InvoicePayment) TableName() string { return "invoice_payments" }
 
 type CreateInvoiceRequest struct {
-	CustomerID string                     `json:"customer_id"`
-	DueAt      *time.Time                 `json:"due_at"`
-	Note       string                     `json:"note"`
-	Items      []CreateInvoiceItemRequest `json:"items"`
+	CustomerID  string                     `json:"customer_id"`
+	DueAt       *time.Time                 `json:"due_at"`
+	Note        string                     `json:"note"`
+	VATIncluded *bool                      `json:"vat_included,omitempty"`
+	VATPercent  *float64                   `json:"vat_percent,omitempty"`
+	Items       []CreateInvoiceItemRequest `json:"items"`
 }
 
 type CreateInvoiceItemRequest struct {

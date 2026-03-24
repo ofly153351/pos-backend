@@ -18,6 +18,7 @@ Base: `Authorization: Bearer <token>`
 {
   "payment_method": "cash",
   "paid_amount": 500,
+  "discount_bill": 20,
   "vat_included": false,
   "vat_percent": 7,
   "note": "walk-in customer",
@@ -45,6 +46,8 @@ Behavior:
 - ถ้าไม่ส่ง `discount_type` และ `discount_value` จะถือว่าไม่มีส่วนลด
 - `discount_value` ของ `amount` คือส่วนลดต่อหน่วย
 - `discount_value` ของ `percent` ต้องอยู่ในช่วง `0-100`
+- `discount_bill` คือส่วนลดท้ายบิล (บาท) หลังหักส่วนลดรายรายการแล้ว
+- `discount_bill` ห้ามน้อยกว่า `0` และห้ามมากกว่ายอดที่ต้องจ่ายก่อน VAT
 - ถ้าส่ง `customer_id` ระบบจะคำนวณส่วนลดเครือข่ายเพิ่มตาม level ของลูกค้า (LV1/LV2/...) โดยอิงจาก `customer_level_discounts`
 - ส่วนลดเครือข่ายคำนวณต่อหน่วยบนยอดหลังหักส่วนลด manual ของรายการนั้น
 - ถ้าสต็อกไม่พอจะไม่สร้างบิล
@@ -52,6 +55,7 @@ Behavior:
 - ถ้า `paid_amount < total_amount` จะ reject
 - รองรับ VAT ด้วย `vat_included` และ `vat_percent` (default `true` และ `7`)
 - บันทึก `subtotal_amount`, `discount_amount`, `vat_amount`, `total_amount`, `change_amount`
+- บันทึก `bill_discount_amount` แยกจาก `discount_amount` (ซึ่งเป็นส่วนลดรวม)
 - ถ้า `vat_included=true`: `total_amount` คือยอดรวมที่มี VAT อยู่แล้ว
 - ถ้า `vat_included=false`: `total_amount` คือยอดหลังหักส่วนลด + VAT เพิ่ม
 
@@ -69,7 +73,8 @@ Response shape หลัก:
     "network_discount_percent": 10,
     "paid_amount": 500,
     "subtotal_amount": 255,
-    "discount_amount": 35,
+    "discount_amount": 55,
+    "bill_discount_amount": 20,
     "vat_included": false,
     "vat_percent": 7,
     "vat_amount": 15.4,
@@ -173,8 +178,7 @@ if (popup) {
 ```
 
 หมายเหตุ VAT:
-- ใบเสร็จนี้คำนวณ `VAT 7%` แบบ `Vat Included` จากยอด `grand_total`
-- สูตร VAT included: `vat_amount = grand_total * 7 / 107`
+- ใบเสร็จอ่านค่า `vat_included`, `vat_percent`, `vat_amount` จากข้อมูล sale ที่บันทึกจริง
 
 ## Notes
 

@@ -22,6 +22,7 @@ type Sale struct {
 	TotalItems             int        `json:"total_items" gorm:"column:total_items"`
 	SubtotalAmount         float64    `json:"subtotal_amount" gorm:"column:subtotal_amount"`
 	DiscountAmount         float64    `json:"discount_amount" gorm:"column:discount_amount"`
+	BillDiscountAmount     float64    `json:"bill_discount_amount" gorm:"column:bill_discount_amount"`
 	VATIncluded            bool       `json:"vat_included" gorm:"column:vat_included"`
 	VATPercent             float64    `json:"vat_percent" gorm:"column:vat_percent"`
 	VATAmount              float64    `json:"vat_amount" gorm:"column:vat_amount"`
@@ -57,6 +58,7 @@ func (SaleItem) TableName() string { return "sale_items" }
 type CreateSaleRequest struct {
 	PaymentMethod string                  `json:"payment_method"`
 	PaidAmount    float64                 `json:"paid_amount"`
+	DiscountBill  float64                 `json:"discount_bill,omitempty"`
 	VATIncluded   *bool                   `json:"vat_included,omitempty"`
 	VATPercent    *float64                `json:"vat_percent,omitempty"`
 	Note          string                  `json:"note"`
