@@ -62,3 +62,18 @@ type UpdateProductRequest struct {
 	IsActive            *bool
 	ImageFile           *multipart.FileHeader
 }
+
+type ListProductsQuery struct {
+	Page  int
+	Limit int
+}
+
+type ProductListResult struct {
+	Items      []Product `json:"items"`
+	Page       int       `json:"page"`
+	Limit      int       `json:"limit"`
+	Total      int64     `json:"total"`
+	TotalPages int       `json:"total_pages"`
+	HasNext    bool      `json:"has_next"`
+	HasPrev    bool      `json:"has_prev"`
+}

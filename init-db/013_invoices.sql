@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS invoice_payments (
     paid_amount NUMERIC(12,2) NOT NULL CHECK (paid_amount > 0),
     payment_method TEXT NOT NULL,
     note TEXT,
+    proof_url TEXT,
+    proof_mime_type TEXT,
+    proof_file_name TEXT,
     paid_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -10,7 +10,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, product Product) (Product, error)
-	ListByStore(ctx context.Context, storeID string) ([]Product, error)
+	ListByStore(ctx context.Context, storeID string, page, limit int) ([]Product, int64, error)
 	GetByID(ctx context.Context, storeID, productID string) (Product, error)
 	Update(ctx context.Context, product Product) (Product, error)
 	Delete(ctx context.Context, storeID, productID string) error
@@ -85,7 +85,22 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	return product, nil
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Product, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int) ([]Product, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var total int64
+	if err := r.db.WithContext(ctx).
+		Table("products").
+		Where("store_id = ?", storeID).
+		Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("products AS p").
@@ -93,9 +108,11 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
 		Where("p.store_id = ?", storeID).
 		Order("p.created_at DESC").
+		Limit(limit).
+		Offset((page - 1) * limit).
 		Find(&rows).Error
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	now := time.Now().UTC()
@@ -105,7 +122,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 		item.EffectivePrice = resolveEffectivePrice(item, now)
 		products = append(products, item)
 	}
-	return products, nil
+	return products, total, nil
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID string) (Product, error) {

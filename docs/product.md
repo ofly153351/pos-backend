@@ -96,7 +96,44 @@ Success Response (`201 Created`)
 
 ## GET /api/v1/stores/:storeID/products
 
-ดึงรายการสินค้าทั้งหมดของร้าน
+ดึงรายการสินค้าแบบ pagination เพื่อลด response size
+
+Query params:
+- `page` optional, default `1`
+- `limit` optional, default `50`, max `200`
+
+ตัวอย่าง:
+
+```bash
+curl "http://localhost:8080/api/v1/stores/{storeID}/products?page=1&limit=50" \
+  -H "Authorization: Bearer <token>"
+```
+
+Success Response (`200 OK`)
+
+```json
+{
+  "success": true,
+  "message": "products fetched",
+  "data": {
+    "items": [
+      {
+        "id": "prod_001",
+        "name": "Coffee Mug",
+        "quantity": 24,
+        "base_price": 120,
+        "effective_price": 120
+      }
+    ],
+    "page": 1,
+    "limit": 50,
+    "total": 1000000,
+    "total_pages": 20000,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
 
 ## GET /api/v1/stores/:storeID/products/:productID
 
@@ -161,6 +198,7 @@ Success Response (`200 OK`)
 
 - ราคาที่ตอบกลับจะมี `effective_price` คำนวณจาก special price window
 - response ของสินค้าแต่ละรายการจะมี `quantity` เป็นจำนวนคงเหลือปัจจุบัน
+- list endpoint ใช้ pagination เสมอเพื่อลด payload (`page/limit`)
 - รูปสินค้าจะถูกอัปโหลดไปที่ MinIO path `products/<generated-filename>` และระบบจะคืนค่าในฟิลด์ `image_url`
 - ถ้าไม่ส่ง `image` ตอน `PATCH` ระบบจะคงรูปเดิมไว้
 - ถ้า `image_url` ว่างจะไม่ถูกส่งกลับใน JSON (เพราะ `omitempty`)

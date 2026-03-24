@@ -27,10 +27,14 @@ type CustomerBenefitResolver interface {
 type Service struct {
 	repo     Repository
 	resolver CustomerBenefitResolver
+	storage  PaymentProofStorage
 }
 
-func NewService(repo Repository, resolver CustomerBenefitResolver) Service {
-	return Service{repo: repo, resolver: resolver}
+func NewService(repo Repository, resolver CustomerBenefitResolver, storage PaymentProofStorage) Service {
+	if storage == nil {
+		storage = NoopPaymentProofStorage{}
+	}
+	return Service{repo: repo, resolver: resolver, storage: storage}
 }
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateInvoiceRequest) (Invoice, error) {
@@ -121,12 +125,19 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, inv
 	}
 
 	now := time.Now().UTC()
+	proofURL, proofMimeType, proofFileName, err := s.storage.SavePaymentProof(req.ProofFile)
+	if err != nil {
+		return Invoice{}, err
+	}
 	payment := InvoicePayment{
 		ID:            newID(),
 		InvoiceID:     invoiceID,
 		PaidAmount:    req.PaidAmount,
 		PaymentMethod: strings.TrimSpace(req.PaymentMethod),
 		Note:          strings.TrimSpace(req.Note),
+		ProofURL:      proofURL,
+		ProofMimeType: proofMimeType,
+		ProofFileName: proofFileName,
 		PaidAt:        now,
 		CreatedAt:     now,
 	}

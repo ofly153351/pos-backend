@@ -7,6 +7,8 @@ var (
 	ErrInvalidInvoiceItem      = errors.New("each invoice item must include product_id and quantity greater than zero")
 	ErrInvalidPaidAmount       = errors.New("paid amount must be greater than zero")
 	ErrInvalidPaymentMethod    = errors.New("payment method is required")
+	ErrInvalidProofFileType    = errors.New("proof file must be image/jpeg, image/png, image/webp, or application/pdf")
+	ErrInvalidProofFileSize    = errors.New("proof file size must be between 1 byte and 10MB")
 	ErrInvalidDiscountType     = errors.New("discount_type must be amount or percent")
 	ErrDiscountValueRequired   = errors.New("discount_value is required when discount_type is provided")
 	ErrInvalidDiscountValue    = errors.New("discount_value must be greater than or equal to zero")

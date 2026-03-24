@@ -34,7 +34,14 @@ func (h Handler) Create(c *fiber.Ctx) error {
 }
 
 func (h Handler) ListByStore(c *fiber.Ctx) error {
-	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"))
+	page, limit, err := parsePaginationQuery(c)
+	if err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, ErrInvalidPagination.Error(), err.Error())
+	}
+	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), ListProductsQuery{
+		Page:  page,
+		Limit: limit,
+	})
 	if err != nil {
 		return writeProductError(c, err)
 	}
@@ -70,7 +77,7 @@ func (h Handler) Delete(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidPagination):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -239,4 +246,34 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parsePaginationQuery(c *fiber.Ctx) (int, int, error) {
+	const defaultPage = 1
+	const defaultLimit = 50
+	const maxLimit = 200
+
+	page := defaultPage
+	limit := defaultLimit
+	var err error
+
+	if raw := strings.TrimSpace(c.Query("page")); raw != "" {
+		page, err = strconv.Atoi(raw)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if page < 1 || limit < 1 {
+		return 0, 0, ErrInvalidPagination
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	return page, limit, nil
 }

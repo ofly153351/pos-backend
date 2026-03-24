@@ -42,13 +42,46 @@ Behavior:
 
 ## POST /api/v1/stores/:storeID/invoices/:invoiceID/payments
 
-บันทึกการชำระบางส่วนหรือปิดบิล
+บันทึกการชำระบางส่วนหรือปิดบิล พร้อมแนบหลักฐานการชำระเงินได้
+
+รองรับ 2 รูปแบบ:
+- `application/json` (เดิม)
+- `multipart/form-data` (แนะนำเมื่อมีไฟล์หลักฐาน)
 
 ```json
 {
   "paid_amount": 500,
   "payment_method": "bank_transfer",
   "note": "โอนงวดแรก"
+}
+```
+
+ตัวอย่างแนบหลักฐาน (รูปหรือ PDF):
+
+```bash
+curl -X POST http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/payments \
+  -H "Authorization: Bearer <token>" \
+  -F "paid_amount=500" \
+  -F "payment_method=bank_transfer" \
+  -F "note=โอนงวดแรก" \
+  -F "proof=@/path/to/slip.pdf"
+```
+
+ข้อกำหนดไฟล์ `proof`:
+- รองรับ `image/jpeg`, `image/png`, `image/webp`, `application/pdf`
+- ขนาดไฟล์สูงสุด `10MB`
+- จัดเก็บใน MinIO และจะได้ URL ในข้อมูล payment (`proof_url`)
+
+ตัวอย่างฟิลด์ที่เพิ่มใน `payments[]`:
+
+```json
+{
+  "id": "pay_001",
+  "paid_amount": 500,
+  "payment_method": "bank_transfer",
+  "proof_url": "http://127.0.0.1:9000/pos-assets/invoice-payments/abc123.pdf",
+  "proof_mime_type": "application/pdf",
+  "proof_file_name": "slip.pdf"
 }
 ```
 

@@ -1,6 +1,9 @@
 package invoice
 
-import "time"
+import (
+	"mime/multipart"
+	"time"
+)
 
 const (
 	StatusUnpaid        = "unpaid"
@@ -59,6 +62,9 @@ type InvoicePayment struct {
 	PaidAmount    float64   `json:"paid_amount" gorm:"column:paid_amount"`
 	PaymentMethod string    `json:"payment_method" gorm:"column:payment_method"`
 	Note          string    `json:"note,omitempty" gorm:"column:note"`
+	ProofURL      string    `json:"proof_url,omitempty" gorm:"column:proof_url"`
+	ProofMimeType string    `json:"proof_mime_type,omitempty" gorm:"column:proof_mime_type"`
+	ProofFileName string    `json:"proof_file_name,omitempty" gorm:"column:proof_file_name"`
 	PaidAt        time.Time `json:"paid_at" gorm:"column:paid_at"`
 	CreatedAt     time.Time `json:"created_at" gorm:"column:created_at"`
 }
@@ -82,9 +88,10 @@ type CreateInvoiceItemRequest struct {
 }
 
 type CreateInvoicePaymentRequest struct {
-	PaidAmount    float64 `json:"paid_amount"`
-	PaymentMethod string  `json:"payment_method"`
-	Note          string  `json:"note"`
+	PaidAmount    float64               `json:"paid_amount"`
+	PaymentMethod string                `json:"payment_method"`
+	Note          string                `json:"note"`
+	ProofFile     *multipart.FileHeader `json:"-"`
 }
 
 type productSnapshot struct {

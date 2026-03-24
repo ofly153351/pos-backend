@@ -4,14 +4,23 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
+	"pos-backend/internal/config"
 	"pos-backend/internal/modules/customer"
 	"pos-backend/internal/modules/invoice"
 )
 
-func newInvoiceHandler(db *gorm.DB) invoice.Handler {
+func newInvoiceHandler(cfg config.Config, db *gorm.DB) invoice.Handler {
 	repo := invoice.NewPostgresRepository(db)
 	customerRepo := customer.NewPostgresRepository(db)
-	service := invoice.NewService(repo, customer.NewSaleBenefitResolver(customerRepo))
+	storage := invoice.NewMinIOPaymentProofStorage(
+		cfg.MinIOEndpoint,
+		cfg.MinIOAccessKey,
+		cfg.MinIOSecretKey,
+		cfg.MinIOBucketName,
+		cfg.MinIOUseSSL,
+		cfg.MinIOPublicURL,
+	)
+	service := invoice.NewService(repo, customer.NewSaleBenefitResolver(customerRepo), storage)
 	return invoice.NewHandler(service)
 }
 

@@ -252,15 +252,28 @@ func (r PostgresRepository) AddPayment(ctx context.Context, storeID, invoiceID s
 		return Invoice{}, err
 	}
 
-	if err := tx.Table("invoice_payments").Create(map[string]any{
-		"id":             payment.ID,
-		"invoice_id":     inv.ID,
-		"paid_amount":    payment.PaidAmount,
-		"payment_method": payment.PaymentMethod,
-		"note":           payment.Note,
-		"paid_at":        payment.PaidAt,
-		"created_at":     payment.CreatedAt,
-	}).Error; err != nil {
+	paymentPayload := map[string]any{
+		"id":              payment.ID,
+		"invoice_id":      inv.ID,
+		"paid_amount":     payment.PaidAmount,
+		"payment_method":  payment.PaymentMethod,
+		"note":            payment.Note,
+		"proof_url":       nil,
+		"proof_mime_type": nil,
+		"proof_file_name": nil,
+		"paid_at":         payment.PaidAt,
+		"created_at":      payment.CreatedAt,
+	}
+	if strings.TrimSpace(payment.ProofURL) != "" {
+		paymentPayload["proof_url"] = payment.ProofURL
+	}
+	if strings.TrimSpace(payment.ProofMimeType) != "" {
+		paymentPayload["proof_mime_type"] = payment.ProofMimeType
+	}
+	if strings.TrimSpace(payment.ProofFileName) != "" {
+		paymentPayload["proof_file_name"] = payment.ProofFileName
+	}
+	if err := tx.Table("invoice_payments").Create(paymentPayload).Error; err != nil {
 		return Invoice{}, err
 	}
 

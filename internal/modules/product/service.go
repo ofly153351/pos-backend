@@ -2,6 +2,7 @@ package product
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -71,15 +72,36 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	return s.repo.Create(ctx, product)
 }
 
-func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Product, error) {
+func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string, query ListProductsQuery) (ProductListResult, error) {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
-		return nil, err
+		return ProductListResult{}, err
 	}
 	if !allowed {
-		return nil, ErrForbiddenStoreAccess
+		return ProductListResult{}, ErrForbiddenStoreAccess
 	}
-	return s.repo.ListByStore(ctx, storeID)
+	if query.Page < 1 || query.Limit < 1 {
+		return ProductListResult{}, ErrInvalidPagination
+	}
+
+	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit)
+	if err != nil {
+		return ProductListResult{}, err
+	}
+	totalPages := int(math.Ceil(float64(total) / float64(query.Limit)))
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	return ProductListResult{
+		Items:      products,
+		Page:       query.Page,
+		Limit:      query.Limit,
+		Total:      total,
+		TotalPages: totalPages,
+		HasNext:    query.Page < totalPages,
+		HasPrev:    query.Page > 1,
+	}, nil
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, productID string) (Product, error) {
