@@ -59,6 +59,7 @@ func Load() Config {
 		MinIOEndpoint:    getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
 		MinIOAccessKey:   getEnv("MINIO_ROOT_USER", "minioadmin"),
 		MinIOSecretKey:   getEnv("MINIO_ROOT_PASSWORD", "minioadmin"),
+		MinIOAccessKey:   firstEnv("MINIO_ACCESS_KEY", "MINIO_ROOT_USER", "minioadmin"),
 		MinIOBucketName:  getEnv("MINIO_BUCKET_NAME", "pos-assets"),
 		MinIOUseSSL:      getEnvBool("MINIO_USE_SSL", false),
 		MinIOPublicURL:   getEnv("MINIO_PUBLIC_URL", "http://127.0.0.1:9000"),
