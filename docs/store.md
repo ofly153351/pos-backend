@@ -25,6 +25,50 @@ http://localhost:8080
 Authorization: Bearer <access_token>
 ```
 
+## GET /api/v1/me/stores
+
+ดึงรายการร้านของ user ปัจจุบัน
+
+หมายเหตุ: มี alias เป็น `GET /api/v1/stores` เช่นกัน เพื่อความเข้ากันได้กับ frontend บาง flow
+
+### Example
+
+```bash
+curl http://localhost:8080/api/v1/me/stores \
+  -H "Authorization: Bearer <token>"
+```
+
+### Success Response
+
+Status: `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "stores fetched",
+  "data": [
+    {
+      "id": "65b493e98058f410a890859f",
+      "owner_user_id": "65b4927f5d58d4a7ed8a4bf1",
+      "name": "Main Branch",
+      "logo_url": "http://localhost:9000/pos-assets/logos/xxx.png",
+      "phone": "021234567",
+      "address": "Bangkok",
+      "currency_code": "THB",
+      "subscription_plan_code": "growth",
+      "subscription_status": "active",
+      "subscription_period_end": "2026-04-22T10:00:00Z",
+      "created_at": "2026-03-23T10:00:00Z"
+    }
+  ]
+}
+```
+
+### Access Rules
+
+- `owner` และ `manager` จะเห็นเฉพาะร้านที่ตัวเองเป็นสมาชิก
+- `platform_admin` จะเห็นทุกร้าน
+
 ## POST /api/v1/stores
 
 สร้างร้านใหม่ (multipart/form-data)

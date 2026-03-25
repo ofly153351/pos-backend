@@ -18,7 +18,9 @@ POST /api/v1/auth/login
 POST /api/v1/auth/logout
 
 # Store
+GET  /api/v1/me/stores
 POST /api/v1/stores
+GET  /api/v1/stores
 GET  /api/v1/stores/:storeID
 PUT  /api/v1/stores/:storeID
 

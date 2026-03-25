@@ -12,6 +12,7 @@ import (
 type Repository interface {
 	CreateWithOwner(ctx context.Context, store Store, ownerUserID string, planCode string) (Store, error)
 	GetByID(ctx context.Context, storeID string) (Store, error)
+	ListByUser(ctx context.Context, userID, role string) ([]Store, error)
 	Update(ctx context.Context, storeID string, update Store) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
@@ -158,6 +159,82 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID string) (Store,
 	}
 
 	return storeModel, nil
+}
+
+func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string) ([]Store, error) {
+	type storeListRow struct {
+		ID                    string     `gorm:"column:id"`
+		OwnerUserID           string     `gorm:"column:owner_user_id"`
+		Name                  string     `gorm:"column:name"`
+		LogoURL               string     `gorm:"column:logo_url"`
+		Phone                 string     `gorm:"column:phone"`
+		Address               string     `gorm:"column:address"`
+		CurrencyCode          string     `gorm:"column:currency_code"`
+		SubscriptionPlanCode  string     `gorm:"column:subscription_plan_code"`
+		SubscriptionStatus    string     `gorm:"column:subscription_status"`
+		SubscriptionPeriodEnd *time.Time `gorm:"column:subscription_period_end"`
+		CreatedAt             time.Time  `gorm:"column:created_at"`
+	}
+
+	query := r.db.WithContext(ctx).
+		Table("stores s").
+		Select(`
+			s.id,
+			s.owner_user_id,
+			s.name,
+			COALESCE(s.logo_url, '') AS logo_url,
+			COALESCE(s.phone, '') AS phone,
+			COALESCE(s.address, '') AS address,
+			s.currency_code,
+			COALESCE(sub.plan_code, '') AS subscription_plan_code,
+			COALESCE(sub.status, '') AS subscription_status,
+			sub.current_period_end AS subscription_period_end,
+			s.created_at
+		`).
+		Joins(`
+			LEFT JOIN (
+				SELECT DISTINCT ON (ss.store_id)
+					ss.store_id,
+					sp.code AS plan_code,
+					ss.status,
+					ss.current_period_end
+				FROM store_subscriptions ss
+				JOIN subscription_plans sp ON sp.id = ss.plan_id
+				ORDER BY ss.store_id, ss.created_at DESC
+			) sub ON sub.store_id = s.id
+		`)
+
+	if role != "platform_admin" {
+		query = query.
+			Joins("JOIN store_members sm ON sm.store_id = s.id").
+			Where("sm.user_id = ?", userID)
+	}
+
+	var rows []storeListRow
+	if err := query.Order("s.created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	result := make([]Store, 0, len(rows))
+	for _, row := range rows {
+		item := Store{
+			ID:                   row.ID,
+			OwnerUserID:          row.OwnerUserID,
+			Name:                 row.Name,
+			LogoURL:              row.LogoURL,
+			Phone:                row.Phone,
+			Address:              row.Address,
+			CurrencyCode:         row.CurrencyCode,
+			SubscriptionPlanCode: row.SubscriptionPlanCode,
+			SubscriptionStatus:   row.SubscriptionStatus,
+			CreatedAt:            row.CreatedAt,
+		}
+		if row.SubscriptionPeriodEnd != nil {
+			item.SubscriptionPeriodEnd = *row.SubscriptionPeriodEnd
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func (r PostgresRepository) Update(ctx context.Context, storeID string, update Store) error {

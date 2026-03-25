@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -53,6 +54,14 @@ func (h Handler) GetByID(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "store fetched", result)
 }
 
+func (h Handler) ListMyStores(c *fiber.Ctx) error {
+	result, err := h.service.ListMyStores(c.UserContext(), middleware.ClaimsFromContext(c))
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "stores fetched", result)
+}
+
 func (h Handler) Update(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	if storeID == "" {
@@ -97,6 +106,16 @@ func writeStoreError(c *fiber.Ctx, err error) error {
 	case errors.Is(err, ErrSubscriptionPlanNotFound):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:
+		claims := middleware.ClaimsFromContext(c)
+		log.Printf(
+			"[store] internal error: method=%s path=%s store_id=%s user_id=%s role=%s err=%v",
+			c.Method(),
+			c.Path(),
+			c.Params("storeID"),
+			claims.UserID,
+			claims.Role,
+			err,
+		)
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
 }

@@ -57,9 +57,8 @@ func Load() Config {
 		MigrationsDir:    getEnv("APP_MIGRATIONS_DIR", "init-db"),
 		UploadDir:        getEnv("APP_UPLOAD_DIR", "storage"),
 		MinIOEndpoint:    getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
-		MinIOAccessKey:   getEnv("MINIO_ROOT_USER", "minioadmin"),
-		MinIOSecretKey:   getEnv("MINIO_ROOT_PASSWORD", "minioadmin"),
 		MinIOAccessKey:   firstEnv("MINIO_ACCESS_KEY", "MINIO_ROOT_USER", "minioadmin"),
+		MinIOSecretKey:   firstEnv("MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD", "change-me"),
 		MinIOBucketName:  getEnv("MINIO_BUCKET_NAME", "pos-assets"),
 		MinIOUseSSL:      getEnvBool("MINIO_USE_SSL", false),
 		MinIOPublicURL:   getEnv("MINIO_PUBLIC_URL", "http://127.0.0.1:9000"),
@@ -91,6 +90,16 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 
+	return fallback
+}
+
+func firstEnv(primary, secondary, fallback string) string {
+	if value := os.Getenv(primary); value != "" {
+		return value
+	}
+	if value := os.Getenv(secondary); value != "" {
+		return value
+	}
 	return fallback
 }
 

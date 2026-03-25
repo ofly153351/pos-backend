@@ -64,6 +64,10 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID string)
 	return s.repo.GetByID(ctx, storeID)
 }
 
+func (s Service) ListMyStores(ctx context.Context, actor auth.Claims) ([]Store, error) {
+	return s.repo.ListByUser(ctx, actor.UserID, actor.Role)
+}
+
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateStoreRequest) (Store, error) {
 	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {

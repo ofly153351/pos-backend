@@ -24,7 +24,9 @@ func newStoreHandler(cfg config.Config, db *gorm.DB) store.Handler {
 
 func registerStoreRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.storeHandler.(store.Handler)
+	protected.Get("/me/stores", handler.ListMyStores)
 	protected.Post("/stores", handler.Create)
+	protected.Get("/stores", handler.ListMyStores)
 	protected.Get("/stores/:storeID", handler.GetByID)
 	protected.Put("/stores/:storeID", handler.Update)
 }
