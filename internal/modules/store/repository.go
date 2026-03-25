@@ -12,6 +12,7 @@ import (
 type Repository interface {
 	CreateWithOwner(ctx context.Context, store Store, ownerUserID string, planCode string) (Store, error)
 	GetByID(ctx context.Context, storeID string) (Store, error)
+	Update(ctx context.Context, storeID string, update Store) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -159,6 +160,33 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID string) (Store,
 	return storeModel, nil
 }
 
+func (r PostgresRepository) Update(ctx context.Context, storeID string, update Store) error {
+	payload := map[string]any{
+		"name":          update.Name,
+		"phone":         nilIfEmpty(update.Phone),
+		"address":       nilIfEmpty(update.Address),
+		"currency_code": update.CurrencyCode,
+		"updated_at":    time.Now().UTC(),
+	}
+	if update.LogoURL == "" {
+		payload["logo_url"] = nil
+	} else {
+		payload["logo_url"] = update.LogoURL
+	}
+
+	result := r.db.WithContext(ctx).
+		Table("stores").
+		Where("id = ?", storeID).
+		Updates(payload)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrStoreNotFound
+	}
+	return nil
+}
+
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -173,4 +201,11 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func nilIfEmpty(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }

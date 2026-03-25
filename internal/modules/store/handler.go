@@ -53,6 +53,39 @@ func (h Handler) GetByID(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "store fetched", result)
 }
 
+func (h Handler) Update(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	if storeID == "" {
+		return httpx.Error(c, fiber.StatusBadRequest, "storeID is required", nil)
+	}
+
+	request := UpdateStoreRequest{}
+	if value := c.FormValue("name"); value != "" {
+		request.Name = &value
+	}
+	if value := c.FormValue("phone"); value != "" {
+		request.Phone = &value
+	}
+	if value := c.FormValue("address"); value != "" {
+		request.Address = &value
+	}
+	if value := c.FormValue("currency_code"); value != "" {
+		request.CurrencyCode = &value
+	}
+
+	logo, err := c.FormFile("logo")
+	if err == nil {
+		request.LogoFile = logo
+	}
+
+	result, err := h.service.Update(c.UserContext(), middleware.ClaimsFromContext(c), storeID, request)
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+
+	return httpx.Success(c, fiber.StatusOK, "store updated", result)
+}
+
 func writeStoreError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidStoreName), errors.Is(err, ErrInvalidCurrencyCode), errors.Is(err, ErrInvalidSubscriptionPlan):

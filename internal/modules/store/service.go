@@ -64,6 +64,56 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID string)
 	return s.repo.GetByID(ctx, storeID)
 }
 
+func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateStoreRequest) (Store, error) {
+	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Store{}, err
+	}
+	if !ok {
+		return Store{}, ErrStoreForbidden
+	}
+
+	current, err := s.repo.GetByID(ctx, storeID)
+	if err != nil {
+		return Store{}, err
+	}
+
+	if input.Name != nil {
+		current.Name = strings.TrimSpace(*input.Name)
+	}
+	if strings.TrimSpace(current.Name) == "" {
+		return Store{}, ErrInvalidStoreName
+	}
+
+	if input.Phone != nil {
+		current.Phone = strings.TrimSpace(*input.Phone)
+	}
+	if input.Address != nil {
+		current.Address = strings.TrimSpace(*input.Address)
+	}
+
+	if input.CurrencyCode != nil {
+		current.CurrencyCode = strings.ToUpper(strings.TrimSpace(*input.CurrencyCode))
+	}
+	if strings.TrimSpace(current.CurrencyCode) == "" {
+		return Store{}, ErrInvalidCurrencyCode
+	}
+
+	if input.LogoFile != nil {
+		logoURL, saveErr := s.storage.SaveStoreLogo(input.LogoFile)
+		if saveErr != nil {
+			return Store{}, saveErr
+		}
+		current.LogoURL = logoURL
+	}
+
+	if err := s.repo.Update(ctx, storeID, current); err != nil {
+		return Store{}, err
+	}
+
+	return s.repo.GetByID(ctx, storeID)
+}
+
 func (s Service) CanManageStore(ctx context.Context, actor auth.Claims, storeID string) (bool, error) {
 	return s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 }

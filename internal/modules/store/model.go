@@ -31,3 +31,11 @@ type CreateStoreRequest struct {
 	SubscriptionPlanCode string
 	LogoFile             *multipart.FileHeader
 }
+
+type UpdateStoreRequest struct {
+	Name         *string
+	Phone        *string
+	Address      *string
+	CurrencyCode *string
+	LogoFile     *multipart.FileHeader
+}

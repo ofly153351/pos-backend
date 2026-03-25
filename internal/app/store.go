@@ -26,4 +26,5 @@ func registerStoreRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.storeHandler.(store.Handler)
 	protected.Post("/stores", handler.Create)
 	protected.Get("/stores/:storeID", handler.GetByID)
+	protected.Put("/stores/:storeID", handler.Update)
 }

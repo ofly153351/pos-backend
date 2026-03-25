@@ -135,3 +135,63 @@ Status: `200 OK`
 - `403 Forbidden`
 - `404 Not Found` ไม่พบร้าน
 - `500 Internal Server Error`
+
+## PUT /api/v1/stores/:storeID
+
+แก้ไขข้อมูลร้าน (multipart/form-data) และสามารถอัปโหลดโลโก้ใหม่ได้
+
+### Request Fields
+
+- `name` optional
+- `phone` optional
+- `address` optional
+- `currency_code` optional
+- `logo` optional (file)
+
+### Example
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/stores/65b493e98058f410a890859f \
+  -H "Authorization: Bearer <token>" \
+  -F "name=Main Branch (Renamed)" \
+  -F "phone=020000000" \
+  -F "logo=@/path/to/new-logo.png"
+```
+
+### Success Response
+
+Status: `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "store updated",
+  "data": {
+    "id": "65b493e98058f410a890859f",
+    "owner_user_id": "65b4927f5d58d4a7ed8a4bf1",
+    "name": "Main Branch (Renamed)",
+    "logo_url": "http://localhost:9000/pos-assets/logos/xxx.png",
+    "phone": "020000000",
+    "address": "Bangkok",
+    "currency_code": "THB",
+    "subscription_plan_code": "growth",
+    "subscription_status": "active",
+    "subscription_period_end": "2026-04-22T10:00:00Z",
+    "created_at": "2026-03-23T10:00:00Z"
+  }
+}
+```
+
+### Access Rules
+
+- `platform_admin` เข้าถึงได้ทุกร้าน
+- `owner` และ `manager` แก้ไขได้เฉพาะร้านที่ตนเป็นสมาชิก
+- role อื่นหรือไม่ใช่สมาชิกจะได้ `403 Forbidden`
+
+### Error Status
+
+- `400 Bad Request` ข้อมูลไม่ถูกต้อง
+- `401 Unauthorized`
+- `403 Forbidden`
+- `404 Not Found`
+- `500 Internal Server Error`

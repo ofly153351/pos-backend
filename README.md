@@ -20,6 +20,7 @@ POST /api/v1/auth/logout
 # Store
 POST /api/v1/stores
 GET  /api/v1/stores/:storeID
+PUT  /api/v1/stores/:storeID
 
 # Product Type
 POST /api/v1/stores/:storeID/product-types
@@ -87,6 +88,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - System flow guide: `docs/flow.md`
 - Admin guide: `docs/admin.md`
 - Store API guide: `docs/store.md`
+- API development guide: `docs/api-development.md`
 - Product API guide: `docs/product.md`
 - Sales API guide: `docs/sales.md`
 - Invoice API guide: `docs/invoice.md`
