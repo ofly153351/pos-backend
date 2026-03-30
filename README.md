@@ -59,6 +59,10 @@ GET  /api/v1/stores/:storeID/sales
 GET  /api/v1/stores/:storeID/sales/:saleID
 GET  /api/v1/stores/:storeID/sales/:saleID/receipt
 GET  /api/v1/stores/:storeID/sales/:saleID/receipt/preview
+
+# Dashboard
+GET  /api/v1/stores/:storeID/dashboard
+
 # VAT
 POST /api/v1/stores/:storeID/vat/calculate
 
@@ -93,6 +97,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - API development guide: `docs/api-development.md`
 - Product API guide: `docs/product.md`
 - Sales API guide: `docs/sales.md`
+- Dashboard API guide: `docs/dashboard.md`
 - Invoice API guide: `docs/invoice.md`
 - Subscription API guide: `docs/subscription.md`
 - Customer network status guide: `docs/customer-network.md`
