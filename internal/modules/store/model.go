@@ -12,6 +12,7 @@ type Store struct {
 	LogoURL               string    `json:"logo_url,omitempty" gorm:"column:logo_url"`
 	Phone                 string    `json:"phone,omitempty" gorm:"column:phone"`
 	Address               string    `json:"address,omitempty" gorm:"column:address"`
+	PromptPayID           string    `json:"promptpay_id,omitempty" gorm:"column:promptpay_id"`
 	CurrencyCode          string    `json:"currency_code" gorm:"column:currency_code"`
 	SubscriptionPlanCode  string    `json:"subscription_plan_code" gorm:"-"`
 	SubscriptionStatus    string    `json:"subscription_status" gorm:"-"`
@@ -27,15 +28,17 @@ type CreateStoreRequest struct {
 	Name                 string
 	Phone                string
 	Address              string
+	PromptPayID          string
 	CurrencyCode         string
 	SubscriptionPlanCode string
 	LogoFile             *multipart.FileHeader
 }
 
 type UpdateStoreRequest struct {
-	Name         *string
-	Phone        *string
-	Address      *string
-	CurrencyCode *string
+	Name         *string `json:"name"`
+	Phone        *string `json:"phone"`
+	Address      *string `json:"address"`
+	PromptPayID  *string `json:"promptpay_id"`
+	CurrencyCode *string `json:"currency_code"`
 	LogoFile     *multipart.FileHeader
 }

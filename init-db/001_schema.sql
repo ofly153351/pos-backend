@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS stores (
     logo_url TEXT,
     phone TEXT,
     address TEXT,
+    promptpay_id TEXT,
     currency_code TEXT NOT NULL DEFAULT 'THB',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

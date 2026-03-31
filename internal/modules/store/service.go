@@ -45,6 +45,7 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 		LogoURL:      logoURL,
 		Phone:        strings.TrimSpace(input.Phone),
 		Address:      strings.TrimSpace(input.Address),
+		PromptPayID:  strings.TrimSpace(input.PromptPayID),
 		CurrencyCode: strings.ToUpper(strings.TrimSpace(input.CurrencyCode)),
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -94,6 +95,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 	}
 	if input.Address != nil {
 		current.Address = strings.TrimSpace(*input.Address)
+	}
+	if input.PromptPayID != nil {
+		current.PromptPayID = strings.TrimSpace(*input.PromptPayID)
 	}
 
 	if input.CurrencyCode != nil {

@@ -7,6 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/jung-kurt/gofpdf v1.16.2
 	github.com/minio/minio-go/v7 v7.0.83
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

@@ -134,6 +134,11 @@ Response shape หลัก:
 - `payment`
 - `footer`
 
+PromptPay QR:
+- ถ้าร้านมี `promptpay_id` ระบบจะแสดงเลขพร้อมเพย์และ QR ที่ท้ายบิลอัตโนมัติ
+- QR จะ encode ยอด `grand_total` ของบิลนั้นให้พร้อมสแกนจ่าย
+- ถ้าร้านยังไม่มี `promptpay_id` จะไม่แสดง block QR
+
 Response:
 - `200 OK`
 - `Content-Type: text/html; charset=utf-8`
@@ -142,6 +147,13 @@ Response:
 
 ```bash
 curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt \
+  -H "Authorization: Bearer <token>"
+```
+
+compatibility path:
+
+```bash
+curl http://localhost:8080/api/stores/{storeID}/sales/{saleID}/receipt \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -155,6 +167,13 @@ Response:
 
 ```bash
 curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt/preview \
+  -H "Authorization: Bearer <token>"
+```
+
+compatibility path:
+
+```bash
+curl http://localhost:8080/api/stores/{storeID}/sales/{saleID}/receipt/preview \
   -H "Authorization: Bearer <token>"
 ```
 
@@ -185,3 +204,4 @@ if (popup) {
 - หน้าขายควรใช้ `GET /api/v1/stores/:storeID/products` เพื่อดึงสินค้าที่เหลือก่อนเริ่มขาย
 - หลังสร้าง sale สำเร็จ ควร refresh product list เพราะ `quantity` ถูกหักแล้ว
 - response จาก backend ควรใช้เป็น source of truth สำหรับ order summary และ receipt
+- ถ้าต้องการ PromptPay QR ในใบเสร็จ ให้ตั้งค่า `promptpay_id` ของร้านก่อนที่ `PUT /api/v1/stores/:storeID` (ดู `docs/store.md`)

@@ -54,6 +54,7 @@ Status: `200 OK`
       "logo_url": "http://localhost:9000/pos-assets/logos/xxx.png",
       "phone": "021234567",
       "address": "Bangkok",
+      "promptpay_id": "0812345678",
       "currency_code": "THB",
       "subscription_plan_code": "growth",
       "subscription_status": "active",
@@ -79,6 +80,7 @@ Status: `200 OK`
 - `phone` optional
 - `address` optional
 - `currency_code` optional (default `THB`)
+- `promptpay_id` optional
 - `subscription_plan_code` required (`starter`, `growth`, `pro`)
 - `logo` optional (file)
 
@@ -90,6 +92,7 @@ curl -X POST http://localhost:8080/api/v1/stores \
   -F "name=Main Branch" \
   -F "phone=021234567" \
   -F "address=Bangkok" \
+  -F "promptpay_id=0812345678" \
   -F "currency_code=THB" \
   -F "subscription_plan_code=growth" \
   -F "logo=@/path/to/logo.png"
@@ -110,6 +113,7 @@ Status: `201 Created`
     "logo_url": "http://localhost:9000/pos-assets/stores/logo-xxx.png",
     "phone": "021234567",
     "address": "Bangkok",
+    "promptpay_id": "0812345678",
     "currency_code": "THB",
     "subscription_plan_code": "growth",
     "subscription_status": "active",
@@ -158,6 +162,7 @@ Status: `200 OK`
     "logo_url": "http://localhost:9000/pos-assets/stores/logo-xxx.png",
     "phone": "021234567",
     "address": "Bangkok",
+    "promptpay_id": "0812345678",
     "currency_code": "THB",
     "subscription_plan_code": "growth",
     "subscription_status": "active",
@@ -182,23 +187,36 @@ Status: `200 OK`
 
 ## PUT /api/v1/stores/:storeID
 
-แก้ไขข้อมูลร้าน (multipart/form-data) และสามารถอัปโหลดโลโก้ใหม่ได้
+แก้ไขข้อมูลร้าน รองรับทั้ง `application/json` และ `multipart/form-data` (สำหรับอัปโหลดโลโก้)
 
 ### Request Fields
 
 - `name` optional
 - `phone` optional
 - `address` optional
+- `promptpay_id` optional
 - `currency_code` optional
 - `logo` optional (file)
 
-### Example
+### Example (JSON)
+
+```bash
+curl -X PUT http://localhost:8080/api/v1/stores/65b493e98058f410a890859f \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "promptpay_id": "0812345678"
+  }'
+```
+
+### Example (multipart/form-data)
 
 ```bash
 curl -X PUT http://localhost:8080/api/v1/stores/65b493e98058f410a890859f \
   -H "Authorization: Bearer <token>" \
   -F "name=Main Branch (Renamed)" \
   -F "phone=020000000" \
+  -F "promptpay_id=0812345678" \
   -F "logo=@/path/to/new-logo.png"
 ```
 
@@ -217,6 +235,7 @@ Status: `200 OK`
     "logo_url": "http://localhost:9000/pos-assets/logos/xxx.png",
     "phone": "020000000",
     "address": "Bangkok",
+    "promptpay_id": "0812345678",
     "currency_code": "THB",
     "subscription_plan_code": "growth",
     "subscription_status": "active",

@@ -17,6 +17,7 @@ type Sale struct {
 	StoreName              string     `json:"store_name,omitempty" gorm:"column:store_name"`
 	StoreAddress           string     `json:"store_address,omitempty" gorm:"column:store_address"`
 	StorePhone             string     `json:"store_phone,omitempty" gorm:"column:store_phone"`
+	StorePromptPayID       string     `json:"store_promptpay_id,omitempty" gorm:"column:store_promptpay_id"`
 	CustomerLevel          *int       `json:"customer_level,omitempty" gorm:"column:customer_level"`
 	NetworkDiscountPercent float64    `json:"network_discount_percent" gorm:"column:network_discount_percent"`
 	TotalItems             int        `json:"total_items" gorm:"column:total_items"`
