@@ -94,6 +94,17 @@ func (r PostgresRepository) Update(ctx context.Context, unit ProductUnit) (Produ
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("products").
+		Where("store_id = ? AND product_unit_id = ?", storeID, id).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrProductUnitInUse
+	}
+
 	result := r.db.WithContext(ctx).
 		Where("store_id = ? AND id = ?", storeID, id).
 		Delete(&ProductUnit{})

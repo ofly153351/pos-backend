@@ -58,6 +58,8 @@ func writeError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidName):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrProductUnitInUse):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrProductUnitNotFound):
