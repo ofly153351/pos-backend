@@ -95,7 +95,8 @@ func (r PostgresRepository) GetLowStockProducts(ctx context.Context, storeID str
 	var items []LowStockProduct
 	err := r.db.WithContext(ctx).
 		Table("products p").
-		Select("p.id AS product_id, p.name, COALESCE(p.sku, '') AS sku, p.unit_type, p.quantity").
+		Select("p.id AS product_id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(pu.name, '') AS unit_type, p.quantity").
+		Joins("LEFT JOIN product_units pu ON pu.id = p.product_unit_id").
 		Where("p.store_id = ? AND p.is_active = TRUE AND p.quantity <= ?", storeID, threshold).
 		Order("p.quantity ASC, p.updated_at DESC").
 		Limit(limit).

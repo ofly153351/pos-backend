@@ -38,6 +38,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if !ok {
 		return Product{}, ErrInvalidProductTypeID
 	}
+	ok, err = s.repo.ProductUnitExists(ctx, storeID, strings.TrimSpace(input.ProductUnitID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidProductUnitID
+	}
 
 	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
 	if err != nil {
@@ -55,7 +62,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		ProductTypeID:       strings.TrimSpace(input.ProductTypeID),
 		Name:                strings.TrimSpace(input.Name),
 		SKU:                 strings.TrimSpace(input.SKU),
-		UnitType:            normalizeUnitType(input.UnitType),
+		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		ImageURL:            imageURL,
 		Quantity:            0,
 		BasePrice:           input.BasePrice,
@@ -138,8 +145,8 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.ProductTypeID != nil {
 		current.ProductTypeID = strings.TrimSpace(*input.ProductTypeID)
 	}
-	if input.UnitType != nil {
-		current.UnitType = normalizeUnitType(*input.UnitType)
+	if input.ProductUnitID != nil {
+		current.ProductUnitID = strings.TrimSpace(*input.ProductUnitID)
 	}
 	if input.BasePrice != nil {
 		current.BasePrice = *input.BasePrice
@@ -184,6 +191,13 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if !ok {
 		return Product{}, ErrInvalidProductTypeID
 	}
+	ok, err = s.repo.ProductUnitExists(ctx, storeID, strings.TrimSpace(current.ProductUnitID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidProductUnitID
+	}
 
 	current.UpdatedAt = time.Now().UTC()
 	return s.repo.Update(ctx, current)
@@ -216,7 +230,7 @@ func resolveEffectivePrice(product Product, now time.Time) float64 {
 func validateCreate(input CreateProductRequest) error {
 	product := Product{
 		Name:                strings.TrimSpace(input.Name),
-		UnitType:            normalizeUnitType(input.UnitType),
+		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		Quantity:            0,
 		BasePrice:           input.BasePrice,
 		SpecialPrice:        input.SpecialPrice,
@@ -233,6 +247,9 @@ func validateExisting(product Product) error {
 	if strings.TrimSpace(product.Name) == "" {
 		return ErrInvalidProductName
 	}
+	if strings.TrimSpace(product.ProductUnitID) == "" {
+		return ErrInvalidProductUnitID
+	}
 	if product.Quantity < 0 {
 		return ErrInvalidQuantity
 	}
@@ -246,12 +263,4 @@ func validateExisting(product Product) error {
 		return ErrInvalidSpecialPriceDate
 	}
 	return nil
-}
-
-func normalizeUnitType(unitType string) string {
-	text := strings.TrimSpace(unitType)
-	if text == "" {
-		return UnitTypePiece
-	}
-	return text
 }

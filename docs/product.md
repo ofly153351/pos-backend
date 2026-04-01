@@ -3,7 +3,7 @@
 API นี้ใช้จัดการสินค้าในร้าน โดยแยก 2 แนวคิด:
 
 - `product_type` ของร้าน: หมวดสินค้า เช่น `กาแฟ`, `เบเกอรี่`, `อุปกรณ์`
-- `unit_type` ของสินค้า: หน่วยขาย เช่น `piece`, `pair`, `box`
+- `product_unit` ของร้าน: หน่วยขาย เช่น `ชิ้น`, `คู่`, `กล่อง`
 
 สินค้าแต่ละตัวจะอ้าง `product_type_id` ของร้าน รองรับรูปสินค้า ราคาพิเศษ และจำนวนคงเหลือ (`quantity`)
 
@@ -15,10 +15,10 @@ API นี้ใช้จัดการสินค้าในร้าน โ
 Authorization: Bearer <access_token>
 ```
 
-## Unit Type
+## Product Unit
 
-- `piece`: ขายเป็นชิ้น
-- `pair`: ขายเป็นคู่
+- สินค้าจะอ้างอิงหน่วยผ่าน `unit_id` (FK ไป `product_units.id`)
+- ต้องสร้างหน่วยด้วย `POST /api/v1/stores/:storeID/product-units` ก่อน แล้วค่อยผูกกับสินค้า
 
 ## Product Type APIs
 
@@ -46,7 +46,7 @@ Fields:
 - `name` required
 - `sku` optional
 - `product_type_id` optional, ต้องเป็น type ของร้านนั้น
-- `unit_type` optional, default `piece`, รับค่า string ตามที่ร้านต้องการ
+- `unit_id` required, ต้องเป็น unit ของร้านนั้น
 - `quantity` optional, default `0`, ต้องเป็นจำนวนเต็มตั้งแต่ `0` ขึ้นไป
 - `base_price` required
 - `special_price` optional
@@ -63,7 +63,7 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
   -F "name=Coffee Mug" \
   -F "sku=MUG-001" \
   -F "product_type_id=type_xxx" \
-  -F "unit_type=piece" \
+  -F "unit_id=unit_xxx" \
   -F "quantity=24" \
   -F "base_price=120" \
   -F "special_price=99" \
@@ -81,7 +81,8 @@ Success Response (`201 Created`)
     "store_id": "65b493e98058f410a890859f",
     "name": "Coffee Mug",
     "sku": "MUG-001",
-    "unit_type": "piece",
+    "product_unit_id": "unit_xxx",
+    "product_unit_name": "piece",
     "image_url": "http://127.0.0.1:9000/pos-assets/products/3f7cbf2b6f9415d4d31811af.jpg",
     "quantity": 24,
     "base_price": 120,
@@ -147,7 +148,7 @@ Fields ที่รองรับ:
 - `name`
 - `sku`
 - `product_type_id`
-- `unit_type`
+- `unit_id`
 - `quantity`
 - `base_price`
 - `special_price`
@@ -178,7 +179,8 @@ Success Response (`200 OK`)
     "id": "3f7cbf2b6f9415d4d31811af",
     "store_id": "65b493e98058f410a890859f",
     "name": "Coffee Mug 2026",
-    "unit_type": "piece",
+    "product_unit_id": "unit_xxx",
+    "product_unit_name": "piece",
     "image_url": "http://127.0.0.1:9000/pos-assets/products/88b9a45a623ad97f0a7f2121.jpg",
     "quantity": 24,
     "base_price": 129,
@@ -203,4 +205,4 @@ Success Response (`200 OK`)
 - ถ้าไม่ส่ง `image` ตอน `PATCH` ระบบจะคงรูปเดิมไว้
 - ถ้า `image_url` ว่างจะไม่ถูกส่งกลับใน JSON (เพราะ `omitempty`)
 - แนะนำให้สร้าง `product_type` ของร้านก่อนแล้วค่อยสร้างสินค้า
-- สำหรับ `unit_type` เฉพาะร้านอาจสร้างชุดของหน่วยไว้ก่อนด้วย `POST /api/v1/stores/:storeID/product-units` แล้ว fetch list เพื่อผูกกับ dropdown
+- ต้องสร้างหน่วยใน `product-units` ก่อน แล้วส่ง `unit_id` ตอนสร้าง/แก้สินค้า

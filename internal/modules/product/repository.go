@@ -15,6 +15,7 @@ type Repository interface {
 	Update(ctx context.Context, product Product) (Product, error)
 	Delete(ctx context.Context, storeID, productID string) error
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
+	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -27,9 +28,10 @@ type productQueryRow struct {
 	StoreID             string     `gorm:"column:store_id"`
 	ProductTypeID       *string    `gorm:"column:product_type_id"`
 	ProductTypeName     *string    `gorm:"column:product_type_name"`
+	ProductUnitID       *string    `gorm:"column:product_unit_id"`
+	ProductUnitName     *string    `gorm:"column:product_unit_name"`
 	Name                string     `gorm:"column:name"`
 	SKU                 *string    `gorm:"column:sku"`
-	UnitType            string     `gorm:"column:unit_type"`
 	ImageURL            *string    `gorm:"column:image_url"`
 	Quantity            int        `gorm:"column:quantity"`
 	BasePrice           float64    `gorm:"column:base_price"`
@@ -50,7 +52,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		"id":                     product.ID,
 		"store_id":               product.StoreID,
 		"name":                   product.Name,
-		"unit_type":              product.UnitType,
+		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
 		"base_price":             product.BasePrice,
 		"special_price":          product.SpecialPrice,
@@ -80,9 +82,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		return Product{}, err
 	}
 
-	product.EffectivePrice = resolveEffectivePrice(product, time.Now().UTC())
-	product.UpdatedAt = product.CreatedAt
-	return product, nil
+	return r.GetByID(ctx, product.StoreID, product.ID)
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int) ([]Product, int64, error) {
@@ -103,11 +103,10 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
-		Table("products AS p").
-		Select("p.id, p.store_id, p.product_type_id, pt.name AS product_type_name, p.name, p.sku, p.unit_type, p.image_url, p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at").
-		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
-		Where("p.store_id = ?", storeID).
-		Order("p.created_at DESC").
+		Table("product_view pv").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Where("pv.store_id = ?", storeID).
+		Order("pv.created_at DESC").
 		Limit(limit).
 		Offset((page - 1) * limit).
 		Find(&rows).Error
@@ -128,10 +127,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID string) (Product, error) {
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
-		Table("products AS p").
-		Select("p.id, p.store_id, p.product_type_id, pt.name AS product_type_name, p.name, p.sku, p.unit_type, p.image_url, p.quantity, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at, p.is_active, p.created_at, p.updated_at").
-		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
-		Where("p.store_id = ? AND p.id = ?", storeID, productID).
+		Table("product_view pv").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -148,7 +146,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 func (r PostgresRepository) Update(ctx context.Context, product Product) (Product, error) {
 	updates := map[string]any{
 		"name":                   product.Name,
-		"unit_type":              product.UnitType,
+		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
 		"base_price":             product.BasePrice,
 		"special_price":          product.SpecialPrice,
@@ -184,8 +182,7 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		return Product{}, ErrProductNotFound
 	}
 
-	product.EffectivePrice = resolveEffectivePrice(product, time.Now().UTC())
-	return product, nil
+	return r.GetByID(ctx, product.StoreID, product.ID)
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, productID string) error {
@@ -216,6 +213,21 @@ func (r PostgresRepository) ProductTypeExists(ctx context.Context, storeID, prod
 	return count > 0, nil
 }
 
+func (r PostgresRepository) ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error) {
+	if productUnitID == "" {
+		return false, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("product_units").
+		Where("store_id = ? AND id = ?", storeID, productUnitID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -236,7 +248,6 @@ func (row productQueryRow) toProduct() Product {
 		ID:                  row.ID,
 		StoreID:             row.StoreID,
 		Name:                row.Name,
-		UnitType:            row.UnitType,
 		Quantity:            row.Quantity,
 		BasePrice:           row.BasePrice,
 		SpecialPrice:        row.SpecialPrice,
@@ -251,6 +262,12 @@ func (row productQueryRow) toProduct() Product {
 	}
 	if row.ProductTypeName != nil {
 		product.ProductTypeName = *row.ProductTypeName
+	}
+	if row.ProductUnitID != nil {
+		product.ProductUnitID = *row.ProductUnitID
+	}
+	if row.ProductUnitName != nil {
+		product.ProductUnitName = *row.ProductUnitName
 	}
 	if row.SKU != nil {
 		product.SKU = *row.SKU

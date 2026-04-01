@@ -77,7 +77,7 @@ func (h Handler) Delete(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidPagination):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -104,7 +104,7 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		Name:          c.FormValue("name"),
 		SKU:           c.FormValue("sku"),
 		ProductTypeID: c.FormValue("product_type_id"),
-		UnitType:      coalesce(c.FormValue("unit_type"), c.FormValue("product_type")),
+		ProductUnitID: c.FormValue("unit_id"),
 	}
 	if value := strings.TrimSpace(c.FormValue("quantity")); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -156,9 +156,8 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 	if value := c.FormValue("product_type_id"); value != "" {
 		req.ProductTypeID = &value
 	}
-	unitType := coalesce(c.FormValue("unit_type"), c.FormValue("product_type"))
-	if unitType != "" {
-		req.UnitType = &unitType
+	if value := c.FormValue("unit_id"); value != "" {
+		req.ProductUnitID = &value
 	}
 	if value := strings.TrimSpace(c.FormValue("quantity")); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -237,15 +236,6 @@ func parsePriceWindow(startValue, endValue string) (*time.Time, *time.Time, erro
 		endAt = &parsed
 	}
 	return startAt, endAt, nil
-}
-
-func coalesce(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func parsePaginationQuery(c *fiber.Ctx) (int, int, error) {

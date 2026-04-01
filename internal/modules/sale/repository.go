@@ -264,10 +264,11 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 func (r PostgresRepository) lockProductForSale(ctx context.Context, tx *gorm.DB, storeID, productID string) (productSnapshot, error) {
 	var product productSnapshot
 	err := tx.WithContext(ctx).
-		Table("products").
+		Table("products p").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id, name, COALESCE(sku, '') AS sku, COALESCE(unit_type, '') AS unit_type, quantity, is_active, base_price, special_price, special_price_start_at, special_price_end_at").
-		Where("store_id = ? AND id = ?", storeID, productID).
+		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(pu.name, '') AS unit_type, p.quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
+		Joins("LEFT JOIN product_units pu ON pu.id = p.product_unit_id").
+		Where("p.store_id = ? AND p.id = ?", storeID, productID).
 		Take(&product).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

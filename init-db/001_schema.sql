@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS products (
     product_type_id TEXT REFERENCES product_types(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     sku TEXT,
-    unit_type TEXT NOT NULL DEFAULT 'piece' CHECK (unit_type IN ('piece', 'pair')),
+    unit_type TEXT NOT NULL DEFAULT 'piece',
     base_price NUMERIC(12,2) NOT NULL CHECK (base_price >= 0),
     special_price NUMERIC(12,2),
     special_price_start_at TIMESTAMPTZ,
