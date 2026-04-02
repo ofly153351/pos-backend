@@ -409,8 +409,7 @@ func (r PostgresRepository) lockProductForInvoice(ctx context.Context, tx *gorm.
 	err := tx.WithContext(ctx).
 		Table("products p").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(pu.name, '') AS unit_type, p.quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
-		Joins("LEFT JOIN product_units pu ON pu.id = p.product_unit_id").
+		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE((SELECT pu.name FROM product_units pu WHERE pu.id = p.product_unit_id), '') AS unit_type, p.quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
 		Where("p.store_id = ? AND p.id = ?", storeID, productID).
 		Take(&product).Error
 	if err != nil {
