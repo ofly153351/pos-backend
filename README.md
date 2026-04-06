@@ -9,6 +9,34 @@ docker compose up -d postgres
 GOCACHE=$(pwd)/.cache/go-build GOMODCACHE=$(pwd)/.cache/go-mod go run ./cmd/api.go
 ```
 
+## Project Structure
+
+```text
+.
+├── cmd/
+│   └── api.go                  # API entrypoint
+├── docs/                       # API and feature guides
+├── init-db/                    # Forward-only SQL schema/migrations
+├── internal/
+│   ├── app/                    # HTTP bootstrap and route wiring
+│   ├── config/                 # Environment-backed configuration
+│   ├── database/               # PostgreSQL connection and migration runner
+│   ├── middleware/             # JWT auth and request guards
+│   ├── modules/                # Bounded business features
+│   │   ├── auth/
+│   │   ├── customer/
+│   │   ├── dashboard/
+│   │   ├── invoice/
+│   │   ├── product/
+│   │   ├── sale/
+│   │   ├── store/
+│   │   ├── subscription/
+│   │   └── vat/
+│   └── platform/httpx/         # Shared HTTP response helpers
+├── docker-compose.yml
+└── README.md
+```
+
 ## Core Endpoints
 
 ```bash
