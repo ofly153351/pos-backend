@@ -11,6 +11,8 @@ type Product struct {
 	ProductTypeID       string     `json:"product_type_id,omitempty" gorm:"column:product_type_id"`
 	ProductTypeName     string     `json:"product_type_name,omitempty" gorm:"-"`
 	Name                string     `json:"name" gorm:"column:name"`
+	BrandID             string     `json:"brand_id,omitempty" gorm:"column:brand_id"`
+	BrandName           string     `json:"brand_name,omitempty" gorm:"-"`
 	SKU                 string     `json:"sku,omitempty" gorm:"column:sku"`
 	ProductUnitID       string     `json:"product_unit_id" gorm:"column:product_unit_id"`
 	ProductUnitName     string     `json:"product_unit_name,omitempty" gorm:"-"`
@@ -32,6 +34,7 @@ func (Product) TableName() string {
 
 type CreateProductRequest struct {
 	Name                string
+	BrandID             string
 	SKU                 string
 	ProductTypeID       string
 	ProductUnitID       string
@@ -46,6 +49,7 @@ type CreateProductRequest struct {
 
 type UpdateProductRequest struct {
 	Name                *string
+	BrandID             *string
 	SKU                 *string
 	ProductTypeID       *string
 	ProductUnitID       *string

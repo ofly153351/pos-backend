@@ -19,6 +19,7 @@ type Repository interface {
 	Delete(ctx context.Context, storeID, productID string) error
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
+	BrandExists(ctx context.Context, storeID, brandID string) (bool, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -33,6 +34,8 @@ type productQueryRow struct {
 	ProductTypeName     *string    `gorm:"column:product_type_name"`
 	ProductUnitID       *string    `gorm:"column:product_unit_id"`
 	ProductUnitName     *string    `gorm:"column:product_unit_name"`
+	BrandID             *string    `gorm:"column:brand_id"`
+	BrandName           *string    `gorm:"column:brand_name"`
 	Name                string     `gorm:"column:name"`
 	SKU                 *string    `gorm:"column:sku"`
 	ImageURL            *string    `gorm:"column:image_url"`
@@ -55,6 +58,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		"id":                     product.ID,
 		"store_id":               product.StoreID,
 		"name":                   product.Name,
+		"brand_id":               product.BrandID,
 		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
 		"base_price":             product.BasePrice,
@@ -69,6 +73,11 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		payload["product_type_id"] = nil
 	} else {
 		payload["product_type_id"] = product.ProductTypeID
+	}
+	if product.BrandID == "" {
+		payload["brand_id"] = nil
+	} else {
+		payload["brand_id"] = product.BrandID
 	}
 	if product.SKU == "" {
 		payload["sku"] = nil
@@ -107,7 +116,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ?", storeID).
 		Order("pv.created_at DESC").
 		Limit(limit).
@@ -131,7 +140,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
@@ -149,6 +158,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 func (r PostgresRepository) Update(ctx context.Context, product Product) (Product, error) {
 	updates := map[string]any{
 		"name":                   product.Name,
+		"brand_id":               product.BrandID,
 		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
 		"base_price":             product.BasePrice,
@@ -162,6 +172,11 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		updates["product_type_id"] = nil
 	} else {
 		updates["product_type_id"] = product.ProductTypeID
+	}
+	if product.BrandID == "" {
+		updates["brand_id"] = nil
+	} else {
+		updates["brand_id"] = product.BrandID
 	}
 	if product.SKU == "" {
 		updates["sku"] = nil
@@ -281,6 +296,21 @@ func (r PostgresRepository) ProductUnitExists(ctx context.Context, storeID, prod
 	return count > 0, nil
 }
 
+func (r PostgresRepository) BrandExists(ctx context.Context, storeID, brandID string) (bool, error) {
+	if brandID == "" {
+		return true, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("product_brands").
+		Where("store_id = ? AND id = ?", storeID, brandID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -309,6 +339,12 @@ func (row productQueryRow) toProduct() Product {
 		IsActive:            row.IsActive,
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
+	}
+	if row.BrandID != nil {
+		product.BrandID = *row.BrandID
+	}
+	if row.BrandName != nil {
+		product.BrandName = *row.BrandName
 	}
 	if row.ProductTypeID != nil {
 		product.ProductTypeID = *row.ProductTypeID

@@ -10,6 +10,7 @@ var (
 	ErrInvalidSpecialPriceDate = errors.New("special price end must be after start")
 	ErrInvalidProductTypeID    = errors.New("product type does not belong to this store")
 	ErrInvalidProductUnitID    = errors.New("product unit does not belong to this store")
+	ErrInvalidBrandID          = errors.New("brand does not belong to this store")
 	ErrInvalidPagination       = errors.New("invalid pagination query")
 	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")
 	ErrProductNotFound         = errors.New("product not found")

@@ -5,7 +5,7 @@ API นี้ใช้จัดการสินค้าในร้าน โ
 - `product_type` ของร้าน: หมวดสินค้า เช่น `กาแฟ`, `เบเกอรี่`, `อุปกรณ์`
 - `product_unit` ของร้าน: หน่วยขาย เช่น `ชิ้น`, `คู่`, `กล่อง`
 
-สินค้าแต่ละตัวจะอ้าง `product_type_id` ของร้าน รองรับรูปสินค้า ราคาพิเศษ และจำนวนคงเหลือ (`quantity`)
+สินค้าแต่ละตัวจะอ้าง `product_type_id` ของร้าน รองรับการอ้างแบรนด์ผ่าน `brand_id`, รูปสินค้า, ราคาพิเศษ และจำนวนคงเหลือ (`quantity`)
 
 ## Base
 
@@ -19,6 +19,12 @@ Authorization: Bearer <access_token>
 
 - สินค้าจะอ้างอิงหน่วยผ่าน `unit_id` (FK ไป `product_units.id`)
 - ต้องสร้างหน่วยด้วย `POST /api/v1/stores/:storeID/product-units` ก่อน แล้วค่อยผูกกับสินค้า
+
+## Product Brand
+
+- สินค้าจะอ้างอิงแบรนด์ผ่าน `brand_id` (FK ไป `product_brands.id`)
+- ตาราง `product_brands` เป็นข้อมูลแยกตามร้าน (`store_id`)
+- response สินค้าจะคืนทั้ง `brand_id` และ `brand_name`
 
 ## Product Type APIs
 
@@ -44,7 +50,8 @@ Authorization: Bearer <access_token>
 
 Fields:
 - `name` required
-- `sku` optional
+- `brand_id` optional (ต้องเป็นแบรนด์ของร้านนั้น)
+- `sku` optional (ถ้าไม่ส่ง ระบบจะ generate barcode ให้เป็น EAN-13 อัตโนมัติ)
 - `product_type_id` optional, ต้องเป็น type ของร้านนั้น
 - `unit_id` required, ต้องเป็น unit ของร้านนั้น
 - `quantity` optional, default `0`, ต้องเป็นจำนวนเต็มตั้งแต่ `0` ขึ้นไป
@@ -61,6 +68,7 @@ Fields:
 curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
   -H "Authorization: Bearer <token>" \
   -F "name=Coffee Mug" \
+  -F "brand_id=brand_xxx" \
   -F "sku=MUG-001" \
   -F "product_type_id=type_xxx" \
   -F "unit_id=unit_xxx" \
@@ -80,6 +88,8 @@ Success Response (`201 Created`)
     "id": "3f7cbf2b6f9415d4d31811af",
     "store_id": "65b493e98058f410a890859f",
     "name": "Coffee Mug",
+    "brand_id": "brand_xxx",
+    "brand_name": "Acme",
     "sku": "MUG-001",
     "product_unit_id": "unit_xxx",
     "product_unit_name": "piece",
@@ -146,6 +156,7 @@ Success Response (`200 OK`)
 
 Fields ที่รองรับ:
 - `name`
+- `brand_id`
 - `sku`
 - `product_type_id`
 - `unit_id`
@@ -165,6 +176,7 @@ Fields ที่รองรับ:
 curl -X PATCH http://localhost:8080/api/v1/stores/{storeID}/products/{productID} \
   -H "Authorization: Bearer <token>" \
   -F "name=Coffee Mug 2026" \
+  -F "brand_id=brand_yyy" \
   -F "base_price=129" \
   -F "image=@/path/to/new-product.jpg"
 ```
@@ -179,6 +191,8 @@ Success Response (`200 OK`)
     "id": "3f7cbf2b6f9415d4d31811af",
     "store_id": "65b493e98058f410a890859f",
     "name": "Coffee Mug 2026",
+    "brand_id": "brand_yyy",
+    "brand_name": "Acme Pro",
     "product_unit_id": "unit_xxx",
     "product_unit_name": "piece",
     "image_url": "http://127.0.0.1:9000/pos-assets/products/88b9a45a623ad97f0a7f2121.jpg",
@@ -196,13 +210,32 @@ Success Response (`200 OK`)
 
 ลบสินค้าออกจากระบบ
 
+## POST /api/v1/stores/:storeID/products/generate-missing-barcodes
+
+ใช้ generate barcode (เก็บใน `sku`) ให้สินค้าที่ `sku` ว่างทั้งหมดในร้าน
+
+Success Response (`200 OK`)
+
+```json
+{
+  "success": true,
+  "message": "missing product barcodes generated",
+  "data": {
+    "updated_count": 12
+  }
+}
+```
+
 ## Notes
 
 - ราคาที่ตอบกลับจะมี `effective_price` คำนวณจาก special price window
 - response ของสินค้าแต่ละรายการจะมี `quantity` เป็นจำนวนคงเหลือปัจจุบัน
+- response ของสินค้าแต่ละรายการจะมี `brand_id` และ `brand_name` (ถ้าไม่ตั้งค่า จะเป็นค่าว่าง)
 - list endpoint ใช้ pagination เสมอเพื่อลด payload (`page/limit`)
 - รูปสินค้าจะถูกอัปโหลดไปที่ MinIO path `products/<generated-filename>` และระบบจะคืนค่าในฟิลด์ `image_url`
 - ถ้าไม่ส่ง `image` ตอน `PATCH` ระบบจะคงรูปเดิมไว้
 - ถ้า `image_url` ว่างจะไม่ถูกส่งกลับใน JSON (เพราะ `omitempty`)
+- ถ้าไม่ส่ง `sku` ตอนสร้างสินค้า ระบบจะ generate barcode แบบ EAN-13 ให้อัตโนมัติ
+- ถ้าต้องการเติม barcode ให้ข้อมูลเดิมที่ยังว่าง ใช้ endpoint `generate-missing-barcodes`
 - แนะนำให้สร้าง `product_type` ของร้านก่อนแล้วค่อยสร้างสินค้า
 - ต้องสร้างหน่วยใน `product-units` ก่อน แล้วส่ง `unit_id` ตอนสร้าง/แก้สินค้า

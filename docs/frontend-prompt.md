@@ -21,7 +21,8 @@ Use this summary to build the POS frontend interactions. Every request requires 
 - `PATCH` / `DELETE` same path to update/remove a unit.
 
 ## Products
-- `POST /api/v1/stores/:storeID/products` (multipart/form-data): `name`, `sku`, `product_type_id`, `unit_type` (free-text string, default `piece`), optional `quantity` (integer, default `0`), `base_price`, optional `special_price`, `special_price_start_at`, `special_price_end_at`, `is_active`, `image`.
+- `POST /api/v1/stores/:storeID/products` (multipart/form-data): `name`, optional `brand_id` (must belong to the same store), optional `sku` (if empty, backend auto-generates EAN-13 barcode), `product_type_id`, `unit_id`, optional `quantity` (integer, default `0`), `base_price`, optional `special_price`, `special_price_start_at`, `special_price_end_at`, `is_active`, `image`.
+- `POST /api/v1/stores/:storeID/products/generate-missing-barcodes` — backfill barcodes for products that still have empty `sku`.
 - `GET /api/v1/stores/:storeID/products` — list including `effective_price`.
 - `GET/PATCH/DELETE /api/v1/stores/:storeID/products/:productID` for individual records.
 
@@ -36,5 +37,5 @@ Use this summary to build the POS frontend interactions. Every request requires 
 
 ## Notes
 - Always trigger subscription plan selection before adding products.
-- `unit_type` defaults to `piece`; frontend can offer any store-defined label.
+- Use `unit_id` from product-units, not free-text `unit_type`.
 - All timestamps are RFC3339; special price windows impact `effective_price`.

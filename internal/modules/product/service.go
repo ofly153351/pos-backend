@@ -45,6 +45,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if !ok {
 		return Product{}, ErrInvalidProductUnitID
 	}
+	ok, err = s.repo.BrandExists(ctx, storeID, strings.TrimSpace(input.BrandID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidBrandID
+	}
 
 	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
 	if err != nil {
@@ -61,6 +68,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		StoreID:             storeID,
 		ProductTypeID:       strings.TrimSpace(input.ProductTypeID),
 		Name:                strings.TrimSpace(input.Name),
+		BrandID:             strings.TrimSpace(input.BrandID),
 		SKU:                 strings.TrimSpace(input.SKU),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		ImageURL:            imageURL,
@@ -146,6 +154,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.Name != nil {
 		current.Name = strings.TrimSpace(*input.Name)
 	}
+	if input.BrandID != nil {
+		current.BrandID = strings.TrimSpace(*input.BrandID)
+	}
 	if input.SKU != nil {
 		current.SKU = strings.TrimSpace(*input.SKU)
 	}
@@ -204,6 +215,13 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 	if !ok {
 		return Product{}, ErrInvalidProductUnitID
+	}
+	ok, err = s.repo.BrandExists(ctx, storeID, strings.TrimSpace(current.BrandID))
+	if err != nil {
+		return Product{}, err
+	}
+	if !ok {
+		return Product{}, ErrInvalidBrandID
 	}
 
 	current.UpdatedAt = time.Now().UTC()

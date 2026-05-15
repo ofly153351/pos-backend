@@ -85,7 +85,7 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -110,6 +110,7 @@ func writeProductError(c *fiber.Ctx, err error) error {
 func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 	req := CreateProductRequest{
 		Name:          c.FormValue("name"),
+		BrandID:       c.FormValue("brand_id"),
 		SKU:           c.FormValue("sku"),
 		ProductTypeID: c.FormValue("product_type_id"),
 		ProductUnitID: c.FormValue("unit_id"),
@@ -157,6 +158,9 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 	req := UpdateProductRequest{}
 	if value := c.FormValue("name"); value != "" {
 		req.Name = &value
+	}
+	if value := c.FormValue("brand_id"); value != "" {
+		req.BrandID = &value
 	}
 	if value := c.FormValue("sku"); value != "" {
 		req.SKU = &value

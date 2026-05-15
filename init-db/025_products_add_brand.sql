@@ -1,8 +1,9 @@
 ALTER TABLE products
-DROP COLUMN IF EXISTS product_type;
+ADD COLUMN IF NOT EXISTS brand TEXT;
 
-ALTER TABLE products
-DROP COLUMN IF EXISTS unit_type;
+UPDATE products
+SET brand = ''
+WHERE brand IS NULL;
 
 DROP VIEW IF EXISTS product_view;
 
@@ -24,7 +25,8 @@ SELECT
     p.special_price_end_at,
     p.is_active,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    COALESCE(p.brand, '') AS brand
 FROM products p
 LEFT JOIN product_types pt ON pt.id = p.product_type_id
 LEFT JOIN product_units pu ON pu.id = p.product_unit_id;

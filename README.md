@@ -102,6 +102,7 @@ DELETE /api/v1/stores/:storeID/product-units/:unitID
 
 # Product
 POST /api/v1/stores/:storeID/products
+POST /api/v1/stores/:storeID/products/generate-missing-barcodes
 GET  /api/v1/stores/:storeID/products
 GET  /api/v1/stores/:storeID/products/:productID
 PATCH /api/v1/stores/:storeID/products/:productID
@@ -154,12 +155,13 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 ## Notes
 
 - PostgreSQL schema is defined in `init-db/001_schema.sql`
-- Incremental schema changes are in `init-db/002_product_type.sql`
+- Incremental schema changes are in `init-db/` (latest: `026_product_brands_refactor.sql`)
 - System flow guide: `docs/flow.md`
 - Admin guide: `docs/admin.md`
 - Store API guide: `docs/store.md`
 - API development guide: `docs/api-development.md`
 - Product API guide: `docs/product.md`
+- Product brand integration guide: `docs/product-brands.md`
 - Sales API guide: `docs/sales.md`
 - Dashboard API guide: `docs/dashboard.md`
 - Invoice API guide: `docs/invoice.md`
