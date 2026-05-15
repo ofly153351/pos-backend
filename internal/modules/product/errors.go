@@ -13,4 +13,5 @@ var (
 	ErrInvalidPagination       = errors.New("invalid pagination query")
 	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")
 	ErrProductNotFound         = errors.New("product not found")
+	ErrGenerateSKUFailed       = errors.New("unable to generate unique barcode")
 )

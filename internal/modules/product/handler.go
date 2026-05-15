@@ -75,6 +75,14 @@ func (h Handler) Delete(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "product deleted", nil)
 }
 
+func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
+	result, err := h.service.GenerateMissingSKU(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"))
+	if err != nil {
+		return writeProductError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "missing product barcodes generated", result)
+}
+
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidPagination):

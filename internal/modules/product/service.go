@@ -75,6 +75,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if input.Quantity != nil {
 		product.Quantity = *input.Quantity
 	}
+	if product.SKU == "" {
+		sku, err := s.generateUniqueSKU(ctx, storeID)
+		if err != nil {
+			return Product{}, err
+		}
+		product.SKU = sku
+	}
 
 	return s.repo.Create(ctx, product)
 }
@@ -214,6 +221,35 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, product
 	return s.repo.Delete(ctx, storeID, productID)
 }
 
+func (s Service) GenerateMissingSKU(ctx context.Context, actor auth.Claims, storeID string) (GenerateMissingSKUResult, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return GenerateMissingSKUResult{}, err
+	}
+	if !allowed {
+		return GenerateMissingSKUResult{}, ErrForbiddenStoreAccess
+	}
+
+	ids, err := s.repo.ListProductIDsWithoutSKU(ctx, storeID)
+	if err != nil {
+		return GenerateMissingSKUResult{}, err
+	}
+
+	updated := 0
+	for _, productID := range ids {
+		sku, err := s.generateUniqueSKU(ctx, storeID)
+		if err != nil {
+			return GenerateMissingSKUResult{}, err
+		}
+		if err := s.repo.UpdateSKU(ctx, storeID, productID, sku, time.Now().UTC()); err != nil {
+			return GenerateMissingSKUResult{}, err
+		}
+		updated++
+	}
+
+	return GenerateMissingSKUResult{UpdatedCount: updated}, nil
+}
+
 func resolveEffectivePrice(product Product, now time.Time) float64 {
 	if product.SpecialPrice == nil {
 		return product.BasePrice
@@ -263,4 +299,19 @@ func validateExisting(product Product) error {
 		return ErrInvalidSpecialPriceDate
 	}
 	return nil
+}
+
+func (s Service) generateUniqueSKU(ctx context.Context, storeID string) (string, error) {
+	const maxAttempts = 20
+	for i := 0; i < maxAttempts; i++ {
+		candidate := buildEAN13(newBarcode12Digits())
+		exists, err := s.repo.SKUExists(ctx, storeID, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+	return "", ErrGenerateSKUFailed
 }

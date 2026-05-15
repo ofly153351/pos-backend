@@ -74,3 +74,7 @@ type ProductListResult struct {
 	HasNext    bool      `json:"has_next"`
 	HasPrev    bool      `json:"has_prev"`
 }
+
+type GenerateMissingSKUResult struct {
+	UpdatedCount int `json:"updated_count"`
+}

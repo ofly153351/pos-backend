@@ -13,6 +13,9 @@ type Repository interface {
 	ListByStore(ctx context.Context, storeID string, page, limit int) ([]Product, int64, error)
 	GetByID(ctx context.Context, storeID, productID string) (Product, error)
 	Update(ctx context.Context, product Product) (Product, error)
+	UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error
+	SKUExists(ctx context.Context, storeID, sku string) (bool, error)
+	ListProductIDsWithoutSKU(ctx context.Context, storeID string) ([]string, error)
 	Delete(ctx context.Context, storeID, productID string) error
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
@@ -196,6 +199,56 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, productID strin
 		return ErrProductNotFound
 	}
 	return nil
+}
+
+func (r PostgresRepository) UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error {
+	result := r.db.WithContext(ctx).
+		Model(&Product{}).
+		Where("store_id = ? AND id = ?", storeID, productID).
+		Updates(map[string]any{
+			"sku":        sku,
+			"updated_at": updatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrProductNotFound
+	}
+	return nil
+}
+
+func (r PostgresRepository) SKUExists(ctx context.Context, storeID, sku string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("products").
+		Where("store_id = ? AND sku = ?", storeID, sku).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r PostgresRepository) ListProductIDsWithoutSKU(ctx context.Context, storeID string) ([]string, error) {
+	type row struct {
+		ID string `gorm:"column:id"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).
+		Table("products").
+		Select("id").
+		Where("store_id = ? AND (sku IS NULL OR TRIM(sku) = '')", storeID).
+		Order("created_at ASC, id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, item := range rows {
+		ids = append(ids, item.ID)
+	}
+	return ids, nil
 }
 
 func (r PostgresRepository) ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error) {
