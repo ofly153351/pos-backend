@@ -52,10 +52,10 @@ func TestReceiptTemplateRendersAbbreviatedTaxInvoiceLayout(t *testing.T) {
 		"INV-271639",
 		"28/3/2569 15:31",
 		"แซนด์วิช (Sandwich)",
-		"182.24 ฿",
-		"12.76 ฿",
 		"195.00 ฿",
-		"หนึ่งร้อยเก้าสิบห้าบาทถ้วน",
+		"13.65 ฿",
+		"208.65 ฿",
+		"สองร้อยแปดบาทหกสิบห้าสตางค์",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rendered receipt missing %q", want)

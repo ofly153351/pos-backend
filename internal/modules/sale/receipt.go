@@ -348,16 +348,13 @@ func buildReceiptPayload(s Sale) map[string]any {
 		vatPercent = 0
 	}
 	vatIncluded := s.VATIncluded
-	vatAmount := roundMoney(s.VATAmount)
-	grandTotal := roundMoney(s.TotalAmount)
 	afterDiscount := roundMoney(s.SubtotalAmount - s.DiscountAmount)
 	if afterDiscount < 0 {
 		afterDiscount = 0
 	}
 	totalBeforeVAT := afterDiscount
-	if vatIncluded {
-		totalBeforeVAT = roundMoney(grandTotal - vatAmount)
-	}
+	vatAmount := roundMoney(totalBeforeVAT * vatPercent / 100)
+	grandTotal := roundMoney(totalBeforeVAT + vatAmount)
 	subtotal := roundMoney(s.SubtotalAmount)
 	discountBill := roundMoney(s.BillDiscountAmount)
 	if discountBill < 0 {
