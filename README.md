@@ -37,6 +37,42 @@ GOCACHE=$(pwd)/.cache/go-build GOMODCACHE=$(pwd)/.cache/go-mod go run ./cmd/api.
 └── README.md
 ```
 
+## โครงสร้างระบบ (สำหรับเขียน Agent.md)
+
+โปรเจกต์นี้ใช้แนวทางแยกชั้น (layered architecture) ชัดเจนเพื่อให้แก้ไขได้ปลอดภัย:
+
+- `cmd/`: จุดเริ่มรันแอป (entrypoint)
+- `internal/app/`: ประกอบ server, dependencies, และผูก route ของแต่ละโมดูล
+- `internal/middleware/`: middleware กลาง เช่น JWT auth
+- `internal/modules/<feature>/handler.go`: แปลง HTTP request/response
+- `internal/modules/<feature>/service.go`: กฎธุรกิจ, สิทธิ์การเข้าถึง, transaction
+- `internal/modules/<feature>/repository.go`: SQL และการคุย PostgreSQL
+- `internal/database/`: connection และ migration runner
+- `internal/platform/httpx/`: helper สำหรับ response/request ที่ใช้ซ้ำ
+- `init-db/`: schema + migration SQL แบบ forward-only
+
+Request flow มาตรฐาน:
+
+1. Route ถูกประกาศใน `internal/app/*.go`
+2. Handler รับ request แล้วเรียก Service
+3. Service ตรวจสิทธิ์/validate/ทำธุรกรรม
+4. Repository ยิง SQL กับ PostgreSQL
+5. ส่งผลลัพธ์กลับผ่าน `httpx`
+
+โมดูลธุรกิจหลักใน `internal/modules/`:
+
+- `auth`: สมัคร/ล็อกอิน/ออกจากระบบ, token และ claims
+- `store`: จัดการร้านและสมาชิกในร้าน
+- `subscription`: แผนใช้งานและสถานะ subscription ของร้าน
+- `producttype`: หมวดสินค้าแบบผูกกับ store
+- `productunit`: หน่วยสินค้า
+- `product`: สินค้า, ราคา, รูปสินค้า
+- `sale`: ขายสินค้าและใบเสร็จ
+- `invoice`: ใบวางบิล, ชำระเงิน, PDF/proof
+- `customer`: เครือข่ายลูกค้าและส่วนลดตามระดับ
+- `dashboard`: ตัวเลขสรุปภาพรวมร้าน
+- `vat`: คำนวณภาษีมูลค่าเพิ่ม
+
 ## Core Endpoints
 
 ```bash

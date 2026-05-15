@@ -12,6 +12,31 @@ The backend is a layered Go + Fiber service:
 - `internal/platform/httpx/` shared JSON response helpers
 - `init-db/` idempotent SQL schema for PostgreSQL
 
+## Request Lifecycle
+Use this flow when reasoning about where to add or change logic:
+
+1. Route registration lives in `internal/app/*.go` and wires handlers by feature.
+2. Handlers in `internal/modules/<feature>/handler.go` parse params/body and call services.
+3. Services in `internal/modules/<feature>/service.go` enforce business rules, validation, transactions, and authorization checks.
+4. Repositories in `internal/modules/<feature>/repository.go` run SQL against PostgreSQL.
+5. Shared response/request helpers are in `internal/platform/httpx/`.
+6. JWT guard and identity context are enforced in `internal/middleware/auth.go`.
+
+## Module Map
+Current bounded modules under `internal/modules/`:
+
+- `auth`: login/register/logout, token security, identity claims
+- `store`: store profile, membership, store-level access
+- `subscription`: plan catalog and per-store subscription state
+- `producttype`: store-scoped product categories
+- `productunit`: unit definitions used by products
+- `product`: catalog data, price rules, optional image upload
+- `sale`: POS sale creation, totals, receipt output
+- `invoice`: outstanding invoices, payment proof and PDF generation
+- `customer`: customer network and level-based discount relationships
+- `dashboard`: store-level summary metrics
+- `vat`: VAT calculation endpoint for checkout flows
+
 ## POS Data Model
 This project uses PostgreSQL as the source of truth.
 
