@@ -39,6 +39,8 @@ type productQueryRow struct {
 	Name                string     `gorm:"column:name"`
 	SKU                 *string    `gorm:"column:sku"`
 	ImageURL            *string    `gorm:"column:image_url"`
+	MinStock            int        `gorm:"column:min_stock"`
+	MaxStock            *int       `gorm:"column:max_stock"`
 	Quantity            int        `gorm:"column:quantity"`
 	BasePrice           float64    `gorm:"column:base_price"`
 	SpecialPrice        *float64   `gorm:"column:special_price"`
@@ -61,6 +63,8 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		"brand_id":               product.BrandID,
 		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
+		"min_stock":              product.MinStock,
+		"max_stock":              product.MaxStock,
 		"base_price":             product.BasePrice,
 		"special_price":          product.SpecialPrice,
 		"special_price_start_at": product.SpecialPriceStartAt,
@@ -116,7 +120,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ?", storeID).
 		Order("pv.created_at DESC").
 		Limit(limit).
@@ -140,7 +144,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
@@ -161,6 +165,8 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		"brand_id":               product.BrandID,
 		"product_unit_id":        product.ProductUnitID,
 		"quantity":               product.Quantity,
+		"min_stock":              product.MinStock,
+		"max_stock":              product.MaxStock,
 		"base_price":             product.BasePrice,
 		"special_price":          product.SpecialPrice,
 		"special_price_start_at": product.SpecialPriceStartAt,
@@ -331,6 +337,8 @@ func (row productQueryRow) toProduct() Product {
 		ID:                  row.ID,
 		StoreID:             row.StoreID,
 		Name:                row.Name,
+		MinStock:            row.MinStock,
+		MaxStock:            row.MaxStock,
 		Quantity:            row.Quantity,
 		BasePrice:           row.BasePrice,
 		SpecialPrice:        row.SpecialPrice,

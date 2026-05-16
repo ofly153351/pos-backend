@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS products (
     special_price_start_at TIMESTAMPTZ,
     special_price_end_at TIMESTAMPTZ,
     image_url TEXT,
+    min_stock INTEGER NOT NULL DEFAULT 0 CHECK (min_stock >= 0),
+    max_stock INTEGER CHECK (max_stock IS NULL OR max_stock >= 0),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

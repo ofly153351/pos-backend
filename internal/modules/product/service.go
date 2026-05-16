@@ -83,6 +83,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if input.Quantity != nil {
 		product.Quantity = *input.Quantity
 	}
+	if input.MinStock != nil {
+		product.MinStock = *input.MinStock
+	}
+	if input.MaxStock != nil {
+		product.MaxStock = input.MaxStock
+	}
 	if product.SKU == "" {
 		sku, err := s.generateUniqueSKU(ctx, storeID)
 		if err != nil {
@@ -171,6 +177,15 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 	if input.Quantity != nil {
 		current.Quantity = *input.Quantity
+	}
+	if input.MinStock != nil {
+		current.MinStock = *input.MinStock
+	}
+	if input.MaxStock != nil {
+		current.MaxStock = input.MaxStock
+	}
+	if input.ClearMaxStock {
+		current.MaxStock = nil
 	}
 	if input.IsActive != nil {
 		current.IsActive = *input.IsActive
@@ -306,6 +321,12 @@ func validateExisting(product Product) error {
 	}
 	if product.Quantity < 0 {
 		return ErrInvalidQuantity
+	}
+	if product.MinStock < 0 {
+		return ErrInvalidMinStock
+	}
+	if product.MaxStock != nil && *product.MaxStock < product.MinStock {
+		return ErrInvalidMaxStock
 	}
 	if product.BasePrice < 0 {
 		return ErrInvalidBasePrice

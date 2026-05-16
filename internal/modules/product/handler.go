@@ -85,7 +85,7 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -121,6 +121,20 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 			return CreateProductRequest{}, err
 		}
 		req.Quantity = &parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return CreateProductRequest{}, err
+		}
+		req.MinStock = &parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("max_stock")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return CreateProductRequest{}, err
+		}
+		req.MaxStock = &parsed
 	}
 	basePrice, err := parseRequiredFloat(c.FormValue("base_price"))
 	if err != nil {
@@ -178,6 +192,20 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 		}
 		req.Quantity = &parsed
 	}
+	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.MinStock = &parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("max_stock")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.MaxStock = &parsed
+	}
 	if value := strings.TrimSpace(c.FormValue("base_price")); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -198,6 +226,13 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 			return UpdateProductRequest{}, err
 		}
 		req.ClearSpecialPrice = parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("clear_max_stock")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.ClearMaxStock = parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("clear_special_window")); value != "" {
 		parsed, err := strconv.ParseBool(value)
