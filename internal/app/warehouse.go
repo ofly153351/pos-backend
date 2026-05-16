@@ -26,5 +26,6 @@ func registerWarehouseRoutes(protected fiber.Router, deps appDependencies) {
 	// Warehouse-Product association
 	protected.Get("/stores/:storeID/warehouses/:warehouseID/products", handler.ListProducts)
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/products", handler.AddProduct)
+	protected.Put("/stores/:storeID/warehouses/:warehouseID/products/:productID", handler.UpdateProduct)
 	protected.Delete("/stores/:storeID/warehouses/:warehouseID/products/:productID", handler.RemoveProduct)
 }

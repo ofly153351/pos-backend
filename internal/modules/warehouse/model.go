@@ -46,10 +46,16 @@ type WarehouseProduct struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"column:created_at"`
 
 	// Joined fields from products table
-	ProductName  string  `json:"product_name,omitempty" gorm:"column:product_name;->"`
-	ProductSKU   string  `json:"product_sku,omitempty" gorm:"column:product_sku;->"`
-	ProductPrice float64 `json:"product_price,omitempty" gorm:"column:product_price;->"`
-	ImageURL     string  `json:"image_url,omitempty" gorm:"column:image_url;->"`
+	ProductName      string  `json:"product_name,omitempty" gorm:"column:product_name;->"`
+	ProductSKU       string  `json:"product_sku,omitempty" gorm:"column:product_sku;->"`
+	ProductBarcode   string  `json:"product_barcode,omitempty" gorm:"column:product_barcode;->"`
+	ProductPrice     float64 `json:"product_price,omitempty" gorm:"column:product_price;->"`
+	ImageURL         string  `json:"image_url,omitempty" gorm:"column:image_url;->"`
+	ProductTypeName  string  `json:"product_type_name,omitempty" gorm:"column:product_type_name;->"`
+	ProductUnitName  string  `json:"product_unit_name,omitempty" gorm:"column:product_unit_name;->"`
+	ProductMinStock  int     `json:"product_min_stock,omitempty" gorm:"column:product_min_stock;->"`
+	ProductMaxStock  *int    `json:"product_max_stock,omitempty" gorm:"column:product_max_stock;->"`
+	ProductQuantity  int     `json:"product_quantity,omitempty" gorm:"column:product_quantity;->"`
 }
 
 func (WarehouseProduct) TableName() string {
@@ -59,4 +65,8 @@ func (WarehouseProduct) TableName() string {
 type AddWarehouseProductRequest struct {
 	ProductID string `json:"product_id"`
 	Quantity  int    `json:"quantity"`
+}
+
+type UpdateWarehouseProductRequest struct {
+	Quantity *int `json:"quantity"`
 }

@@ -14,6 +14,7 @@ type Product struct {
 	BrandID             string     `json:"brand_id,omitempty" gorm:"column:brand_id"`
 	BrandName           string     `json:"brand_name,omitempty" gorm:"-"`
 	SKU                 string     `json:"sku,omitempty" gorm:"column:sku"`
+	Barcode             string     `json:"barcode,omitempty" gorm:"column:barcode"`
 	ProductUnitID       string     `json:"product_unit_id" gorm:"column:product_unit_id"`
 	ProductUnitName     string     `json:"product_unit_name,omitempty" gorm:"-"`
 	ImageURL            string     `json:"image_url,omitempty" gorm:"column:image_url"`
@@ -38,6 +39,7 @@ type CreateProductRequest struct {
 	Name                string
 	BrandID             string
 	SKU                 string
+	Barcode             string
 	ProductTypeID       string
 	ProductUnitID       string
 	Quantity            *int
@@ -55,6 +57,8 @@ type UpdateProductRequest struct {
 	Name                *string
 	BrandID             *string
 	SKU                 *string
+	Barcode             *string
+	ClearBarcode        bool
 	ProductTypeID       *string
 	ProductUnitID       *string
 	Quantity            *int

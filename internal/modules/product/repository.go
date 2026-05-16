@@ -15,6 +15,7 @@ type Repository interface {
 	Update(ctx context.Context, product Product) (Product, error)
 	UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error
 	SKUExists(ctx context.Context, storeID, sku string) (bool, error)
+	BarcodeExists(ctx context.Context, storeID, barcode string) (bool, error)
 	ListProductIDsWithoutSKU(ctx context.Context, storeID string) ([]string, error)
 	Delete(ctx context.Context, storeID, productID string) error
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
@@ -38,6 +39,7 @@ type productQueryRow struct {
 	BrandName           *string    `gorm:"column:brand_name"`
 	Name                string     `gorm:"column:name"`
 	SKU                 *string    `gorm:"column:sku"`
+	Barcode             *string    `gorm:"column:barcode"`
 	ImageURL            *string    `gorm:"column:image_url"`
 	MinStock            int        `gorm:"column:min_stock"`
 	MaxStock            *int       `gorm:"column:max_stock"`
@@ -88,6 +90,11 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	} else {
 		payload["sku"] = product.SKU
 	}
+	if product.Barcode == "" {
+		payload["barcode"] = nil
+	} else {
+		payload["barcode"] = product.Barcode
+	}
 	if product.ImageURL == "" {
 		payload["image_url"] = nil
 	} else {
@@ -120,7 +127,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ?", storeID).
 		Order("pv.created_at DESC").
 		Limit(limit).
@@ -144,7 +151,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
@@ -188,6 +195,11 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		updates["sku"] = nil
 	} else {
 		updates["sku"] = product.SKU
+	}
+	if product.Barcode == "" {
+		updates["barcode"] = nil
+	} else {
+		updates["barcode"] = product.Barcode
 	}
 	if product.ImageURL == "" {
 		updates["image_url"] = nil
@@ -244,6 +256,18 @@ func (r PostgresRepository) SKUExists(ctx context.Context, storeID, sku string) 
 	err := r.db.WithContext(ctx).
 		Table("products").
 		Where("store_id = ? AND sku = ?", storeID, sku).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func (r PostgresRepository) BarcodeExists(ctx context.Context, storeID, barcode string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("products").
+		Where("store_id = ? AND barcode = ?", storeID, barcode).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -368,6 +392,9 @@ func (row productQueryRow) toProduct() Product {
 	}
 	if row.SKU != nil {
 		product.SKU = *row.SKU
+	}
+	if row.Barcode != nil {
+		product.Barcode = *row.Barcode
 	}
 	if row.ImageURL != nil {
 		product.ImageURL = *row.ImageURL

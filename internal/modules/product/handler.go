@@ -112,6 +112,7 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		Name:          c.FormValue("name"),
 		BrandID:       c.FormValue("brand_id"),
 		SKU:           c.FormValue("sku"),
+		Barcode:       c.FormValue("barcode"),
 		ProductTypeID: c.FormValue("product_type_id"),
 		ProductUnitID: c.FormValue("unit_id"),
 	}
@@ -179,6 +180,9 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 	if value := c.FormValue("sku"); value != "" {
 		req.SKU = &value
 	}
+	if value := c.FormValue("barcode"); value != "" {
+		req.Barcode = &value
+	}
 	if value := c.FormValue("product_type_id"); value != "" {
 		req.ProductTypeID = &value
 	}
@@ -233,6 +237,13 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 			return UpdateProductRequest{}, err
 		}
 		req.ClearMaxStock = parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("clear_barcode")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.ClearBarcode = parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("clear_special_window")); value != "" {
 		parsed, err := strconv.ParseBool(value)

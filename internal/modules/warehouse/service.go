@@ -168,6 +168,32 @@ func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, w
 	return s.repo.ListProducts(ctx, warehouseID)
 }
 
+func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string, quantity int) error {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbiddenStoreAccess
+	}
+
+	// Verify warehouse belongs to store
+	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
+		return err
+	}
+
+	// Verify product exists in warehouse
+	exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, productID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrProductNotInWarehouse
+	}
+
+	return s.repo.UpdateProduct(ctx, warehouseID, productID, quantity)
+}
+
 func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string) error {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {

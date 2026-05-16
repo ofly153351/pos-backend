@@ -18,6 +18,7 @@ type Repository interface {
 	// Warehouse-Product association
 	AddProduct(ctx context.Context, wp WarehouseProduct) (WarehouseProduct, error)
 	ListProducts(ctx context.Context, warehouseID string) ([]WarehouseProduct, error)
+	UpdateProduct(ctx context.Context, warehouseID, productID string, quantity int) error
 	RemoveProduct(ctx context.Context, warehouseID, productID string) error
 	ProductExistsInWarehouse(ctx context.Context, warehouseID, productID string) (bool, error)
 	ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error)
@@ -156,17 +157,38 @@ func (r PostgresRepository) ListProducts(ctx context.Context, warehouseID string
 			warehouse_products.id,
 			warehouse_products.warehouse_id,
 			warehouse_products.product_id,
+			warehouse_products.quantity,
 			warehouse_products.created_at,
-			products.name AS product_name,
-			products.sku AS product_sku,
-			products.base_price AS product_price,
-			products.image_url
+			pv.name AS product_name,
+			pv.sku AS product_sku,
+			pv.barcode AS product_barcode,
+			pv.base_price AS product_price,
+			pv.image_url,
+			pv.product_type_name,
+			pv.product_unit_name,
+			pv.min_stock AS product_min_stock,
+			pv.max_stock AS product_max_stock,
+			pv.quantity AS product_quantity
 		`).
-		Joins("JOIN products ON products.id = warehouse_products.product_id").
+		Joins("JOIN product_view pv ON pv.id = warehouse_products.product_id").
 		Where("warehouse_products.warehouse_id = ?", warehouseID).
-		Order("products.name ASC").
+		Order("pv.name ASC").
 		Find(&items).Error
 	return items, err
+}
+
+func (r PostgresRepository) UpdateProduct(ctx context.Context, warehouseID, productID string, quantity int) error {
+	result := r.db.WithContext(ctx).
+		Table("warehouse_products").
+		Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+		Update("quantity", quantity)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrProductNotInWarehouse
+	}
+	return nil
 }
 
 func (r PostgresRepository) RemoveProduct(ctx context.Context, warehouseID, productID string) error {

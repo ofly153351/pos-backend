@@ -70,6 +70,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		Name:                strings.TrimSpace(input.Name),
 		BrandID:             strings.TrimSpace(input.BrandID),
 		SKU:                 strings.TrimSpace(input.SKU),
+		Barcode:             strings.TrimSpace(input.Barcode),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		ImageURL:            imageURL,
 		Quantity:            0,
@@ -95,6 +96,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 			return Product{}, err
 		}
 		product.SKU = sku
+	}
+	if product.Barcode == "" {
+		barcode, err := s.generateUniqueBarcode(ctx, storeID)
+		if err != nil {
+			return Product{}, err
+		}
+		product.Barcode = barcode
 	}
 
 	return s.repo.Create(ctx, product)
@@ -165,6 +173,12 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 	if input.SKU != nil {
 		current.SKU = strings.TrimSpace(*input.SKU)
+	}
+	if input.Barcode != nil {
+		current.Barcode = strings.TrimSpace(*input.Barcode)
+	}
+	if input.ClearBarcode {
+		current.Barcode = ""
 	}
 	if input.ProductTypeID != nil {
 		current.ProductTypeID = strings.TrimSpace(*input.ProductTypeID)
@@ -345,6 +359,21 @@ func (s Service) generateUniqueSKU(ctx context.Context, storeID string) (string,
 	for i := 0; i < maxAttempts; i++ {
 		candidate := buildEAN13(newBarcode12Digits())
 		exists, err := s.repo.SKUExists(ctx, storeID, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+	return "", ErrGenerateSKUFailed
+}
+
+func (s Service) generateUniqueBarcode(ctx context.Context, storeID string) (string, error) {
+	const maxAttempts = 20
+	for i := 0; i < maxAttempts; i++ {
+		candidate := buildEAN13(newBarcode12Digits())
+		exists, err := s.repo.BarcodeExists(ctx, storeID, candidate)
 		if err != nil {
 			return "", err
 		}

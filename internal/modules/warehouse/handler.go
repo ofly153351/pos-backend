@@ -99,6 +99,30 @@ func (h Handler) ListProducts(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "warehouse products fetched", result)
 }
 
+func (h Handler) UpdateProduct(c *fiber.Ctx) error {
+	var req UpdateWarehouseProductRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if req.Quantity == nil || *req.Quantity < 0 {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid quantity", nil)
+	}
+	if err := h.service.UpdateProduct(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), c.Params("productID"), *req.Quantity); err != nil {
+		return writeError(c, err)
+	}
+	// Re-fetch the updated product
+	result, err := h.service.ListProducts(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	for _, p := range result {
+		if p.ProductID == c.Params("productID") {
+			return httpx.Success(c, fiber.StatusOK, "product quantity updated", p)
+		}
+	}
+	return httpx.Success(c, fiber.StatusOK, "product quantity updated", nil)
+}
+
 func (h Handler) RemoveProduct(c *fiber.Ctx) error {
 	if err := h.service.RemoveProduct(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), c.Params("productID")); err != nil {
 		return writeError(c, err)
