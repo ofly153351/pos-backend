@@ -2,6 +2,7 @@ package app
 
 import (
 	"gorm.io/gorm"
+
 	"pos-backend/internal/config"
 )
 
@@ -23,5 +24,6 @@ func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 		invoiceHandler:      newInvoiceHandler(cfg, db),
 		subscriptionHandler: newSubscriptionHandler(db),
 		dashboardHandler:    newDashboardHandler(db),
+		warehouseHandler:    newWarehouseHandler(db),
 	}
 }

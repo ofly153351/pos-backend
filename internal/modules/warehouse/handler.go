@@ -1,0 +1,107 @@
+package warehouse
+
+import (
+	"errors"
+
+	"github.com/gofiber/fiber/v2"
+
+	"pos-backend/internal/middleware"
+	"pos-backend/internal/platform/httpx"
+)
+
+type Handler struct{ service Service }
+
+func NewHandler(service Service) Handler { return Handler{service: service} }
+
+func (h Handler) Create(c *fiber.Ctx) error {
+	var req CreateWarehouseRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.Create(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "warehouse created", result)
+}
+
+func (h Handler) ListByStore(c *fiber.Ctx) error {
+	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouses fetched", result)
+}
+
+func (h Handler) GetByID(c *fiber.Ctx) error {
+	result, err := h.service.GetByID(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse fetched", result)
+}
+
+func (h Handler) Update(c *fiber.Ctx) error {
+	var req UpdateWarehouseRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.Update(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse updated", result)
+}
+
+func (h Handler) Delete(c *fiber.Ctx) error {
+	if err := h.service.Delete(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID")); err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse deleted", nil)
+}
+
+func writeError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, ErrInvalidName):
+		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrForbiddenStoreAccess):
+		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+	case errors.Is(err, ErrWarehouseNotFound), errors.Is(err, ErrProductNotFound):
+		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	case errors.Is(err, ErrProductAlreadyInWarehouse):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrProductNotInWarehouse):
+		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	default:
+		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+	}
+}
+
+// Warehouse-Product handlers
+
+func (h Handler) AddProduct(c *fiber.Ctx) error {
+	var req AddWarehouseProductRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.AddProduct(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "product added to warehouse", result)
+}
+
+func (h Handler) ListProducts(c *fiber.Ctx) error {
+	result, err := h.service.ListProducts(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse products fetched", result)
+}
+
+func (h Handler) RemoveProduct(c *fiber.Ctx) error {
+	if err := h.service.RemoveProduct(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), c.Params("productID")); err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "product removed from warehouse", nil)
+}
