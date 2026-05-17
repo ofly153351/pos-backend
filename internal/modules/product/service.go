@@ -174,6 +174,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.SKU != nil {
 		current.SKU = strings.TrimSpace(*input.SKU)
 	}
+	if input.ClearSKU {
+		current.SKU = ""
+	}
 	if input.Barcode != nil {
 		current.Barcode = strings.TrimSpace(*input.Barcode)
 	}

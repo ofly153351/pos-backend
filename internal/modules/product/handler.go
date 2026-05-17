@@ -245,6 +245,13 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 		}
 		req.ClearBarcode = parsed
 	}
+	if value := strings.TrimSpace(c.FormValue("clear_sku")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.ClearSKU = parsed
+	}
 	if value := strings.TrimSpace(c.FormValue("clear_special_window")); value != "" {
 		parsed, err := strconv.ParseBool(value)
 		if err != nil {

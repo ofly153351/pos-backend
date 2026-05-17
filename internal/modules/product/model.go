@@ -59,6 +59,7 @@ type UpdateProductRequest struct {
 	SKU                 *string
 	Barcode             *string
 	ClearBarcode        bool
+	ClearSKU            bool
 	ProductTypeID       *string
 	ProductUnitID       *string
 	Quantity            *int
