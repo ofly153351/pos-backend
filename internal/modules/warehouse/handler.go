@@ -62,7 +62,7 @@ func (h Handler) Delete(c *fiber.Ctx) error {
 
 func writeError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidName):
+	case errors.Is(err, ErrInvalidName), errors.Is(err, ErrStandaloneProductNameRequired):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -116,7 +116,7 @@ func (h Handler) UpdateProduct(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	for _, p := range result {
-		if p.ProductID == c.Params("productID") {
+		if p.ProductID != nil && *p.ProductID == c.Params("productID") {
 			return httpx.Success(c, fiber.StatusOK, "product quantity updated", p)
 		}
 	}

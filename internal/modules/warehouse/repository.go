@@ -138,10 +138,34 @@ func (r PostgresRepository) AddProduct(ctx context.Context, wp WarehouseProduct)
 	payload := map[string]any{
 		"id":           wp.ID,
 		"warehouse_id": wp.WarehouseID,
-		"product_id":   wp.ProductID,
 		"quantity":     wp.Quantity,
 		"created_at":   wp.CreatedAt,
 	}
+
+	if wp.ProductID != nil && *wp.ProductID != "" {
+		payload["product_id"] = *wp.ProductID
+	}
+
+	// Standalone fields
+	if wp.StandaloneName != "" {
+		payload["name"] = wp.StandaloneName
+	}
+	if wp.StandaloneSKU != "" {
+		payload["sku"] = wp.StandaloneSKU
+	}
+	if wp.StandaloneBarcode != "" {
+		payload["barcode"] = wp.StandaloneBarcode
+	}
+	if wp.StandalonePrice > 0 {
+		payload["price"] = wp.StandalonePrice
+	}
+	if wp.StandaloneUnitName != "" {
+		payload["unit_name"] = wp.StandaloneUnitName
+	}
+	if wp.StandaloneTypeName != "" {
+		payload["type_name"] = wp.StandaloneTypeName
+	}
+
 	err := r.db.WithContext(ctx).Table("warehouse_products").Create(payload).Error
 	if err != nil {
 		return WarehouseProduct{}, err
@@ -159,28 +183,46 @@ func (r PostgresRepository) ListProducts(ctx context.Context, warehouseID string
 			warehouse_products.product_id,
 			warehouse_products.quantity,
 			warehouse_products.created_at,
-			pv.name AS product_name,
-			pv.sku AS product_sku,
-			pv.barcode AS product_barcode,
-			pv.base_price AS product_price,
-			pv.image_url,
-			pv.product_type_name,
-			pv.product_unit_name,
+			warehouse_products.name AS standalone_name,
+			warehouse_products.sku AS standalone_sku,
+			warehouse_products.barcode AS standalone_barcode,
+			warehouse_products.price AS standalone_price,
+			warehouse_products.unit_name AS standalone_unit_name,
+			warehouse_products.type_name AS standalone_type_name,
+			COALESCE(pv.name, warehouse_products.name) AS product_name,
+			COALESCE(pv.sku, warehouse_products.sku) AS product_sku,
+			COALESCE(pv.barcode, warehouse_products.barcode) AS product_barcode,
+			COALESCE(pv.base_price, warehouse_products.price) AS product_price,
+			COALESCE(pv.image_url, '') AS image_url,
+			COALESCE(pv.product_type_name, warehouse_products.type_name) AS product_type_name,
+			COALESCE(pv.product_unit_name, warehouse_products.unit_name) AS product_unit_name,
 			pv.min_stock AS product_min_stock,
 			pv.max_stock AS product_max_stock,
 			pv.quantity AS product_quantity
 		`).
-		Joins("JOIN product_view pv ON pv.id = warehouse_products.product_id").
+		Joins("LEFT JOIN product_view pv ON pv.id = warehouse_products.product_id").
 		Where("warehouse_products.warehouse_id = ?", warehouseID).
-		Order("pv.name ASC").
+		Order("COALESCE(pv.name, warehouse_products.name) ASC").
 		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// For standalone products (product_id is null), use the warehouse_product id as product_id
+	// so the frontend can use it as an identifier in checkbox/update/delete operations.
+	for i := range items {
+		if items[i].ProductID == nil || *items[i].ProductID == "" {
+			items[i].ProductID = &items[i].ID
+		}
+	}
+
 	return items, err
 }
 
 func (r PostgresRepository) UpdateProduct(ctx context.Context, warehouseID, productID string, quantity int) error {
 	result := r.db.WithContext(ctx).
 		Table("warehouse_products").
-		Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
 		Update("quantity", quantity)
 	if result.Error != nil {
 		return result.Error
@@ -194,7 +236,7 @@ func (r PostgresRepository) UpdateProduct(ctx context.Context, warehouseID, prod
 func (r PostgresRepository) RemoveProduct(ctx context.Context, warehouseID, productID string) error {
 	result := r.db.WithContext(ctx).
 		Table("warehouse_products").
-		Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
 		Delete(nil)
 	if result.Error != nil {
 		return result.Error
@@ -209,7 +251,7 @@ func (r PostgresRepository) ProductExistsInWarehouse(ctx context.Context, wareho
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("warehouse_products").
-		Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -218,6 +260,11 @@ func (r PostgresRepository) ProductExistsInWarehouse(ctx context.Context, wareho
 }
 
 func (r PostgresRepository) ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error) {
+	// For standalone products, productID is the warehouse_product id, not a real product_id.
+	// Return true to skip the check — we'll validate standalone fields elsewhere.
+	if productID == "" {
+		return true, nil
+	}
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("products").

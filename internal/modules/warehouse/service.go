@@ -127,27 +127,50 @@ func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, war
 		return WarehouseProduct{}, err
 	}
 
-	// Verify product belongs to store
-	if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
-		return WarehouseProduct{}, err
+	var wp WarehouseProduct
+
+	if req.IsStandalone() {
+		// Standalone mode — validate name is required
+		if strings.TrimSpace(req.Name) == "" {
+			return WarehouseProduct{}, ErrStandaloneProductNameRequired
+		}
+		wp = WarehouseProduct{
+			ID:               newID(),
+			WarehouseID:      warehouseID,
+			Quantity:         req.Quantity,
+			CreatedAt:        time.Now().UTC(),
+			StandaloneName:   strings.TrimSpace(req.Name),
+			StandaloneSKU:    strings.TrimSpace(req.SKU),
+			StandaloneBarcode: strings.TrimSpace(req.Barcode),
+			StandalonePrice:  req.Price,
+			StandaloneUnitName: strings.TrimSpace(req.UnitName),
+			StandaloneTypeName: strings.TrimSpace(req.TypeName),
+		}
+	} else {
+		// Reference mode — verify product belongs to store
+		if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
+			return WarehouseProduct{}, err
+		}
+
+		// Check duplicate
+		exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, req.ProductID)
+		if err != nil {
+			return WarehouseProduct{}, err
+		}
+		if exists {
+			return WarehouseProduct{}, ErrProductAlreadyInWarehouse
+		}
+
+		pid := req.ProductID
+		wp = WarehouseProduct{
+			ID:          newID(),
+			WarehouseID: warehouseID,
+			ProductID:   &pid,
+			Quantity:    req.Quantity,
+			CreatedAt:   time.Now().UTC(),
+		}
 	}
 
-	// Check duplicate
-	exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, req.ProductID)
-	if err != nil {
-		return WarehouseProduct{}, err
-	}
-	if exists {
-		return WarehouseProduct{}, ErrProductAlreadyInWarehouse
-	}
-
-	wp := WarehouseProduct{
-		ID:          newID(),
-		WarehouseID: warehouseID,
-		ProductID:   req.ProductID,
-		Quantity:    req.Quantity,
-		CreatedAt:   time.Now().UTC(),
-	}
 	return s.repo.AddProduct(ctx, wp)
 }
 
