@@ -24,6 +24,8 @@ type appDependencies struct {
 	subscriptionHandler any
 	dashboardHandler    any
 	warehouseHandler    any
+	purchasingHandler   any
+	stockMovementHandler any
 }
 
 func registerBaseRoutes(app *fiber.App, cfg config.Config) {
@@ -56,6 +58,8 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerSubscriptionRoutes(protected, deps)
 	registerDashboardRoutes(protected, deps)
 	registerWarehouseRoutes(protected, deps)
+	registerPurchasingRoutes(protected, deps)
+	registerStockMovementRoutes(protected, deps)
 
 	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo), middleware.RequireRoles(auth.RolePlatformAdmin))
 	registerAdminSubscriptionRoutes(admin, deps)

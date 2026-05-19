@@ -17,6 +17,7 @@ type Product struct {
 	Barcode             string     `json:"barcode,omitempty" gorm:"column:barcode"`
 	ProductUnitID       string     `json:"product_unit_id" gorm:"column:product_unit_id"`
 	ProductUnitName     string     `json:"product_unit_name,omitempty" gorm:"-"`
+	CostPrice           float64    `json:"cost_price,omitempty" gorm:"column:cost_price"`
 	ImageURL            string     `json:"image_url,omitempty" gorm:"column:image_url"`
 	MinStock            int        `json:"min_stock" gorm:"column:min_stock"`
 	MaxStock            *int       `json:"max_stock,omitempty" gorm:"column:max_stock"`
