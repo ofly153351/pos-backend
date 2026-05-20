@@ -452,6 +452,31 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 	}
 	if strings.TrimSpace(productUnitID) != "" {
 		payload["product_unit_id"] = productUnitID
+	} else {
+		// product_unit_id is NOT NULL — find or create a default unit for this store
+		var defaultUnitID string
+		unitID := newID()
+		err := r.db.WithContext(ctx).
+			Table("product_units").
+			Where("store_id = ?", storeID).
+			Order("created_at ASC").
+			Select("id").
+			Take(&defaultUnitID).Error
+		if err != nil {
+			// Create a default 'unit' for this store
+			defaultUnitID = unitID
+			if err := r.db.WithContext(ctx).Table("product_units").Create(map[string]any{
+				"id":         defaultUnitID,
+				"store_id":   storeID,
+				"name":       "unit",
+				"is_active":  true,
+				"created_at": now,
+				"updated_at": now,
+			}).Error; err != nil {
+				return "", err
+			}
+		}
+		payload["product_unit_id"] = defaultUnitID
 	}
 	if err := r.db.WithContext(ctx).Table("products").Create(payload).Error; err != nil {
 		return "", err
