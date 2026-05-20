@@ -160,16 +160,16 @@ func (r PostgresRepository) AddProduct(ctx context.Context, storeID, warehouseID
 		// No location exists — create default
 		locationID = newID()
 		now := time.Now().UTC()
-		err = r.db.WithContext(ctx).Table("locations").Create(map[string]any{
-			"id":            locationID,
-			"store_id":      storeID,
-			"warehouse_id":  warehouseID,
-			"name":          "คลังหลัก",
-			"is_sale_point": true,
-			"is_active":     true,
-			"created_at":    now,
-			"updated_at":    now,
-		}).Error
+			err = r.db.WithContext(ctx).Table("locations").Create(map[string]any{
+				"id":            locationID,
+				"store_id":      storeID,
+				"warehouse_id":  warehouseID,
+				"name":          "คลังหลัก",
+				"is_sale_point": false,
+				"is_active":     true,
+				"created_at":    now,
+				"updated_at":    now,
+			}).Error
 		if err != nil {
 			return WarehouseProduct{}, err
 		}

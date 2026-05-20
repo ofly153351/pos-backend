@@ -379,12 +379,21 @@ func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, store
 	var locID string
 	err := r.db.WithContext(ctx).
 		Table("locations").
-		Where("store_id = ? AND is_sale_point = ?", storeID, true).
+		Where("store_id = ? AND is_sale_point = ?", storeID, false).
 		Order("created_at ASC").
 		Select("id").
 		Take(&locID).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Try any location (for stores with only sale_point locations)
+			if err2 := r.db.WithContext(ctx).
+				Table("locations").
+				Where("store_id = ?", storeID).
+				Order("created_at ASC").
+				Select("id").
+				Take(&locID).Error; err2 == nil {
+				goto found
+			}
 			// Auto-create a default receiving location
 			locID = newID()
 			var whID string
@@ -403,7 +412,7 @@ func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, store
 					"store_id":     storeID,
 					"warehouse_id": whID,
 					"name":         "รับสินค้าเข้า",
-					"is_sale_point": true,
+					"is_sale_point": false,
 					"is_active":    true,
 					"created_at":   gorm.Expr("NOW()"),
 					"updated_at":   gorm.Expr("NOW()"),
@@ -414,6 +423,7 @@ func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, store
 			return err
 		}
 	}
+found:
 
 	// Upsert stock at location, update cost_price on product
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
