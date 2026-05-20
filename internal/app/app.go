@@ -9,22 +9,23 @@ import (
 )
 
 type appDependencies struct {
-	tokenManager        auth.TokenManager
-	authUserRepo        auth.UserRepository
-	authHandler         auth.Handler
-	storeHandler        any
-	productTypeHandler  any
-	productUnitHandler  any
-	productBrandHandler any
-	productHandler      any
-	customerHandler     any
-	vatHandler          any
-	saleHandler         any
-	invoiceHandler      any
-	subscriptionHandler any
-	dashboardHandler    any
-	warehouseHandler    any
-	purchasingHandler   any
+	tokenManager         auth.TokenManager
+	authUserRepo         auth.UserRepository
+	authHandler          auth.Handler
+	storeHandler         any
+	productTypeHandler   any
+	productUnitHandler   any
+	productBrandHandler  any
+	productHandler       any
+	customerHandler      any
+	vatHandler           any
+	saleHandler          any
+	parkedBillHandler    any
+	invoiceHandler       any
+	subscriptionHandler  any
+	dashboardHandler     any
+	warehouseHandler     any
+	purchasingHandler    any
 	stockMovementHandler any
 }
 
@@ -54,6 +55,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerCustomerRoutes(protected, deps)
 	registerVATRoutes(protected, deps)
 	registerSaleRoutes(protected, deps)
+	registerParkedBillRoutes(protected, deps)
 	registerInvoiceRoutes(protected, deps)
 	registerSubscriptionRoutes(protected, deps)
 	registerDashboardRoutes(protected, deps)
