@@ -69,3 +69,13 @@ type AddWarehouseProductRequest struct {
 type UpdateWarehouseProductRequest struct {
 	Quantity *int `json:"quantity"`
 }
+
+// WarehouseTransferRequest is the request to transfer stock from a warehouse
+// to another warehouse or to a sale_point location.
+type WarehouseTransferRequest struct {
+	ProductID       string `json:"product_id"`
+	Quantity        int    `json:"quantity"`
+	DestinationType string `json:"destination_type"` // "warehouse" or "stock"
+	DestinationID   string `json:"destination_id"`   // warehouse_id if destination_type="warehouse", ignored if "stock"
+	Note            string `json:"note"`
+}

@@ -70,6 +70,10 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, ErrProductNotInWarehouse):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	case errors.Is(err, ErrTransferInvalidDestination), errors.Is(err, ErrTransferSameWarehouse), errors.Is(err, ErrTransferZeroQty):
+		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrInsufficientStock):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
@@ -126,4 +130,16 @@ func (h Handler) RemoveProduct(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "product removed from warehouse", nil)
+}
+
+// TransferStock handles transferring stock from a warehouse to another warehouse or sale_point.
+func (h Handler) TransferStock(c *fiber.Ctx) error {
+	var req WarehouseTransferRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if err := h.service.TransferStock(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), req); err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "stock transferred successfully", nil)
 }

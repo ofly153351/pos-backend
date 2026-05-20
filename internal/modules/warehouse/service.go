@@ -205,3 +205,60 @@ func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, 
 
 	return s.repo.RemoveProduct(ctx, storeID, warehouseID, productID)
 }
+
+// ──────────────────────────────────────────────
+// Transfer stock service methods
+// ──────────────────────────────────────────────
+
+func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID, warehouseID string, req WarehouseTransferRequest) error {
+	// Validate quantity
+	if req.Quantity <= 0 {
+		return ErrTransferZeroQty
+	}
+
+	// Validate destination type
+	if req.DestinationType != "warehouse" && req.DestinationType != "stock" {
+		return ErrTransferInvalidDestination
+	}
+
+	// Verify user can manage this store
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbiddenStoreAccess
+	}
+
+	// Verify source warehouse exists and belongs to store
+	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
+		return err
+	}
+
+	// Verify product belongs to store
+	if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
+		return err
+	}
+
+	// Determine destination identifier
+	var destID string
+	switch req.DestinationType {
+	case "warehouse":
+		destID = req.DestinationID
+		if destID == "" {
+			return ErrTransferInvalidDestination
+		}
+		// Verify destination warehouse is different from source
+		if destID == warehouseID {
+			return ErrTransferSameWarehouse
+		}
+		// Verify destination warehouse exists and belongs to store
+		if _, err := s.repo.GetByID(ctx, storeID, destID); err != nil {
+			return err
+		}
+	case "stock":
+		destID = "stock"
+	}
+
+	return s.repo.TransferStock(ctx, storeID, warehouseID, req.ProductID, req.Quantity, destID, req.Note, actor.UserID)
+}

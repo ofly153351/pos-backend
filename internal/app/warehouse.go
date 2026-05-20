@@ -28,4 +28,7 @@ func registerWarehouseRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/products", handler.AddProduct)
 	protected.Put("/stores/:storeID/warehouses/:warehouseID/products/:productID", handler.UpdateProduct)
 	protected.Delete("/stores/:storeID/warehouses/:warehouseID/products/:productID", handler.RemoveProduct)
+
+	// Warehouse Transfer
+	protected.Post("/stores/:storeID/warehouses/:warehouseID/transfer", handler.TransferStock)
 }

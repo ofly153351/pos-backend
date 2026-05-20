@@ -23,6 +23,9 @@ type Repository interface {
 	RemoveProduct(ctx context.Context, storeID, warehouseID, productID string) error
 	ProductExistsInWarehouse(ctx context.Context, warehouseID, productID string) (bool, error)
 	ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error)
+
+	// TransferStock transfers stock between warehouses or to a sale_point location.
+	TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, note, createdBy string) error
 }
 
 type PostgresRepository struct{ db *gorm.DB }
@@ -340,4 +343,129 @@ func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, 
 		return WarehouseProduct{}, err
 	}
 	return wp, nil
+}
+
+// ──────────────────────────────────────────────
+// Transfer stock methods
+// ──────────────────────────────────────────────
+
+func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, note, createdBy string) error {
+	// 1. Find the first active location in source warehouse
+	var srcLoc struct {
+		ID string `gorm:"column:id"`
+	}
+	if err := r.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("warehouse_id = ? AND is_active = ?", sourceWarehouseID, true).
+		Order("created_at ASC").
+		Take(&srcLoc).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrProductNotInWarehouse
+		}
+		return err
+	}
+
+	var destLocationID string
+	if destWarehouseID == "stock" {
+		// 2a. Find first is_sale_point location in the store
+		var salePoint struct {
+			ID string `gorm:"column:id"`
+		}
+		if err := r.db.WithContext(ctx).
+			Table("locations").
+			Select("id").
+			Where("store_id = ? AND is_sale_point = ? AND is_active = ?", storeID, true, true).
+			Order("created_at ASC").
+			Take(&salePoint).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("no sale point location found in this store")
+			}
+			return err
+		}
+		destLocationID = salePoint.ID
+	} else {
+		// 2b. Find first active location in destination warehouse
+		var destLoc struct {
+			ID string `gorm:"column:id"`
+		}
+		if err := r.db.WithContext(ctx).
+			Table("locations").
+			Select("id").
+			Where("warehouse_id = ? AND is_active = ?", destWarehouseID, true).
+			Order("created_at ASC").
+			Take(&destLoc).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrProductNotInWarehouse
+			}
+			return err
+		}
+		destLocationID = destLoc.ID
+	}
+
+	// 3. Execute transfer in a transaction
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// a. Deduct from source location
+		result := tx.Exec(`
+			UPDATE stocks SET quantity = quantity - ?, updated_at = NOW()
+			WHERE product_id = ? AND location_id = ? AND quantity >= ?
+		`, qty, productID, srcLoc.ID, qty)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrInsufficientStock
+		}
+
+		// b. Upsert to destination location
+		stockID := newID()
+		if err := tx.Exec(`
+			INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+			ON CONFLICT (product_id, location_id)
+			DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+		`, stockID, storeID, productID, destLocationID, qty, qty).Error; err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+
+		// c. Create OUT movement record
+		outID := newID()
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":                       outID,
+			"store_id":                 storeID,
+			"product_id":               productID,
+			"location_id":              srcLoc.ID,
+			"destination_location_id":  destLocationID,
+			"quantity_change":          -qty,
+			"type":                     "TRANSFER",
+			"note":                     note,
+			"created_by":               createdBy,
+			"created_at":               now,
+			"updated_at":               now,
+		}).Error; err != nil {
+			return err
+		}
+
+		// d. Create IN movement record
+		inID := newID()
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              inID,
+			"store_id":        storeID,
+			"product_id":      productID,
+			"location_id":     destLocationID,
+			"reference_id":    srcLoc.ID,
+			"quantity_change": qty,
+			"type":            "TRANSFER",
+			"note":            note,
+			"created_by":      createdBy,
+			"created_at":      now,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
