@@ -94,11 +94,10 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 func (r PostgresRepository) GetLowStockProducts(ctx context.Context, storeID string, threshold, limit int) ([]LowStockProduct, error) {
 	var items []LowStockProduct
 	err := r.db.WithContext(ctx).
-		Table("products p").
-		Select("p.id AS product_id, p.name, COALESCE(p.sku, '') AS sku, COALESCE(pu.name, '') AS unit_type, p.quantity").
-		Joins("LEFT JOIN product_units pu ON pu.id = p.product_unit_id").
-		Where("p.store_id = ? AND p.is_active = TRUE AND p.quantity <= ?", storeID, threshold).
-		Order("p.quantity ASC, p.updated_at DESC").
+		Table("product_view pv").
+		Select("pv.id AS product_id, pv.name, COALESCE(pv.sku, '') AS sku, COALESCE(pv.product_unit_name, '') AS unit_type, pv.min_stock, pv.max_stock, COALESCE(pv.total_stock, 0) AS quantity").
+		Where("pv.store_id = ? AND pv.is_active = TRUE AND COALESCE(pv.total_stock, 0) <= ?", storeID, threshold).
+		Order("COALESCE(pv.total_stock, 0) ASC, pv.updated_at DESC").
 		Limit(limit).
 		Find(&items).Error
 	return items, err

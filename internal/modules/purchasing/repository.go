@@ -37,7 +37,7 @@ type Repository interface {
 
 	// Products
 	GetProduct(ctx context.Context, storeID, productID string) (ProductRef, error)
-	UpdateProductStockAndCost(ctx context.Context, productID string, addQty int, costPrice float64) error
+	UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64) error
 	CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error)
 
 	// Access
@@ -355,8 +355,8 @@ func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID s
 		CostPrice float64
 	}
 	err := r.db.WithContext(ctx).
-		Table("products").
-		Select("id, store_id, name, quantity, cost_price").
+		Table("product_view").
+		Select("id, store_id, name, COALESCE(total_stock, 0) AS quantity, cost_price").
 		Where("id = ? AND store_id = ?", productID, storeID).
 		Take(&prod).Error
 	if err != nil {
@@ -374,14 +374,63 @@ func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID s
 	}, nil
 }
 
-func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, productID string, addQty int, costPrice float64) error {
-	return r.db.WithContext(ctx).
-		Table("products").
-		Where("id = ?", productID).
-		Updates(map[string]any{
-			"quantity":   gorm.Expr("quantity + ?", addQty),
-			"cost_price": costPrice,
-		}).Error
+func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64) error {
+	// Find or create a default receiving location in this store
+	var locID string
+	err := r.db.WithContext(ctx).
+		Table("locations").
+		Where("store_id = ? AND is_sale_point = ?", storeID, true).
+		Order("created_at ASC").
+		Select("id").
+		Take(&locID).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Auto-create a default receiving location
+			locID = newID()
+			var whID string
+			if err := r.db.WithContext(ctx).
+				Table("warehouses").
+				Where("store_id = ?", storeID).
+				Order("created_at ASC").
+				Select("id").
+				Take(&whID).Error; err != nil {
+				return err
+			}
+			if err := r.db.WithContext(ctx).
+				Table("locations").
+				Create(map[string]any{
+					"id":           locID,
+					"store_id":     storeID,
+					"warehouse_id": whID,
+					"name":         "รับสินค้าเข้า",
+					"is_sale_point": true,
+					"is_active":    true,
+					"created_at":   gorm.Expr("NOW()"),
+					"updated_at":   gorm.Expr("NOW()"),
+				}).Error; err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	// Upsert stock at location, update cost_price on product
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, GREATEST(0, ?), NOW(), NOW())
+			 ON CONFLICT (product_id, location_id)
+			 DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+			 WHERE (stocks.quantity + ?) >= 0`,
+			newID(), storeID, productID, locID, addQty, addQty, addQty,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Table("products").
+			Where("id = ?", productID).
+			Update("cost_price", costPrice).Error
+	})
 }
 
 func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error) {
@@ -393,7 +442,6 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 		"name":        name,
 		"sku":         sku,
 		"barcode":     barcode,
-		"quantity":    0,
 		"base_price":  basePrice,
 		"is_active":   true,
 		"created_at":  now,

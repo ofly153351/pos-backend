@@ -298,7 +298,7 @@ func (s Service) ReceiveStock(ctx context.Context, actor auth.Claims, storeID, p
 		}
 
 		// Update product stock and cost price
-		if err := s.repo.UpdateProductStockAndCost(ctx, item.ProductID, reqQty, item.UnitCost); err != nil {
+		if err := s.repo.UpdateProductStockAndCost(ctx, storeID, item.ProductID, reqQty, item.UnitCost); err != nil {
 			return PurchaseOrder{}, err
 		}
 

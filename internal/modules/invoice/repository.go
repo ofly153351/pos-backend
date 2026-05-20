@@ -78,12 +78,42 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 		invoice.DiscountAmount += invoice.Items[index].LineDiscountTotal
 		invoice.TotalAmount += invoice.Items[index].LineTotal
 
-		if err := tx.Table("products").
-			Where("store_id = ? AND id = ?", invoice.StoreID, product.ID).
-			Updates(map[string]any{
-				"quantity":   gorm.Expr("quantity - ?", item.Quantity),
-				"updated_at": invoice.CreatedAt,
-			}).Error; err != nil {
+		// Find a sale point location to deduct from
+		var deductLocID string
+		if err := tx.Table("locations").
+			Where("store_id = ? AND is_sale_point = ?", invoice.StoreID, true).
+			Order("created_at ASC").
+			Select("id").
+			Take(&deductLocID).Error; err != nil {
+			return Invoice{}, err
+		}
+
+		// Deduct from stocks table
+		stockResult := tx.Exec(
+			`UPDATE stocks SET quantity = quantity - ?, updated_at = NOW()
+			 WHERE store_id = ? AND product_id = ? AND location_id = ? AND quantity >= ?`,
+			item.Quantity, invoice.StoreID, product.ID, deductLocID, item.Quantity,
+		)
+		if stockResult.Error != nil {
+			return Invoice{}, stockResult.Error
+		}
+		if stockResult.RowsAffected == 0 {
+			return Invoice{}, fmt.Errorf("insufficient stock for product %s", item.ProductID)
+		}
+
+		// Create stock movement record
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":                newID(),
+			"store_id":          invoice.StoreID,
+			"product_id":        product.ID,
+			"location_id":       deductLocID,
+			"movement_type":     "SALE",
+			"quantity_change":   -item.Quantity,
+			"reference_type":    "invoice",
+			"reference_id":      invoice.ID,
+			"note":              "invoice deduction",
+			"created_at":        invoice.CreatedAt,
+		}).Error; err != nil {
 			return Invoice{}, err
 		}
 	}
@@ -409,7 +439,7 @@ func (r PostgresRepository) lockProductForInvoice(ctx context.Context, tx *gorm.
 	err := tx.WithContext(ctx).
 		Table("products p").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE((SELECT pu.name FROM product_units pu WHERE pu.id = p.product_unit_id), '') AS unit_type, p.quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
+		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE((SELECT pu.name FROM product_units pu WHERE pu.id = p.product_unit_id), '') AS unit_type, COALESCE((SELECT SUM(s.quantity) FROM stocks s WHERE s.product_id = p.id), 0) AS quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
 		Where("p.store_id = ? AND p.id = ?", storeID, productID).
 		Take(&product).Error
 	if err != nil {
