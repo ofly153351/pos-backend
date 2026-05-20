@@ -219,7 +219,7 @@ func (r PostgresRepository) ListProducts(ctx context.Context, warehouseID string
 		`).
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
-		Where("locations.warehouse_id = ?", warehouseID).
+		Where("locations.warehouse_id = ? AND locations.is_sale_point = ?", warehouseID, false).
 		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
 		Order("COALESCE(pv.name, '') ASC").
 		Find(&items).Error
@@ -285,7 +285,7 @@ func (r PostgresRepository) ProductExistsInWarehouse(ctx context.Context, wareho
 		Table("stocks").
 		Select("COALESCE(SUM(stocks.quantity), 0)").
 		Joins("JOIN locations ON locations.id = stocks.location_id").
-		Where("locations.warehouse_id = ? AND stocks.product_id = ?", warehouseID, productID).
+		Where("locations.warehouse_id = ? AND locations.is_sale_point = ? AND stocks.product_id = ?", warehouseID, false, productID).
 		Scan(&total).Error
 	if err != nil {
 		return false, err
@@ -336,7 +336,7 @@ func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, 
 		`).
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
-		Where("stocks.product_id = ? AND locations.warehouse_id = ?", productID, warehouseID).
+		Where("stocks.product_id = ? AND locations.warehouse_id = ? AND locations.is_sale_point = ?", productID, warehouseID, false).
 		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
 		Take(&wp).Error
 	if err != nil {
