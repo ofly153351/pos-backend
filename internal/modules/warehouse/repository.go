@@ -379,9 +379,34 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 			Order("created_at ASC").
 			Take(&salePoint).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("no sale point location found in this store")
+				// Auto-create a sale point location
+				var whID string
+				if err2 := r.db.WithContext(ctx).
+					Table("warehouses").
+					Where("store_id = ? AND is_active = ?", storeID, true).
+					Order("created_at ASC").
+					Select("id").
+					Take(&whID).Error; err2 != nil {
+					return errors.New("no warehouse found in this store")
+				}
+				salePoint.ID = newID()
+				if err2 := r.db.WithContext(ctx).
+					Table("locations").
+					Create(map[string]any{
+						"id":            salePoint.ID,
+						"store_id":      storeID,
+						"warehouse_id":  whID,
+						"name":          "หน้าร้าน",
+						"is_sale_point": true,
+						"is_active":     true,
+						"created_at":    time.Now().UTC(),
+						"updated_at":    time.Now().UTC(),
+					}).Error; err2 != nil {
+					return err2
+				}
+			} else {
+				return err
 			}
-			return err
 		}
 		destLocationID = salePoint.ID
 	} else {
