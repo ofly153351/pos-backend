@@ -53,4 +53,6 @@ DROP TABLE IF EXISTS warehouse_products;
 
 -- 5. Remove quantity from products (now tracked in stocks table)
 -- First ensure no FK references to products.quantity are broken
+-- Must drop product_view first as it depends on products.quantity
+DROP VIEW IF EXISTS product_view;
 ALTER TABLE products DROP COLUMN IF EXISTS quantity;
