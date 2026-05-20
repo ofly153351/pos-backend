@@ -52,6 +52,7 @@ type productQueryRow struct {
 	SpecialPrice        *float64   `gorm:"column:special_price"`
 	SpecialPriceStartAt *time.Time `gorm:"column:special_price_start_at"`
 	SpecialPriceEndAt   *time.Time `gorm:"column:special_price_end_at"`
+	TotalStock          int        `gorm:"column:total_stock"`
 	IsActive            bool       `gorm:"column:is_active"`
 	CreatedAt           time.Time  `gorm:"column:created_at"`
 	UpdatedAt           time.Time  `gorm:"column:updated_at"`
@@ -146,7 +147,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
+	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
 		Where("pv.store_id = ?", storeID).
 		Order("pv.created_at DESC").
 		Limit(limit).
@@ -170,7 +171,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
+	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
@@ -408,6 +409,7 @@ func (row productQueryRow) toProduct() Product {
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
 		CostPrice:           row.CostPrice,
+		TotalStock:          row.TotalStock,
 	}
 	if row.BrandID != nil {
 		product.BrandID = *row.BrandID
