@@ -111,7 +111,9 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id stri
 	return s.repo.Delete(ctx, storeID, id)
 }
 
+// ──────────────────────────────────────────────
 // Warehouse-Product service methods
+// ──────────────────────────────────────────────
 
 func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID string, req AddWarehouseProductRequest) (WarehouseProduct, error) {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
@@ -127,51 +129,12 @@ func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, war
 		return WarehouseProduct{}, err
 	}
 
-	var wp WarehouseProduct
-
-	if req.IsStandalone() {
-		// Standalone mode — validate name is required
-		if strings.TrimSpace(req.Name) == "" {
-			return WarehouseProduct{}, ErrStandaloneProductNameRequired
-		}
-		wp = WarehouseProduct{
-			ID:               newID(),
-			WarehouseID:      warehouseID,
-			Quantity:         req.Quantity,
-			CreatedAt:        time.Now().UTC(),
-			StandaloneName:   strings.TrimSpace(req.Name),
-			StandaloneSKU:    strings.TrimSpace(req.SKU),
-			StandaloneBarcode: strings.TrimSpace(req.Barcode),
-			StandalonePrice:  req.Price,
-			StandaloneUnitName: strings.TrimSpace(req.UnitName),
-			StandaloneTypeName: strings.TrimSpace(req.TypeName),
-		}
-	} else {
-		// Reference mode — verify product belongs to store
-		if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
-			return WarehouseProduct{}, err
-		}
-
-		// Check duplicate
-		exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, req.ProductID)
-		if err != nil {
-			return WarehouseProduct{}, err
-		}
-		if exists {
-			return WarehouseProduct{}, ErrProductAlreadyInWarehouse
-		}
-
-		pid := req.ProductID
-		wp = WarehouseProduct{
-			ID:          newID(),
-			WarehouseID: warehouseID,
-			ProductID:   &pid,
-			Quantity:    req.Quantity,
-			CreatedAt:   time.Now().UTC(),
-		}
+	// Verify product belongs to store
+	if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
+		return WarehouseProduct{}, err
 	}
 
-	return s.repo.AddProduct(ctx, wp)
+	return s.repo.AddProduct(ctx, storeID, warehouseID, req.ProductID, req.Quantity)
 }
 
 func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]WarehouseProduct, error) {
@@ -214,7 +177,7 @@ func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, 
 		return ErrProductNotInWarehouse
 	}
 
-	return s.repo.UpdateProduct(ctx, warehouseID, productID, quantity)
+	return s.repo.UpdateProduct(ctx, storeID, warehouseID, productID, quantity)
 }
 
 func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string) error {
@@ -231,5 +194,14 @@ func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, 
 		return err
 	}
 
-	return s.repo.RemoveProduct(ctx, warehouseID, productID)
+	// Verify product exists in warehouse
+	exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, productID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrProductNotInWarehouse
+	}
+
+	return s.repo.RemoveProduct(ctx, storeID, warehouseID, productID)
 }

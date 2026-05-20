@@ -3,6 +3,7 @@ package warehouse
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -15,11 +16,11 @@ type Repository interface {
 	Delete(ctx context.Context, storeID, id string) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 
-	// Warehouse-Product association
-	AddProduct(ctx context.Context, wp WarehouseProduct) (WarehouseProduct, error)
+	// Warehouse-Product association (via stocks + locations)
+	AddProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) (WarehouseProduct, error)
 	ListProducts(ctx context.Context, warehouseID string) ([]WarehouseProduct, error)
-	UpdateProduct(ctx context.Context, warehouseID, productID string, quantity int) error
-	RemoveProduct(ctx context.Context, warehouseID, productID string) error
+	UpdateProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) error
+	RemoveProduct(ctx context.Context, storeID, warehouseID, productID string) error
 	ProductExistsInWarehouse(ctx context.Context, warehouseID, productID string) (bool, error)
 	ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error)
 }
@@ -132,112 +133,140 @@ func nilEmpty(s string) any {
 	return s
 }
 
-// Warehouse-Product repository methods
+// ──────────────────────────────────────────────
+// Warehouse-Product repository methods (stocks + locations)
+// ──────────────────────────────────────────────
 
-func (r PostgresRepository) AddProduct(ctx context.Context, wp WarehouseProduct) (WarehouseProduct, error) {
-	payload := map[string]any{
-		"id":           wp.ID,
-		"warehouse_id": wp.WarehouseID,
-		"quantity":     wp.Quantity,
-		"created_at":   wp.CreatedAt,
+func (r PostgresRepository) AddProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) (WarehouseProduct, error) {
+	// Ensure at least one active location exists in the warehouse.
+	// If none, auto-create a default location called "คลังหลัก".
+	var locationID string
+	var loc struct {
+		ID string `gorm:"column:id"`
+	}
+	err := r.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("warehouse_id = ? AND is_active = ?", warehouseID, true).
+		Order("created_at ASC").
+		Take(&loc).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return WarehouseProduct{}, err
+		}
+		// No location exists — create default
+		locationID = newID()
+		now := time.Now().UTC()
+		err = r.db.WithContext(ctx).Table("locations").Create(map[string]any{
+			"id":            locationID,
+			"store_id":      storeID,
+			"warehouse_id":  warehouseID,
+			"name":          "คลังหลัก",
+			"is_sale_point": true,
+			"is_active":     true,
+			"created_at":    now,
+			"updated_at":    now,
+		}).Error
+		if err != nil {
+			return WarehouseProduct{}, err
+		}
+	} else {
+		locationID = loc.ID
 	}
 
-	if wp.ProductID != nil && *wp.ProductID != "" {
-		payload["product_id"] = *wp.ProductID
-	}
-
-	// Standalone fields
-	if wp.StandaloneName != "" {
-		payload["name"] = wp.StandaloneName
-	}
-	if wp.StandaloneSKU != "" {
-		payload["sku"] = wp.StandaloneSKU
-	}
-	if wp.StandaloneBarcode != "" {
-		payload["barcode"] = wp.StandaloneBarcode
-	}
-	if wp.StandalonePrice > 0 {
-		payload["price"] = wp.StandalonePrice
-	}
-	if wp.StandaloneUnitName != "" {
-		payload["unit_name"] = wp.StandaloneUnitName
-	}
-	if wp.StandaloneTypeName != "" {
-		payload["type_name"] = wp.StandaloneTypeName
-	}
-
-	err := r.db.WithContext(ctx).Table("warehouse_products").Create(payload).Error
+	// Upsert stock — add quantity to existing or insert new row
+	stockID := newID()
+	err = r.db.WithContext(ctx).Exec(`
+		INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+		ON CONFLICT (product_id, location_id)
+		DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+	`, stockID, storeID, productID, locationID, quantity, quantity).Error
 	if err != nil {
 		return WarehouseProduct{}, err
 	}
-	return wp, nil
+
+	return r.getWarehouseProduct(ctx, productID, warehouseID)
 }
 
 func (r PostgresRepository) ListProducts(ctx context.Context, warehouseID string) ([]WarehouseProduct, error) {
 	var items []WarehouseProduct
 	err := r.db.WithContext(ctx).
-		Table("warehouse_products").
+		Table("stocks").
 		Select(`
-			warehouse_products.id,
-			warehouse_products.warehouse_id,
-			warehouse_products.product_id,
-			warehouse_products.quantity,
-			warehouse_products.created_at,
-			warehouse_products.name AS standalone_name,
-			warehouse_products.sku AS standalone_sku,
-			warehouse_products.barcode AS standalone_barcode,
-			warehouse_products.price AS standalone_price,
-			warehouse_products.unit_name AS standalone_unit_name,
-			warehouse_products.type_name AS standalone_type_name,
-			COALESCE(pv.name, warehouse_products.name) AS product_name,
-			COALESCE(pv.sku, warehouse_products.sku) AS product_sku,
-			COALESCE(pv.barcode, warehouse_products.barcode) AS product_barcode,
-			COALESCE(pv.base_price, warehouse_products.price) AS product_price,
+			stocks.product_id,
+			COALESCE(pv.name, '') AS product_name,
+			COALESCE(pv.sku, '') AS product_sku,
+			COALESCE(pv.barcode, '') AS product_barcode,
+			COALESCE(pv.base_price, 0) AS product_price,
+			COALESCE(pv.cost_price, 0) AS cost_price,
+			CASE
+				WHEN pv.special_price IS NOT NULL
+					AND (pv.special_price_start_at IS NULL OR pv.special_price_start_at <= NOW())
+					AND (pv.special_price_end_at IS NULL OR pv.special_price_end_at >= NOW())
+				THEN pv.special_price
+				ELSE pv.base_price
+			END AS effective_price,
 			COALESCE(pv.image_url, '') AS image_url,
-			COALESCE(pv.product_type_name, warehouse_products.type_name) AS product_type_name,
-			COALESCE(pv.product_unit_name, warehouse_products.unit_name) AS product_unit_name,
-			pv.min_stock AS product_min_stock,
+			COALESCE(pv.product_type_name, '') AS product_type_name,
+			COALESCE(pv.product_unit_name, '') AS product_unit_name,
+			COALESCE(pv.min_stock, 0) AS product_min_stock,
 			pv.max_stock AS product_max_stock,
-			pv.quantity AS product_quantity
+			SUM(stocks.quantity) AS quantity
 		`).
-		Joins("LEFT JOIN product_view pv ON pv.id = warehouse_products.product_id").
-		Where("warehouse_products.warehouse_id = ?", warehouseID).
-		Order("COALESCE(pv.name, warehouse_products.name) ASC").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
+		Where("locations.warehouse_id = ?", warehouseID).
+		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
+		Order("COALESCE(pv.name, '') ASC").
 		Find(&items).Error
 	if err != nil {
 		return nil, err
 	}
-
-	// For standalone products (product_id is null), use the warehouse_product id as product_id
-	// so the frontend can use it as an identifier in checkbox/update/delete operations.
-	for i := range items {
-		if items[i].ProductID == nil || *items[i].ProductID == "" {
-			items[i].ProductID = &items[i].ID
-		}
+	if items == nil {
+		items = []WarehouseProduct{}
 	}
-
-	return items, err
+	return items, nil
 }
 
-func (r PostgresRepository) UpdateProduct(ctx context.Context, warehouseID, productID string, quantity int) error {
-	result := r.db.WithContext(ctx).
-		Table("warehouse_products").
-		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
-		Update("quantity", quantity)
-	if result.Error != nil {
-		return result.Error
+func (r PostgresRepository) UpdateProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) error {
+	// Find the first active location in the warehouse
+	var loc struct {
+		ID string `gorm:"column:id"`
 	}
-	if result.RowsAffected == 0 {
+	err := r.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("warehouse_id = ? AND is_active = ?", warehouseID, true).
+		Order("created_at ASC").
+		Take(&loc).Error
+	if err != nil {
 		return ErrProductNotInWarehouse
 	}
-	return nil
+
+	// Remove stock entries for this product at all OTHER locations in the warehouse
+	err = r.db.WithContext(ctx).
+		Exec(`DELETE FROM stocks WHERE product_id = ? AND location_id IN (
+			SELECT id FROM locations WHERE warehouse_id = ? AND id != ?
+		)`, productID, warehouseID, loc.ID).Error
+	if err != nil {
+		return err
+	}
+
+	// Upsert the total quantity at the first location
+	return r.db.WithContext(ctx).Exec(`
+		INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+		ON CONFLICT (product_id, location_id)
+		DO UPDATE SET quantity = ?, updated_at = NOW()
+	`, newID(), storeID, productID, loc.ID, quantity, quantity).Error
 }
 
-func (r PostgresRepository) RemoveProduct(ctx context.Context, warehouseID, productID string) error {
+func (r PostgresRepository) RemoveProduct(ctx context.Context, storeID, warehouseID, productID string) error {
 	result := r.db.WithContext(ctx).
-		Table("warehouse_products").
-		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
-		Delete(nil)
+		Exec(`DELETE FROM stocks WHERE product_id = ? AND location_id IN (
+			SELECT id FROM locations WHERE warehouse_id = ?
+		)`, productID, warehouseID)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -248,23 +277,20 @@ func (r PostgresRepository) RemoveProduct(ctx context.Context, warehouseID, prod
 }
 
 func (r PostgresRepository) ProductExistsInWarehouse(ctx context.Context, warehouseID, productID string) (bool, error) {
-	var count int64
+	var total int
 	err := r.db.WithContext(ctx).
-		Table("warehouse_products").
-		Where("warehouse_id = ? AND (product_id = ? OR id = ?)", warehouseID, productID, productID).
-		Count(&count).Error
+		Table("stocks").
+		Select("COALESCE(SUM(stocks.quantity), 0)").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("locations.warehouse_id = ? AND stocks.product_id = ?", warehouseID, productID).
+		Scan(&total).Error
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	return total > 0, nil
 }
 
 func (r PostgresRepository) ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error) {
-	// For standalone products, productID is the warehouse_product id, not a real product_id.
-	// Return true to skip the check — we'll validate standalone fields elsewhere.
-	if productID == "" {
-		return true, nil
-	}
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("products").
@@ -277,4 +303,41 @@ func (r PostgresRepository) ProductBelongsToStore(ctx context.Context, storeID, 
 		return false, ErrProductNotFound
 	}
 	return true, nil
+}
+
+// getWarehouseProduct fetches a single product's aggregated stock info from a warehouse.
+func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, warehouseID string) (WarehouseProduct, error) {
+	var wp WarehouseProduct
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select(`
+			stocks.product_id,
+			COALESCE(pv.name, '') AS product_name,
+			COALESCE(pv.sku, '') AS product_sku,
+			COALESCE(pv.barcode, '') AS product_barcode,
+			COALESCE(pv.base_price, 0) AS product_price,
+			COALESCE(pv.cost_price, 0) AS cost_price,
+			CASE
+				WHEN pv.special_price IS NOT NULL
+					AND (pv.special_price_start_at IS NULL OR pv.special_price_start_at <= NOW())
+					AND (pv.special_price_end_at IS NULL OR pv.special_price_end_at >= NOW())
+				THEN pv.special_price
+				ELSE pv.base_price
+			END AS effective_price,
+			COALESCE(pv.image_url, '') AS image_url,
+			COALESCE(pv.product_type_name, '') AS product_type_name,
+			COALESCE(pv.product_unit_name, '') AS product_unit_name,
+			COALESCE(pv.min_stock, 0) AS product_min_stock,
+			pv.max_stock AS product_max_stock,
+			SUM(stocks.quantity) AS quantity
+		`).
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
+		Where("stocks.product_id = ? AND locations.warehouse_id = ?", productID, warehouseID).
+		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
+		Take(&wp).Error
+	if err != nil {
+		return WarehouseProduct{}, err
+	}
+	return wp, nil
 }
