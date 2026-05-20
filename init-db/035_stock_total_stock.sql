@@ -21,7 +21,17 @@ SELECT
     p.image_url,
     p.min_stock,
     p.max_stock,
-    COALESCE(SUM(s.quantity), 0)::integer AS total_stock,
+    COALESCE((
+        SELECT SUM(s.quantity)
+        FROM stocks s
+        JOIN locations l ON l.id = s.location_id AND l.is_sale_point = TRUE
+        WHERE s.product_id = p.id
+    ), 0)::integer AS total_stock,
+    COALESCE((
+        SELECT SUM(s.quantity)
+        FROM stocks s
+        WHERE s.product_id = p.id
+    ), 0)::integer AS warehouse_stock,
     p.base_price,
     p.special_price,
     p.special_price_start_at,
@@ -37,7 +47,6 @@ FROM products p
 LEFT JOIN product_types pt ON pt.id = p.product_type_id
 LEFT JOIN product_units pu ON pu.id = p.product_unit_id
 LEFT JOIN product_brands pb ON pb.id = p.brand_id
-LEFT JOIN stocks s ON s.product_id = p.id
 GROUP BY
     p.id, p.store_id, p.product_type_id, pt.name,
     p.product_unit_id, pu.name, p.brand_id, pb.name,
