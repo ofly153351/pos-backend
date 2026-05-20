@@ -17,4 +17,5 @@ var (
 	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")
 	ErrProductNotFound         = errors.New("product not found")
 	ErrGenerateSKUFailed       = errors.New("unable to generate unique barcode")
+	ErrProductInUse            = errors.New("cannot delete product: it is referenced by active purchase orders or other records")
 )

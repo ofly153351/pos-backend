@@ -91,6 +91,8 @@ func writeProductError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrProductNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	case errors.Is(err, ErrProductInUse):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	default:
 		claims := middleware.ClaimsFromContext(c)
 		log.Printf(
@@ -113,6 +115,9 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		BrandID:       c.FormValue("brand_id"),
 		SKU:           c.FormValue("sku"),
 		Barcode:       c.FormValue("barcode"),
+		ProductCode:   strings.TrimSpace(c.FormValue("product_code")),
+		Description:   strings.TrimSpace(c.FormValue("description")),
+		StorageLocation: strings.TrimSpace(c.FormValue("storage_location")),
 		ProductTypeID: c.FormValue("product_type_id"),
 		ProductUnitID: c.FormValue("unit_id"),
 	}
@@ -142,6 +147,13 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		return CreateProductRequest{}, err
 	}
 	req.BasePrice = basePrice
+	if value := strings.TrimSpace(c.FormValue("cost_price")); value != "" {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return CreateProductRequest{}, err
+		}
+		req.CostPrice = parsed
+	}
 	if value := strings.TrimSpace(c.FormValue("special_price")); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -217,6 +229,13 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 		}
 		req.BasePrice = &parsed
 	}
+	if value := strings.TrimSpace(c.FormValue("cost_price")); value != "" {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.CostPrice = &parsed
+	}
 	if value := strings.TrimSpace(c.FormValue("special_price")); value != "" {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -251,6 +270,22 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 			return UpdateProductRequest{}, err
 		}
 		req.ClearSKU = parsed
+	}
+	if value := c.FormValue("product_code"); value != "" {
+		req.ProductCode = &value
+	}
+	if value := c.FormValue("description"); value != "" {
+		req.Description = &value
+	}
+	if value := c.FormValue("storage_location"); value != "" {
+		req.StorageLocation = &value
+	}
+	if value := strings.TrimSpace(c.FormValue("clear_product_code")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.ClearProductCode = parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("clear_special_window")); value != "" {
 		parsed, err := strconv.ParseBool(value)

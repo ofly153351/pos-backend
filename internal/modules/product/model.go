@@ -27,6 +27,9 @@ type Product struct {
 	SpecialPriceStartAt *time.Time `json:"special_price_start_at,omitempty" gorm:"column:special_price_start_at"`
 	SpecialPriceEndAt   *time.Time `json:"special_price_end_at,omitempty" gorm:"column:special_price_end_at"`
 	EffectivePrice      float64    `json:"effective_price" gorm:"-"`
+	ProductCode         string     `json:"product_code,omitempty" gorm:"column:product_code"`
+	Description         string     `json:"description,omitempty" gorm:"column:description"`
+	StorageLocation     string     `json:"storage_location,omitempty" gorm:"column:storage_location"`
 	IsActive            bool       `json:"is_active" gorm:"column:is_active"`
 	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt           time.Time  `json:"updated_at" gorm:"column:updated_at"`
@@ -41,12 +44,16 @@ type CreateProductRequest struct {
 	BrandID             string
 	SKU                 string
 	Barcode             string
+	ProductCode         string
+	Description         string
+	StorageLocation     string
 	ProductTypeID       string
 	ProductUnitID       string
 	Quantity            *int
 	MinStock            *int
 	MaxStock            *int
 	BasePrice           float64
+	CostPrice           float64
 	SpecialPrice        *float64
 	SpecialPriceStartAt *time.Time
 	SpecialPriceEndAt   *time.Time
@@ -59,8 +66,12 @@ type UpdateProductRequest struct {
 	BrandID             *string
 	SKU                 *string
 	Barcode             *string
+	ProductCode         *string
+	Description         *string
+	StorageLocation     *string
 	ClearBarcode        bool
 	ClearSKU            bool
+	ClearProductCode    bool
 	ProductTypeID       *string
 	ProductUnitID       *string
 	Quantity            *int
@@ -68,6 +79,7 @@ type UpdateProductRequest struct {
 	MaxStock            *int
 	ClearMaxStock       bool
 	BasePrice           *float64
+	CostPrice           *float64
 	SpecialPrice        *float64
 	ClearSpecialPrice   bool
 	SpecialPriceStartAt *time.Time

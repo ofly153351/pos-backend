@@ -3,6 +3,7 @@ package product
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -40,6 +41,10 @@ type productQueryRow struct {
 	Name                string     `gorm:"column:name"`
 	SKU                 *string    `gorm:"column:sku"`
 	Barcode             *string    `gorm:"column:barcode"`
+	ProductCode         *string    `gorm:"column:product_code"`
+	Description         *string    `gorm:"column:description"`
+	StorageLocation     *string    `gorm:"column:storage_location"`
+	CostPrice           float64    `gorm:"column:cost_price"`
 	ImageURL            *string    `gorm:"column:image_url"`
 	MinStock            int        `gorm:"column:min_stock"`
 	MaxStock            *int       `gorm:"column:max_stock"`
@@ -68,6 +73,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 		"min_stock":              product.MinStock,
 		"max_stock":              product.MaxStock,
 		"base_price":             product.BasePrice,
+		"cost_price":             product.CostPrice,
 		"special_price":          product.SpecialPrice,
 		"special_price_start_at": product.SpecialPriceStartAt,
 		"special_price_end_at":   product.SpecialPriceEndAt,
@@ -100,6 +106,21 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	} else {
 		payload["image_url"] = product.ImageURL
 	}
+	if product.ProductCode == "" {
+		payload["product_code"] = nil
+	} else {
+		payload["product_code"] = product.ProductCode
+	}
+	if product.Description == "" {
+		payload["description"] = nil
+	} else {
+		payload["description"] = product.Description
+	}
+	if product.StorageLocation == "" {
+		payload["storage_location"] = nil
+	} else {
+		payload["storage_location"] = product.StorageLocation
+	}
 
 	if err := r.db.WithContext(ctx).Table("products").Create(payload).Error; err != nil {
 		return Product{}, err
@@ -127,7 +148,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
 		Where("pv.store_id = ?", storeID).
 		Order("pv.created_at DESC").
 		Limit(limit).
@@ -151,7 +172,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	var row productQueryRow
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at").
+	        Select("pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.quantity, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location").
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
 	if err != nil {
@@ -175,6 +196,7 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		"min_stock":              product.MinStock,
 		"max_stock":              product.MaxStock,
 		"base_price":             product.BasePrice,
+		"cost_price":             product.CostPrice,
 		"special_price":          product.SpecialPrice,
 		"special_price_start_at": product.SpecialPriceStartAt,
 		"special_price_end_at":   product.SpecialPriceEndAt,
@@ -206,6 +228,21 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 	} else {
 		updates["image_url"] = product.ImageURL
 	}
+	if product.ProductCode == "" {
+		updates["product_code"] = nil
+	} else {
+		updates["product_code"] = product.ProductCode
+	}
+	if product.Description == "" {
+		updates["description"] = nil
+	} else {
+		updates["description"] = product.Description
+	}
+	if product.StorageLocation == "" {
+		updates["storage_location"] = nil
+	} else {
+		updates["storage_location"] = product.StorageLocation
+	}
 
 	result := r.db.WithContext(ctx).
 		Model(&Product{}).
@@ -226,6 +263,9 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, productID strin
 		Where("store_id = ? AND id = ?", storeID, productID).
 		Delete(&Product{})
 	if result.Error != nil {
+		if isForeignKeyViolation(result.Error) {
+			return ErrProductInUse
+		}
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
@@ -371,6 +411,7 @@ func (row productQueryRow) toProduct() Product {
 		IsActive:            row.IsActive,
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
+		CostPrice:           row.CostPrice,
 	}
 	if row.BrandID != nil {
 		product.BrandID = *row.BrandID
@@ -399,5 +440,18 @@ func (row productQueryRow) toProduct() Product {
 	if row.ImageURL != nil {
 		product.ImageURL = *row.ImageURL
 	}
+	if row.ProductCode != nil {
+		product.ProductCode = *row.ProductCode
+	}
+	if row.Description != nil {
+		product.Description = *row.Description
+	}
+	if row.StorageLocation != nil {
+		product.StorageLocation = *row.StorageLocation
+	}
 	return product
+}
+
+func isForeignKeyViolation(err error) bool {
+	return strings.Contains(err.Error(), "SQLSTATE 23503")
 }

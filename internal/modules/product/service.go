@@ -71,10 +71,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		BrandID:             strings.TrimSpace(input.BrandID),
 		SKU:                 strings.TrimSpace(input.SKU),
 		Barcode:             strings.TrimSpace(input.Barcode),
+		ProductCode:         strings.TrimSpace(input.ProductCode),
+		Description:         strings.TrimSpace(input.Description),
+		StorageLocation:     strings.TrimSpace(input.StorageLocation),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		ImageURL:            imageURL,
 		Quantity:            0,
 		BasePrice:           input.BasePrice,
+		CostPrice:           input.CostPrice,
 		SpecialPrice:        input.SpecialPrice,
 		SpecialPriceStartAt: input.SpecialPriceStartAt,
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
@@ -183,6 +187,18 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.ClearBarcode {
 		current.Barcode = ""
 	}
+	if input.ProductCode != nil {
+		current.ProductCode = strings.TrimSpace(*input.ProductCode)
+	}
+	if input.ClearProductCode {
+		current.ProductCode = ""
+	}
+	if input.Description != nil {
+		current.Description = strings.TrimSpace(*input.Description)
+	}
+	if input.StorageLocation != nil {
+		current.StorageLocation = strings.TrimSpace(*input.StorageLocation)
+	}
 	if input.ProductTypeID != nil {
 		current.ProductTypeID = strings.TrimSpace(*input.ProductTypeID)
 	}
@@ -191,6 +207,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 	if input.BasePrice != nil {
 		current.BasePrice = *input.BasePrice
+	}
+	if input.CostPrice != nil {
+		current.CostPrice = *input.CostPrice
 	}
 	if input.Quantity != nil {
 		current.Quantity = *input.Quantity
