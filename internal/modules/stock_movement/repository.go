@@ -10,15 +10,9 @@ import (
 type Repository interface {
 	Create(ctx context.Context, m StockMovement) (StockMovement, error)
 	ListByStore(ctx context.Context, storeID string, q ListMovementsQuery) (MovementResponse, error)
-	GetProduct(ctx context.Context, storeID, productID string) (ProductRef, error)
-	UpdateProductQuantity(ctx context.Context, productID string, addQty int) error
-}
-
-type ProductRef struct {
-	ID       string
-	StoreID  string
-	Name     string
-	Quantity int
+	UpsertStock(ctx context.Context, storeID, productID, locationID string, delta int) error
+	SetStockQuantity(ctx context.Context, storeID, productID, locationID string, qty int) error
+	GetCurrentStockQty(ctx context.Context, storeID, productID, locationID string) (int, error)
 }
 
 type PostgresRepository struct {
@@ -43,6 +37,12 @@ func (r PostgresRepository) Create(ctx context.Context, m StockMovement) (StockM
 	}
 	if m.ReferenceID != nil {
 		payload["reference_id"] = *m.ReferenceID
+	}
+	if m.LocationID != nil {
+		payload["location_id"] = *m.LocationID
+	}
+	if m.DestinationLocationID != nil {
+		payload["destination_location_id"] = *m.DestinationLocationID
 	}
 	if err := r.db.WithContext(ctx).Table("stock_movements").Create(payload).Error; err != nil {
 		return StockMovement{}, err
@@ -79,6 +79,8 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, q L
 			stock_movements.id,
 			stock_movements.store_id,
 			stock_movements.product_id,
+			stock_movements.location_id,
+			stock_movements.destination_location_id,
 			stock_movements.quantity_change,
 			stock_movements.type,
 			stock_movements.reference_id,
@@ -88,10 +90,12 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, q L
 			stock_movements.updated_at,
 			COALESCE(products.name, '') AS product_name,
 			COALESCE(products.sku, '') AS product_sku,
-			COALESCE(users.full_name, '') AS created_by_name
+			COALESCE(users.full_name, '') AS created_by_name,
+			COALESCE(locations.name, '') AS location_name
 		`).
 		Joins("LEFT JOIN products ON products.id = stock_movements.product_id").
 		Joins("LEFT JOIN users ON users.id = stock_movements.created_by").
+		Joins("LEFT JOIN locations ON locations.id = stock_movements.location_id").
 		Where("stock_movements.store_id = ?", storeID)
 	if q.ProductID != "" {
 		lq = lq.Where("stock_movements.product_id = ?", q.ProductID)
@@ -122,25 +126,66 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, q L
 	}, nil
 }
 
-func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID string) (ProductRef, error) {
-	var p ProductRef
-	err := r.db.WithContext(ctx).
-		Table("products").
-		Select("id, store_id, name, quantity").
-		Where("id = ? AND store_id = ?", productID, storeID).
-		Take(&p).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ProductRef{}, ErrProductNotFound
-		}
-		return ProductRef{}, err
+func (r PostgresRepository) UpsertStock(ctx context.Context, storeID, productID, locationID string, delta int) error {
+	id := newID()
+	result := r.db.WithContext(ctx).
+		Exec(`
+			INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+			VALUES (?, ?, ?, ?, GREATEST(0, ?), NOW(), NOW())
+			ON CONFLICT (product_id, location_id)
+			DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+			WHERE (stocks.quantity + ?) >= 0
+		`, id, storeID, productID, locationID, delta, delta, delta)
+
+	if result.Error != nil {
+		return result.Error
 	}
-	return p, nil
+	if result.RowsAffected == 0 {
+		return ErrInsufficientStock
+	}
+	return nil
 }
 
-func (r PostgresRepository) UpdateProductQuantity(ctx context.Context, productID string, addQty int) error {
-	return r.db.WithContext(ctx).
-		Table("products").
-		Where("id = ?", productID).
-		Update("quantity", gorm.Expr("quantity + ?", addQty)).Error
+func (r PostgresRepository) SetStockQuantity(ctx context.Context, storeID, productID, locationID string, qty int) error {
+	result := r.db.WithContext(ctx).
+		Table("stocks").
+		Where("store_id = ? AND product_id = ? AND location_id = ?", storeID, productID, locationID).
+		Updates(map[string]any{
+			"quantity":   qty,
+			"updated_at": gorm.Expr("NOW()"),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		// No row exists, insert new one
+		return r.db.WithContext(ctx).
+			Table("stocks").
+			Create(map[string]any{
+				"id":          newID(),
+				"store_id":    storeID,
+				"product_id":  productID,
+				"location_id": locationID,
+				"quantity":    qty,
+				"created_at":  gorm.Expr("NOW()"),
+				"updated_at":  gorm.Expr("NOW()"),
+			}).Error
+	}
+	return nil
+}
+
+func (r PostgresRepository) GetCurrentStockQty(ctx context.Context, storeID, productID, locationID string) (int, error) {
+	var qty int
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select("COALESCE(quantity, 0)").
+		Where("store_id = ? AND product_id = ? AND location_id = ?", storeID, productID, locationID).
+		Take(&qty).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return qty, nil
 }

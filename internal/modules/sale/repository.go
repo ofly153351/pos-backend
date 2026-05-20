@@ -39,8 +39,10 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		if !product.IsActive {
 			return Sale{}, ErrProductInactive
 		}
-		if product.Quantity < item.Quantity {
-			return Sale{}, fmt.Errorf("%w for product %s", ErrInsufficientStock, item.ProductID)
+
+		// Check stock availability from sale-point locations
+		if err := r.checkAndDeductSaleStock(ctx, tx, sale.StoreID, item.ProductID, item.Quantity, sale.ID); err != nil {
+			return Sale{}, err
 		}
 
 		unitPrice := resolveEffectivePrice(product, sale.SoldAt)
@@ -73,15 +75,6 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		sale.SubtotalAmount += sale.Items[index].LineSubtotal
 		sale.DiscountAmount += sale.Items[index].LineDiscountTotal
 		sale.TotalAmount += sale.Items[index].LineTotal
-
-		if err := tx.Table("products").
-			Where("store_id = ? AND id = ?", sale.StoreID, product.ID).
-			Updates(map[string]any{
-				"quantity":   gorm.Expr("quantity - ?", item.Quantity),
-				"updated_at": sale.CreatedAt,
-			}).Error; err != nil {
-			return Sale{}, err
-		}
 	}
 
 	sale.SubtotalAmount = roundMoney(sale.SubtotalAmount)
@@ -196,6 +189,94 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 	return sale, nil
 }
 
+// checkAndDeductSaleStock checks stock availability in sale-point locations
+// and deducts proportionally from them, creating stock_movement records.
+func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gorm.DB, storeID, productID string, qty int, saleID string) error {
+	// Lock and check total available stock in sale-point locations
+	var totalAvailable int
+	err := tx.WithContext(ctx).
+		Table("stocks").
+		Select("COALESCE(SUM(quantity), 0)").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true", productID, storeID).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Scan(&totalAvailable).Error
+	if err != nil {
+		return err
+	}
+	if totalAvailable < qty {
+		return fmt.Errorf("%w for product %s", ErrInsufficientStock, productID)
+	}
+
+	// Get all sale-point locations with stock for this product, ordered
+	type locationStock struct {
+		LocationID string
+		Quantity   int
+	}
+	var locationStocks []locationStock
+	err = tx.WithContext(ctx).
+		Table("stocks").
+		Select("stocks.location_id, stocks.quantity").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true AND stocks.quantity > 0", productID, storeID).
+		Order("stocks.quantity DESC").
+		Find(&locationStocks).Error
+	if err != nil {
+		return err
+	}
+
+	remaining := qty
+	movementID := newID()
+	now := gorm.Expr("NOW()")
+
+	for _, ls := range locationStocks {
+		if remaining <= 0 {
+			break
+		}
+		deduct := ls.Quantity
+		if deduct > remaining {
+			deduct = remaining
+		}
+
+		// Update stock quantity
+		result := tx.WithContext(ctx).
+			Exec(`
+				UPDATE stocks
+				SET quantity = quantity - ?, updated_at = NOW()
+				WHERE product_id = ? AND location_id = ? AND quantity >= ?
+			`, deduct, productID, ls.LocationID, deduct)
+		if result.Error != nil {
+			return result.Error
+		}
+
+		// Create stock movement record
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              newID(),
+			"store_id":        storeID,
+			"product_id":      productID,
+			"location_id":     ls.LocationID,
+			"quantity_change": -deduct,
+			"type":            "SALE",
+			"reference_id":    saleID,
+			"note":            "sale deduction",
+			"created_by":      "system",
+			"created_at":      now,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return err
+		}
+
+		remaining -= deduct
+		_ = movementID
+	}
+
+	if remaining > 0 {
+		return fmt.Errorf("%w for product %s", ErrInsufficientStock, productID)
+	}
+
+	return nil
+}
+
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
 	promptPaySelect := "'' AS store_promptpay_id"
 	if hasColumn, err := r.hasStorePromptPayIDColumn(ctx); err == nil && hasColumn {
@@ -266,7 +347,7 @@ func (r PostgresRepository) lockProductForSale(ctx context.Context, tx *gorm.DB,
 	err := tx.WithContext(ctx).
 		Table("products p").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE((SELECT pu.name FROM product_units pu WHERE pu.id = p.product_unit_id), '') AS unit_type, p.quantity, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
+		Select("p.id, p.name, COALESCE(p.sku, '') AS sku, COALESCE((SELECT pu.name FROM product_units pu WHERE pu.id = p.product_unit_id), '') AS unit_type, p.is_active, p.base_price, p.special_price, p.special_price_start_at, p.special_price_end_at").
 		Where("p.store_id = ? AND p.id = ?", storeID, productID).
 		Take(&product).Error
 	if err != nil {

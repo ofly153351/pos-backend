@@ -21,7 +21,6 @@ type Product struct {
 	ImageURL            string     `json:"image_url,omitempty" gorm:"column:image_url"`
 	MinStock            int        `json:"min_stock" gorm:"column:min_stock"`
 	MaxStock            *int       `json:"max_stock,omitempty" gorm:"column:max_stock"`
-	Quantity            int        `json:"quantity" gorm:"column:quantity"`
 	BasePrice           float64    `json:"base_price" gorm:"column:base_price"`
 	SpecialPrice        *float64   `json:"special_price,omitempty" gorm:"column:special_price"`
 	SpecialPriceStartAt *time.Time `json:"special_price_start_at,omitempty" gorm:"column:special_price_start_at"`
@@ -49,7 +48,6 @@ type CreateProductRequest struct {
 	StorageLocation     string
 	ProductTypeID       string
 	ProductUnitID       string
-	Quantity            *int
 	MinStock            *int
 	MaxStock            *int
 	BasePrice           float64
@@ -74,7 +72,6 @@ type UpdateProductRequest struct {
 	ClearProductCode    bool
 	ProductTypeID       *string
 	ProductUnitID       *string
-	Quantity            *int
 	MinStock            *int
 	MaxStock            *int
 	ClearMaxStock       bool

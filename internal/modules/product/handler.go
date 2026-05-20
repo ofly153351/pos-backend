@@ -85,7 +85,7 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidQuantity), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -120,13 +120,6 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		StorageLocation: strings.TrimSpace(c.FormValue("storage_location")),
 		ProductTypeID: c.FormValue("product_type_id"),
 		ProductUnitID: c.FormValue("unit_id"),
-	}
-	if value := strings.TrimSpace(c.FormValue("quantity")); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return CreateProductRequest{}, err
-		}
-		req.Quantity = &parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -200,13 +193,6 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 	}
 	if value := c.FormValue("unit_id"); value != "" {
 		req.ProductUnitID = &value
-	}
-	if value := strings.TrimSpace(c.FormValue("quantity")); value != "" {
-		parsed, err := strconv.Atoi(value)
-		if err != nil {
-			return UpdateProductRequest{}, err
-		}
-		req.Quantity = &parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
 		parsed, err := strconv.Atoi(value)

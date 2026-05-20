@@ -76,7 +76,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		StorageLocation:     strings.TrimSpace(input.StorageLocation),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		ImageURL:            imageURL,
-		Quantity:            0,
 		BasePrice:           input.BasePrice,
 		CostPrice:           input.CostPrice,
 		SpecialPrice:        input.SpecialPrice,
@@ -84,9 +83,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
 		IsActive:            isActive,
 		CreatedAt:           time.Now().UTC(),
-	}
-	if input.Quantity != nil {
-		product.Quantity = *input.Quantity
 	}
 	if input.MinStock != nil {
 		product.MinStock = *input.MinStock
@@ -211,9 +207,6 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.CostPrice != nil {
 		current.CostPrice = *input.CostPrice
 	}
-	if input.Quantity != nil {
-		current.Quantity = *input.Quantity
-	}
 	if input.MinStock != nil {
 		current.MinStock = *input.MinStock
 	}
@@ -336,14 +329,10 @@ func validateCreate(input CreateProductRequest) error {
 	product := Product{
 		Name:                strings.TrimSpace(input.Name),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
-		Quantity:            0,
 		BasePrice:           input.BasePrice,
 		SpecialPrice:        input.SpecialPrice,
 		SpecialPriceStartAt: input.SpecialPriceStartAt,
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
-	}
-	if input.Quantity != nil {
-		product.Quantity = *input.Quantity
 	}
 	return validateExisting(product)
 }
@@ -354,9 +343,6 @@ func validateExisting(product Product) error {
 	}
 	if strings.TrimSpace(product.ProductUnitID) == "" {
 		return ErrInvalidProductUnitID
-	}
-	if product.Quantity < 0 {
-		return ErrInvalidQuantity
 	}
 	if product.MinStock < 0 {
 		return ErrInvalidMinStock

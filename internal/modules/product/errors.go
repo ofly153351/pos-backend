@@ -4,7 +4,6 @@ import "errors"
 
 var (
 	ErrInvalidProductName      = errors.New("product name is required")
-	ErrInvalidQuantity         = errors.New("quantity must be greater than or equal to zero")
 	ErrInvalidMinStock         = errors.New("min stock must be greater than or equal to zero")
 	ErrInvalidMaxStock         = errors.New("max stock must be greater than or equal to min stock")
 	ErrInvalidBasePrice        = errors.New("base price must be greater than or equal to zero")

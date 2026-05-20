@@ -79,7 +79,6 @@ type productSnapshot struct {
 	Name                string
 	SKU                 string
 	UnitType            string
-	Quantity            int
 	IsActive            bool
 	BasePrice           float64
 	SpecialPrice        *float64
