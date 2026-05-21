@@ -230,6 +230,17 @@ func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID, 
 		return ErrForbiddenStoreAccess
 	}
 
+	// If destination_store_id is provided, verify user can also manage the target store
+	if req.DestinationStoreID != "" {
+		allowedDest, err := s.repo.UserCanManageStore(ctx, req.DestinationStoreID, actor.UserID, actor.Role)
+		if err != nil {
+			return err
+		}
+		if !allowedDest {
+			return ErrForbiddenStoreAccess
+		}
+	}
+
 	// Verify source warehouse exists and belongs to store
 	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
 		return err
@@ -260,5 +271,5 @@ func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID, 
 		destID = "stock"
 	}
 
-	return s.repo.TransferStock(ctx, storeID, warehouseID, req.ProductID, req.Quantity, destID, req.Note, actor.UserID)
+	return s.repo.TransferStock(ctx, storeID, warehouseID, req.ProductID, req.Quantity, destID, req.DestinationStoreID, req.Note, actor.UserID)
 }

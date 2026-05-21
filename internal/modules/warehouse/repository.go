@@ -25,7 +25,7 @@ type Repository interface {
 	ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error)
 
 	// TransferStock transfers stock between warehouses or to a sale_point location.
-	TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, note, createdBy string) error
+	TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, destinationStoreID, note, createdBy string) error
 }
 
 type PostgresRepository struct{ db *gorm.DB }
@@ -349,7 +349,7 @@ func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, 
 // Transfer stock methods
 // ──────────────────────────────────────────────
 
-func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, note, createdBy string) error {
+func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, destinationStoreID, note, createdBy string) error {
 	// 1. Find the first active location in source warehouse
 	var srcLoc struct {
 		ID string `gorm:"column:id"`
@@ -366,35 +366,55 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 		return err
 	}
 
+	// Determine target store for destination stock
+	targetStoreID := storeID
+	if destWarehouseID == "stock" && destinationStoreID != "" {
+		targetStoreID = destinationStoreID
+	}
+
 	var destLocationID string
 	if destWarehouseID == "stock" {
-		// 2a. Find first is_sale_point location in the store
+		// 2a. Find first is_sale_point location in the target store
 		var salePoint struct {
 			ID string `gorm:"column:id"`
 		}
 		if err := r.db.WithContext(ctx).
 			Table("locations").
 			Select("id").
-			Where("store_id = ? AND is_sale_point = ? AND is_active = ?", storeID, true, true).
+			Where("store_id = ? AND is_sale_point = ? AND is_active = ?", targetStoreID, true, true).
 			Order("created_at ASC").
 			Take(&salePoint).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// Auto-create a sale point location
+				// Auto-create a sale point location in the target store
 				var whID string
 				if err2 := r.db.WithContext(ctx).
 					Table("warehouses").
-					Where("store_id = ? AND is_active = ?", storeID, true).
+					Where("store_id = ? AND is_active = ?", targetStoreID, true).
 					Order("created_at ASC").
 					Select("id").
 					Take(&whID).Error; err2 != nil {
-					return errors.New("no warehouse found in this store")
+					// Auto-create a warehouse for the target store
+					whID = newID()
+					now := time.Now().UTC()
+					if err2 := r.db.WithContext(ctx).
+						Table("warehouses").
+						Create(map[string]any{
+							"id":         whID,
+							"store_id":   targetStoreID,
+							"name":       "คลังหลัก",
+							"is_active":  true,
+							"created_at": now,
+							"updated_at": now,
+						}).Error; err2 != nil {
+						return err2
+					}
 				}
 				salePoint.ID = newID()
 				if err2 := r.db.WithContext(ctx).
 					Table("locations").
 					Create(map[string]any{
 						"id":            salePoint.ID,
-						"store_id":      storeID,
+						"store_id":      targetStoreID,
 						"warehouse_id":  whID,
 						"name":          "หน้าร้าน",
 						"is_sale_point": true,
@@ -449,7 +469,7 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 			VALUES (?, ?, ?, ?, ?, NOW(), NOW())
 			ON CONFLICT (product_id, location_id)
 			DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
-		`, stockID, storeID, productID, destLocationID, qty, qty).Error; err != nil {
+		`, stockID, targetStoreID, productID, destLocationID, qty, qty).Error; err != nil {
 			return err
 		}
 
@@ -477,7 +497,7 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 		inID := newID()
 		if err := tx.Table("stock_movements").Create(map[string]any{
 			"id":              inID,
-			"store_id":        storeID,
+			"store_id":        targetStoreID,
 			"product_id":      productID,
 			"location_id":     destLocationID,
 			"reference_id":    srcLoc.ID,
