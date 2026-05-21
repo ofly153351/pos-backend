@@ -373,19 +373,19 @@ func (r PostgresRepository) cloneOrFindProductType(ctx context.Context, targetSt
 		Select("name, slug, description").Where("id = ?", sourceTypeID).Take(&src).Error; err != nil {
 		return "", nil // source type gone; skip rather than fail
 	}
-	var existingID string
+	var existing struct{ ID string `gorm:"column:id"` }
 	err := r.db.WithContext(ctx).Table("product_types").Select("id").
 		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
-		Take(&existingID).Error
+		Take(&existing).Error
 	if err == nil {
-		return existingID, nil
+		return existing.ID, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
 	}
 	// Ensure slug is unique in target store
 	slug := src.Slug
-	var conflict string
+	var conflict struct{ ID string `gorm:"column:id"` }
 	if r.db.WithContext(ctx).Table("product_types").Select("id").
 		Where("store_id = ? AND slug = ?", targetStoreID, slug).Take(&conflict).Error == nil {
 		slug = slug + "-" + newID()[:6]
@@ -422,12 +422,12 @@ func (r PostgresRepository) cloneOrFindProductUnit(ctx context.Context, targetSt
 		Select("name, description").Where("id = ?", sourceUnitID).Take(&src).Error; err != nil {
 		return "", err
 	}
-	var existingID string
+	var existingUnit struct{ ID string `gorm:"column:id"` }
 	err := r.db.WithContext(ctx).Table("product_units").Select("id").
 		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
-		Take(&existingID).Error
+		Take(&existingUnit).Error
 	if err == nil {
-		return existingID, nil
+		return existingUnit.ID, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
@@ -454,17 +454,17 @@ func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetS
 	if sourceBrandID == "" {
 		return "", nil
 	}
-	var srcName string
+	var srcBrand struct{ Name string `gorm:"column:name"` }
 	if err := r.db.WithContext(ctx).Table("product_brands").Select("name").
-		Where("id = ?", sourceBrandID).Take(&srcName).Error; err != nil {
+		Where("id = ?", sourceBrandID).Take(&srcBrand).Error; err != nil {
 		return "", nil
 	}
-	var existingID string
+	var existingBrand struct{ ID string `gorm:"column:id"` }
 	err := r.db.WithContext(ctx).Table("product_brands").Select("id").
-		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, srcName).
-		Take(&existingID).Error
+		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, srcBrand.Name).
+		Take(&existingBrand).Error
 	if err == nil {
-		return existingID, nil
+		return existingBrand.ID, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
@@ -473,7 +473,7 @@ func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetS
 	now := time.Now().UTC()
 	if err := r.db.WithContext(ctx).Table("product_brands").Create(map[string]any{
 		"id": newBrandID, "store_id": targetStoreID,
-		"name": srcName, "is_active": true,
+		"name": srcBrand.Name, "is_active": true,
 		"created_at": now, "updated_at": now,
 	}).Error; err != nil {
 		return "", err
@@ -486,25 +486,28 @@ func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetS
 // Returns the product ID in targetStoreID.
 func (r PostgresRepository) cloneOrFindProduct(ctx context.Context, targetStoreID, sourceProductID string) (string, error) {
 	type productRow struct {
-		ID              string  `gorm:"column:id"`
-		Name            string  `gorm:"column:name"`
-		SKU             *string `gorm:"column:sku"`
-		Barcode         *string `gorm:"column:barcode"`
-		BasePrice       float64 `gorm:"column:base_price"`
-		CostPrice       float64 `gorm:"column:cost_price"`
-		ProductTypeID   *string `gorm:"column:product_type_id"`
-		ProductUnitID   *string `gorm:"column:product_unit_id"`
-		BrandID         *string `gorm:"column:brand_id"`
-		MinStock        int     `gorm:"column:min_stock"`
-		ProductCode     *string `gorm:"column:product_code"`
-		Description     *string `gorm:"column:description"`
-		StorageLocation *string `gorm:"column:storage_location"`
+		ID                 string   `gorm:"column:id"`
+		Name               string   `gorm:"column:name"`
+		SKU                *string  `gorm:"column:sku"`
+		Barcode            *string  `gorm:"column:barcode"`
+		BasePrice          float64  `gorm:"column:base_price"`
+		CostPrice          float64  `gorm:"column:cost_price"`
+		SpecialPrice       *float64 `gorm:"column:special_price"`
+		SpecialPriceStart  *string  `gorm:"column:special_price_start_at"`
+		SpecialPriceEnd    *string  `gorm:"column:special_price_end_at"`
+		ProductTypeID      *string  `gorm:"column:product_type_id"`
+		ProductUnitID      *string  `gorm:"column:product_unit_id"`
+		BrandID            *string  `gorm:"column:brand_id"`
+		MinStock           int      `gorm:"column:min_stock"`
+		ProductCode        *string  `gorm:"column:product_code"`
+		Description        *string  `gorm:"column:description"`
+		StorageLocation    *string  `gorm:"column:storage_location"`
 	}
 
 	var src productRow
 	if err := r.db.WithContext(ctx).
 		Table("products").
-		Select("id, name, sku, barcode, base_price, cost_price, product_type_id, product_unit_id, brand_id, min_stock, product_code, description, storage_location").
+		Select("id, name, sku, barcode, base_price, cost_price, special_price, special_price_start_at, special_price_end_at, product_type_id, product_unit_id, brand_id, min_stock, product_code, description, storage_location").
 		Where("id = ?", sourceProductID).
 		Take(&src).Error; err != nil {
 		return "", err
@@ -594,6 +597,15 @@ func (r PostgresRepository) cloneOrFindProduct(ctx context.Context, targetStoreI
 	payload["product_unit_id"] = destUnitID
 	if destBrandID != "" {
 		payload["brand_id"] = destBrandID
+	}
+	if src.SpecialPrice != nil {
+		payload["special_price"] = *src.SpecialPrice
+	}
+	if src.SpecialPriceStart != nil {
+		payload["special_price_start_at"] = *src.SpecialPriceStart
+	}
+	if src.SpecialPriceEnd != nil {
+		payload["special_price_end_at"] = *src.SpecialPriceEnd
 	}
 	if src.ProductCode != nil {
 		payload["product_code"] = *src.ProductCode
