@@ -3,9 +3,11 @@ package warehouse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repository interface {
@@ -27,9 +29,11 @@ type Repository interface {
 	// TransferStock transfers stock between warehouses or to a sale_point location.
 	TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, destinationStoreID, note, createdBy string) error
 
-	// CloneWarehouseToStore clones a warehouse (with its locations) and all products
-	// that have stock in that warehouse to the target store.
-	CloneWarehouseToStore(ctx context.Context, sourceWarehouseID, targetStoreID string) (newWarehouseID string, locationIDMap map[string]string, productIDMap map[string]string, err error)
+	// ListWarehouseInventory lists all inventory items for a warehouse (warehouse_inventory table).
+	ListWarehouseInventory(ctx context.Context, warehouseID string) ([]WarehouseInventory, error)
+
+	// AllocateInventoryToStock moves quantity from warehouse_inventory to stocks (sale point).
+	AllocateInventoryToStock(ctx context.Context, storeID, warehouseID, productID string, qty int, note, createdBy string) error
 }
 
 type PostgresRepository struct{ db *gorm.DB }
@@ -353,47 +357,433 @@ func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, 
 // Transfer stock methods
 // ──────────────────────────────────────────────
 
+// cloneOrFindProductType ensures a product_type exists in targetStoreID.
+// Matches by name; creates a copy if missing. Returns "" when sourceTypeID is empty.
+func (r PostgresRepository) cloneOrFindProductType(ctx context.Context, targetStoreID, sourceTypeID string) (string, error) {
+	if sourceTypeID == "" {
+		return "", nil
+	}
+	type row struct {
+		Name        string  `gorm:"column:name"`
+		Slug        string  `gorm:"column:slug"`
+		Description *string `gorm:"column:description"`
+	}
+	var src row
+	if err := r.db.WithContext(ctx).Table("product_types").
+		Select("name, slug, description").Where("id = ?", sourceTypeID).Take(&src).Error; err != nil {
+		return "", nil // source type gone; skip rather than fail
+	}
+	var existingID string
+	err := r.db.WithContext(ctx).Table("product_types").Select("id").
+		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
+		Take(&existingID).Error
+	if err == nil {
+		return existingID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	// Ensure slug is unique in target store
+	slug := src.Slug
+	var conflict string
+	if r.db.WithContext(ctx).Table("product_types").Select("id").
+		Where("store_id = ? AND slug = ?", targetStoreID, slug).Take(&conflict).Error == nil {
+		slug = slug + "-" + newID()[:6]
+	}
+	newTypeID := newID()
+	now := time.Now().UTC()
+	payload := map[string]any{
+		"id": newTypeID, "store_id": targetStoreID,
+		"name": src.Name, "slug": slug,
+		"is_active": true, "created_at": now, "updated_at": now,
+	}
+	if src.Description != nil {
+		payload["description"] = *src.Description
+	}
+	if err := r.db.WithContext(ctx).Table("product_types").Create(payload).Error; err != nil {
+		return "", err
+	}
+	return newTypeID, nil
+}
+
+// cloneOrFindProductUnit ensures a product_unit exists in targetStoreID.
+// Matches by name; creates a copy if missing. Returns an error when sourceUnitID is
+// non-empty but cannot be resolved, because product_unit_id is NOT NULL in products.
+func (r PostgresRepository) cloneOrFindProductUnit(ctx context.Context, targetStoreID, sourceUnitID string) (string, error) {
+	if sourceUnitID == "" {
+		return "", nil
+	}
+	type row struct {
+		Name        string  `gorm:"column:name"`
+		Description *string `gorm:"column:description"`
+	}
+	var src row
+	if err := r.db.WithContext(ctx).Table("product_units").
+		Select("name, description").Where("id = ?", sourceUnitID).Take(&src).Error; err != nil {
+		return "", err
+	}
+	var existingID string
+	err := r.db.WithContext(ctx).Table("product_units").Select("id").
+		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
+		Take(&existingID).Error
+	if err == nil {
+		return existingID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	newUnitID := newID()
+	now := time.Now().UTC()
+	payload := map[string]any{
+		"id": newUnitID, "store_id": targetStoreID,
+		"name": src.Name, "is_active": true,
+		"created_at": now, "updated_at": now,
+	}
+	if src.Description != nil {
+		payload["description"] = *src.Description
+	}
+	if err := r.db.WithContext(ctx).Table("product_units").Create(payload).Error; err != nil {
+		return "", err
+	}
+	return newUnitID, nil
+}
+
+// cloneOrFindProductBrand ensures a product_brand exists in targetStoreID.
+// Matches by name; creates a copy if missing. Returns "" when sourceBrandID is empty.
+func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetStoreID, sourceBrandID string) (string, error) {
+	if sourceBrandID == "" {
+		return "", nil
+	}
+	var srcName string
+	if err := r.db.WithContext(ctx).Table("product_brands").Select("name").
+		Where("id = ?", sourceBrandID).Take(&srcName).Error; err != nil {
+		return "", nil
+	}
+	var existingID string
+	err := r.db.WithContext(ctx).Table("product_brands").Select("id").
+		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, srcName).
+		Take(&existingID).Error
+	if err == nil {
+		return existingID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	newBrandID := newID()
+	now := time.Now().UTC()
+	if err := r.db.WithContext(ctx).Table("product_brands").Create(map[string]any{
+		"id": newBrandID, "store_id": targetStoreID,
+		"name": srcName, "is_active": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		return "", err
+	}
+	return newBrandID, nil
+}
+
+// cloneOrFindProduct ensures a product exists in targetStoreID. It matches by
+// barcode first, then SKU. If no match, it clones the product from sourceProductID.
+// Returns the product ID in targetStoreID.
+func (r PostgresRepository) cloneOrFindProduct(ctx context.Context, targetStoreID, sourceProductID string) (string, error) {
+	type productRow struct {
+		ID              string  `gorm:"column:id"`
+		Name            string  `gorm:"column:name"`
+		SKU             *string `gorm:"column:sku"`
+		Barcode         *string `gorm:"column:barcode"`
+		BasePrice       float64 `gorm:"column:base_price"`
+		CostPrice       float64 `gorm:"column:cost_price"`
+		ProductTypeID   *string `gorm:"column:product_type_id"`
+		ProductUnitID   *string `gorm:"column:product_unit_id"`
+		BrandID         *string `gorm:"column:brand_id"`
+		MinStock        int     `gorm:"column:min_stock"`
+		ProductCode     *string `gorm:"column:product_code"`
+		Description     *string `gorm:"column:description"`
+		StorageLocation *string `gorm:"column:storage_location"`
+	}
+
+	var src productRow
+	if err := r.db.WithContext(ctx).
+		Table("products").
+		Select("id, name, sku, barcode, base_price, cost_price, product_type_id, product_unit_id, brand_id, min_stock, product_code, description, storage_location").
+		Where("id = ?", sourceProductID).
+		Take(&src).Error; err != nil {
+		return "", err
+	}
+
+	// Match by barcode (preferred), then SKU
+	if src.Barcode != nil && *src.Barcode != "" {
+		var existingID string
+		err := r.db.WithContext(ctx).
+			Table("products").
+			Select("id").
+			Where("store_id = ? AND barcode = ?", targetStoreID, *src.Barcode).
+			Take(&existingID).Error
+		if err == nil {
+			return existingID, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+	}
+	if src.SKU != nil && *src.SKU != "" {
+		var existingID string
+		err := r.db.WithContext(ctx).
+			Table("products").
+			Select("id").
+			Where("store_id = ? AND sku = ?", targetStoreID, *src.SKU).
+			Take(&existingID).Error
+		if err == nil {
+			return existingID, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+	}
+
+	// Clone type, unit, brand into target store first (all idempotent by name/code)
+	var destTypeID, destUnitID, destBrandID string
+	if src.ProductTypeID != nil {
+		id, err := r.cloneOrFindProductType(ctx, targetStoreID, *src.ProductTypeID)
+		if err != nil {
+			return "", err
+		}
+		destTypeID = id
+	}
+	if src.ProductUnitID != nil {
+		id, err := r.cloneOrFindProductUnit(ctx, targetStoreID, *src.ProductUnitID)
+		if err != nil {
+			return "", err
+		}
+		destUnitID = id
+	}
+	if src.BrandID != nil {
+		id, err := r.cloneOrFindProductBrand(ctx, targetStoreID, *src.BrandID)
+		if err != nil {
+			return "", err
+		}
+		destBrandID = id
+	}
+
+	// Clone product into target store
+	clonedID := newID()
+	now := time.Now().UTC()
+	payload := map[string]any{
+		"id":         clonedID,
+		"store_id":   targetStoreID,
+		"name":       src.Name,
+		"base_price": src.BasePrice,
+		"cost_price": src.CostPrice,
+		"min_stock":  src.MinStock,
+		"is_active":  true,
+		"created_at": now,
+		"updated_at": now,
+	}
+	if src.SKU != nil && *src.SKU != "" {
+		payload["sku"] = *src.SKU
+	}
+	if src.Barcode != nil && *src.Barcode != "" {
+		payload["barcode"] = *src.Barcode
+	}
+	if destTypeID != "" {
+		payload["product_type_id"] = destTypeID
+	}
+	// product_unit_id is NOT NULL — must always be set
+	if destUnitID == "" {
+		return "", fmt.Errorf("could not resolve product unit for product %s in target store", sourceProductID)
+	}
+	payload["product_unit_id"] = destUnitID
+	if destBrandID != "" {
+		payload["brand_id"] = destBrandID
+	}
+	if src.ProductCode != nil {
+		payload["product_code"] = *src.ProductCode
+	}
+	if src.Description != nil {
+		payload["description"] = *src.Description
+	}
+	if src.StorageLocation != nil {
+		payload["storage_location"] = *src.StorageLocation
+	}
+
+	if err := r.db.WithContext(ctx).Table("products").Create(payload).Error; err != nil {
+		return "", err
+	}
+	return clonedID, nil
+}
+
 func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWarehouseID, productID string, qty int, destWarehouseID, destinationStoreID, note, createdBy string) error {
 	// 1. Find the first active location in source warehouse
 	var srcLoc struct {
 		ID string `gorm:"column:id"`
 	}
+	// Find the location in the source warehouse that actually holds stock for this product.
+	// Prefer non-sale-point (warehouse storage) locations, fall back to any location with stock.
 	if err := r.db.WithContext(ctx).
-		Table("locations").
-		Select("id").
-		Where("warehouse_id = ? AND is_active = ?", sourceWarehouseID, true).
-		Order("created_at ASC").
+		Table("stocks").
+		Select("stocks.location_id AS id").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("locations.warehouse_id = ? AND locations.is_active = ? AND stocks.product_id = ? AND stocks.quantity >= ?",
+			sourceWarehouseID, true, productID, qty).
+		Order("locations.is_sale_point ASC"). // prefer warehouse (non-sale-point) first
 		Take(&srcLoc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrProductNotInWarehouse
+			return ErrInsufficientStock
 		}
 		return err
 	}
 
 	// Determine target store for destination stock
 	targetStoreID := storeID
-	if destWarehouseID == "stock" && destinationStoreID != "" {
+	if destinationStoreID != "" {
 		targetStoreID = destinationStoreID
 	}
 
-	// For cross-store transfer (different target store), clone the source warehouse
-	// (including locations and products) to the target store, then switch to warehouse mode.
-	// This ensures all locations and products exist in the destination store.
+	// For cross-store transfer (different target store), use warehouse_inventory system.
+	// Do NOT touch stocks table directly — stock must be allocated later via Allocate endpoint.
 	var destProductID = productID
-	if destWarehouseID == "stock" && destinationStoreID != "" && destinationStoreID != storeID {
-		clonedWHID, _, prodMap, cloneErr := r.CloneWarehouseToStore(ctx, sourceWarehouseID, targetStoreID)
-		if cloneErr != nil {
-			return cloneErr
-		}
-		// Use the cloned warehouse as the destination (warehouse mode)
-		destWarehouseID = clonedWHID
-		if mappedID, ok := prodMap[productID]; ok {
-			destProductID = mappedID
-		}
-	}
-
 	var destLocationID string
-	if destWarehouseID == "stock" {
+	if destinationStoreID != "" && destinationStoreID != storeID {
+		// Look up source warehouse info for naming
+		var srcWH struct {
+			Name string `gorm:"column:name"`
+		}
+		if err := r.db.WithContext(ctx).
+			Table("warehouses").
+			Select("name").
+			Where("id = ?", sourceWarehouseID).
+			Take(&srcWH).Error; err != nil {
+			return err
+		}
+
+		// Look up source store name
+		var srcStoreName string
+		if err := r.db.WithContext(ctx).
+			Table("stores").
+			Select("name").
+			Where("id = ?", storeID).
+			Take(&srcStoreName).Error; err != nil {
+			srcStoreName = storeID
+		}
+
+		// Check if warehouse already exists in target store with matching source tracking
+		var existingWH struct {
+			ID string `gorm:"column:id"`
+		}
+		err := r.db.WithContext(ctx).
+			Table("warehouses").
+			Select("id").
+			Where("store_id = ? AND source_store_id = ? AND source_warehouse_id = ?", targetStoreID, storeID, sourceWarehouseID).
+			Take(&existingWH).Error
+		destWarehouseForInventory := ""
+		if err == nil {
+			destWarehouseForInventory = existingWH.ID
+		} else {
+			// Create new warehouse in target store with source tracking
+			destWarehouseForInventory = newID()
+			now := time.Now().UTC()
+			whName := srcWH.Name + " (จาก " + srcStoreName + ")"
+			if err := r.db.WithContext(ctx).Table("warehouses").Create(map[string]any{
+				"id":                 destWarehouseForInventory,
+				"store_id":           targetStoreID,
+				"name":               whName,
+				"is_active":          true,
+				"source_store_id":    storeID,
+				"source_warehouse_id": sourceWarehouseID,
+				"created_at":         now,
+				"updated_at":         now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+
+		// Clone product to target store so Store B owns the product in their catalog.
+		destProductID, err = r.cloneOrFindProduct(ctx, targetStoreID, productID)
+		if err != nil {
+			return err
+		}
+
+		// Transaction: deduct from Store A → add directly to Store B's warehouse stocks.
+		// No warehouse_inventory staging — product is immediately visible in Store B's warehouse.
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+
+			// a. Deduct from source location in Store A
+			result := tx.Exec(`
+				UPDATE stocks SET quantity = quantity - ?, updated_at = NOW()
+				WHERE product_id = ? AND location_id = ? AND quantity >= ?
+			`, qty, productID, srcLoc.ID, qty)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return ErrInsufficientStock
+			}
+
+			// b. Find or create a non-sale-point storage location in destination warehouse
+			var destLoc struct{ ID string `gorm:"column:id"` }
+			if err := tx.Table("locations").Select("id").
+				Where("warehouse_id = ? AND is_sale_point = ? AND is_active = ?", destWarehouseForInventory, false, true).
+				Order("created_at ASC").Take(&destLoc).Error; err != nil {
+				destLoc.ID = newID()
+				if err := tx.Table("locations").Create(map[string]any{
+					"id":            destLoc.ID,
+					"store_id":      targetStoreID,
+					"warehouse_id":  destWarehouseForInventory,
+					"name":          "คลังสินค้า",
+					"is_sale_point": false,
+					"is_active":     true,
+					"created_at":    now,
+					"updated_at":    now,
+				}).Error; err != nil {
+					return err
+				}
+			}
+
+			// c. Upsert into Store B's stocks (visible in warehouse section immediately)
+			if err := tx.Exec(`
+				INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+				ON CONFLICT (product_id, location_id)
+				DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+			`, newID(), targetStoreID, destProductID, destLoc.ID, qty, qty).Error; err != nil {
+				return err
+			}
+
+			// d. OUT movement for Store A
+			if err := tx.Table("stock_movements").Create(map[string]any{
+				"id":              newID(),
+				"store_id":        storeID,
+				"product_id":      productID,
+				"location_id":     srcLoc.ID,
+				"quantity_change": -qty,
+				"type":            "TRANSFER",
+				"note":            note,
+				"created_by":      createdBy,
+				"created_at":      now,
+				"updated_at":      now,
+			}).Error; err != nil {
+				return err
+			}
+
+			// e. IN movement for Store B (in warehouse storage location)
+			if err := tx.Table("stock_movements").Create(map[string]any{
+				"id":              newID(),
+				"store_id":        targetStoreID,
+				"product_id":      destProductID,
+				"location_id":     destLoc.ID,
+				"quantity_change": qty,
+				"type":            "TRANSFER",
+				"note":            note,
+				"created_by":      createdBy,
+				"created_at":      now,
+				"updated_at":      now,
+			}).Error; err != nil {
+				return err
+			}
+
+			return nil
+		})
+	} else if destWarehouseID == "stock" {
 		// 2a. Find first is_sale_point location in the target store
 		var salePoint struct {
 			ID string `gorm:"column:id"`
@@ -535,264 +925,133 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 	})
 }
 
-// CloneWarehouseToStore clones a warehouse (with its locations) and all products
-// that have stock in that warehouse to the target store.
-func (r PostgresRepository) CloneWarehouseToStore(ctx context.Context, sourceWarehouseID, targetStoreID string) (newWarehouseID string, locationIDMap map[string]string, productIDMap map[string]string, err error) {
-	locationIDMap = make(map[string]string)
-	productIDMap = make(map[string]string)
+// ──────────────────────────────────────────────
+// Warehouse Inventory methods (warehouse_inventory table)
+// ──────────────────────────────────────────────
 
-	// 1. Query source warehouse data
-	var srcWarehouse struct {
-		Name        string `gorm:"column:name"`
-		Code        string `gorm:"column:code"`
-		Address     string `gorm:"column:address"`
-		Phone       string `gorm:"column:phone"`
-		ContactName string `gorm:"column:contact_name"`
-		IsActive    bool   `gorm:"column:is_active"`
+func (r PostgresRepository) ListWarehouseInventory(ctx context.Context, warehouseID string) ([]WarehouseInventory, error) {
+	var items []WarehouseInventory
+	err := r.db.WithContext(ctx).
+		Table("warehouse_inventory wi").
+		Select(`
+			wi.id,
+			wi.store_id,
+			wi.warehouse_id,
+			wi.product_id,
+			wi.quantity,
+			wi.source_store_id,
+			wi.source_warehouse_id,
+			wi.transferred_at,
+			wi.created_at,
+			wi.updated_at,
+			COALESCE(pv.name, '') AS product_name,
+			COALESCE(pv.sku, '') AS product_sku,
+			COALESCE(s.name, '') AS source_store_name
+		`).
+		Joins("LEFT JOIN product_view pv ON pv.id = wi.product_id").
+		Joins("LEFT JOIN stores s ON s.id = wi.source_store_id").
+		Where("wi.warehouse_id = ?", warehouseID).
+		Order("wi.transferred_at DESC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
 	}
-	if err := r.db.WithContext(ctx).
-		Table("warehouses").
-		Select("name, code, address, phone, contact_name, is_active").
-		Where("id = ?", sourceWarehouseID).
-		Take(&srcWarehouse).Error; err != nil {
-		return "", nil, nil, err
+	if items == nil {
+		items = []WarehouseInventory{}
 	}
+	return items, nil
+}
 
-	// 2. INSERT new warehouse at target store
-	now := time.Now().UTC()
-	newWarehouseID = newID()
-	if err := r.db.WithContext(ctx).Table("warehouses").Create(map[string]any{
-		"id":           newWarehouseID,
-		"store_id":     targetStoreID,
-		"name":         srcWarehouse.Name,
-		"code":         nilEmpty(srcWarehouse.Code),
-		"address":      nilEmpty(srcWarehouse.Address),
-		"phone":        nilEmpty(srcWarehouse.Phone),
-		"contact_name": nilEmpty(srcWarehouse.ContactName),
-		"is_active":    true,
-		"created_at":   now,
-		"updated_at":   now,
-	}).Error; err != nil {
-		return "", nil, nil, err
-	}
+func (r PostgresRepository) AllocateInventoryToStock(ctx context.Context, storeID, warehouseID, productID string, qty int, note, createdBy string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Lock and deduct from warehouse_inventory
+		var inv struct {
+			ID       string `gorm:"column:id"`
+			Quantity int    `gorm:"column:quantity"`
+		}
+		if err := tx.
+			Table("warehouse_inventory").
+			Select("id, quantity").
+			Where("warehouse_id = ? AND product_id = ?", warehouseID, productID).
+			// Lock row for update to prevent race conditions
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Take(&inv).Error; err != nil {
+			return ErrInventoryNotFound
+		}
+		if inv.Quantity < qty {
+			return ErrInventoryInsufficientQty
+		}
 
-	// 3. Query source locations
-	type srcLocation struct {
-		ID          string `gorm:"column:id"`
-		Name        string `gorm:"column:name"`
-		IsSalePoint bool   `gorm:"column:is_sale_point"`
-		IsActive    bool   `gorm:"column:is_active"`
-	}
-	var srcLocations []srcLocation
-	if err := r.db.WithContext(ctx).
-		Table("locations").
-		Select("id, name, is_sale_point, is_active").
-		Where("warehouse_id = ?", sourceWarehouseID).
-		Find(&srcLocations).Error; err != nil {
-		return "", nil, nil, err
-	}
+		// Deduct
+		result := tx.Exec(`
+			UPDATE warehouse_inventory SET quantity = quantity - ?, updated_at = NOW()
+			WHERE id = ? AND quantity >= ?
+		`, qty, inv.ID, qty)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrInventoryInsufficientQty
+		}
 
-	// 4. INSERT cloned locations at target store
-	for _, loc := range srcLocations {
-		newLocID := newID()
-		if err := r.db.WithContext(ctx).Table("locations").Create(map[string]any{
-			"id":            newLocID,
-			"store_id":      targetStoreID,
-			"warehouse_id":  newWarehouseID,
-			"name":          loc.Name,
-			"is_sale_point": loc.IsSalePoint,
-			"is_active":     loc.IsActive,
-			"created_at":    now,
-			"updated_at":    now,
+		// 2. Find/create sale_point location in the warehouse
+		var salePoint struct {
+			ID string `gorm:"column:id"`
+		}
+		err := tx.
+			Table("locations").
+			Select("id").
+			Where("warehouse_id = ? AND is_sale_point = ? AND is_active = ?", warehouseID, true, true).
+			Order("created_at ASC").
+			Take(&salePoint).Error
+		if err != nil {
+			// Auto-create a sale_point location named "หน้าร้าน"
+			salePoint.ID = newID()
+			now := time.Now().UTC()
+			if err := tx.Table("locations").Create(map[string]any{
+				"id":            salePoint.ID,
+				"store_id":      storeID,
+				"warehouse_id":  warehouseID,
+				"name":          "หน้าร้าน",
+				"is_sale_point": true,
+				"is_active":     true,
+				"created_at":    now,
+				"updated_at":    now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+
+		// 3. Upsert into stocks at sale_point location
+		stockID := newID()
+		if err := tx.Exec(`
+			INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+			ON CONFLICT (product_id, location_id)
+			DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
+		`, stockID, storeID, productID, salePoint.ID, qty, qty).Error; err != nil {
+			return err
+		}
+
+		// 4. Create stock_movement record with type="ALLOCATE" and inventory_id
+		movementID := newID()
+		now := time.Now().UTC()
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              movementID,
+			"store_id":        storeID,
+			"product_id":      productID,
+			"location_id":     salePoint.ID,
+			"quantity_change": qty,
+			"type":            "ALLOCATE",
+			"note":            note,
+			"created_by":      createdBy,
+			"inventory_id":    inv.ID,
+			"created_at":      now,
+			"updated_at":      now,
 		}).Error; err != nil {
-			return "", nil, nil, err
-		}
-		locationIDMap[loc.ID] = newLocID
-	}
-
-	// 5. Query distinct product IDs that have stock in the source warehouse
-	var srcProductIDs []string
-	if err := r.db.WithContext(ctx).
-		Table("stocks").
-		Select("DISTINCT s.product_id").
-		Joins("JOIN locations l ON l.id = s.location_id").
-		Where("l.warehouse_id = ?", sourceWarehouseID).
-		Pluck("s.product_id", &srcProductIDs).Error; err != nil {
-		return "", nil, nil, err
-	}
-	if len(srcProductIDs) == 0 {
-		return newWarehouseID, locationIDMap, productIDMap, nil
-	}
-
-	// 6. Clone each product to the target store
-	type srcProductData struct {
-		Name                string     `gorm:"column:name"`
-		SKU                 string     `gorm:"column:sku"`
-		Barcode             string     `gorm:"column:barcode"`
-		ImageURL            string     `gorm:"column:image_url"`
-		BasePrice           float64    `gorm:"column:base_price"`
-		CostPrice           float64    `gorm:"column:cost_price"`
-		SpecialPrice        *float64   `gorm:"column:special_price"`
-		SpecialPriceStartAt *time.Time `gorm:"column:special_price_start_at"`
-		SpecialPriceEndAt   *time.Time `gorm:"column:special_price_end_at"`
-		IsActive            bool       `gorm:"column:is_active"`
-		MinStock            int        `gorm:"column:min_stock"`
-		MaxStock            *int       `gorm:"column:max_stock"`
-		ProductCode         string     `gorm:"column:product_code"`
-		Description         string     `gorm:"column:description"`
-		StorageLocation     string     `gorm:"column:storage_location"`
-		ProductUnitID       string     `gorm:"column:product_unit_id"`
-	}
-
-	for _, srcPID := range srcProductIDs {
-		// a. Query source product data
-		var pData srcProductData
-		if err := r.db.WithContext(ctx).
-			Table("products").
-			Select("name, sku, barcode, image_url, base_price, cost_price, special_price, special_price_start_at, special_price_end_at, is_active, min_stock, max_stock, product_code, description, storage_location, product_unit_id").
-			Where("id = ?", srcPID).
-			Take(&pData).Error; err != nil {
-			return "", nil, nil, err
+			return err
 		}
 
-		// b. Check if SKU already exists in target store
-		if pData.SKU != "" {
-			var existingDestID string
-			if err := r.db.WithContext(ctx).
-				Table("products").
-				Select("id").
-				Where("store_id = ? AND sku = ?", targetStoreID, pData.SKU).
-				Take(&existingDestID).Error; err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return "", nil, nil, err
-				}
-			}
-			if existingDestID != "" {
-				productIDMap[srcPID] = existingDestID
-				continue
-			}
-		}
-
-		// c. Resolve product_unit_id for target store
-		destUnitID := pData.ProductUnitID
-		if pData.ProductUnitID != "" {
-			// Find unit name from source
-			var unitName string
-			if err := r.db.WithContext(ctx).
-				Table("product_units").
-				Select("name").
-				Where("id = ?", pData.ProductUnitID).
-				Take(&unitName).Error; err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return "", nil, nil, err
-				}
-			}
-			if unitName != "" {
-				// Try to find unit with same name in target store
-				var existingUnitID string
-				if err := r.db.WithContext(ctx).
-					Table("product_units").
-					Select("id").
-					Where("store_id = ? AND name = ?", targetStoreID, unitName).
-					Take(&existingUnitID).Error; err != nil {
-					if !errors.Is(err, gorm.ErrRecordNotFound) {
-						return "", nil, nil, err
-					}
-				}
-				if existingUnitID != "" {
-					destUnitID = existingUnitID
-				} else {
-					// No matching unit — find any active unit in target store
-					var anyUnitID string
-					if err := r.db.WithContext(ctx).
-						Table("product_units").
-						Select("id").
-						Where("store_id = ? AND is_active = ?", targetStoreID, true).
-						Limit(1).
-						Take(&anyUnitID).Error; err != nil {
-						if !errors.Is(err, gorm.ErrRecordNotFound) {
-							return "", nil, nil, err
-						}
-					}
-					if anyUnitID != "" {
-						destUnitID = anyUnitID
-					} else {
-						// No units at all in target store — create a default one
-						destUnitID = newID()
-						if err := r.db.WithContext(ctx).Table("product_units").Create(map[string]any{
-							"id":         destUnitID,
-							"store_id":   targetStoreID,
-							"name":       "ชิ้น",
-							"is_active":  true,
-							"created_at": now,
-							"updated_at": now,
-						}).Error; err != nil {
-							return "", nil, nil, err
-						}
-					}
-				}
-			}
-		} else {
-			// Source product has no unit — find any active unit in target store
-			var anyUnitID string
-			if err := r.db.WithContext(ctx).
-				Table("product_units").
-				Select("id").
-				Where("store_id = ? AND is_active = ?", targetStoreID, true).
-				Limit(1).
-				Take(&anyUnitID).Error; err != nil {
-				if !errors.Is(err, gorm.ErrRecordNotFound) {
-					return "", nil, nil, err
-				}
-			}
-			if anyUnitID != "" {
-				destUnitID = anyUnitID
-			} else {
-				// Create a default unit
-				destUnitID = newID()
-				if err := r.db.WithContext(ctx).Table("product_units").Create(map[string]any{
-					"id":         destUnitID,
-					"store_id":   targetStoreID,
-					"name":       "ชิ้น",
-					"is_active":  true,
-					"created_at": now,
-					"updated_at": now,
-				}).Error; err != nil {
-					return "", nil, nil, err
-				}
-			}
-		}
-
-		// Create cloned product
-		destPID := newID()
-		if err := r.db.WithContext(ctx).Table("products").Create(map[string]any{
-			"id":                     destPID,
-			"store_id":               targetStoreID,
-			"name":                   pData.Name,
-			"sku":                    nilEmpty(pData.SKU),
-			"barcode":                nilEmpty(pData.Barcode),
-			"image_url":              nilEmpty(pData.ImageURL),
-			"product_type_id":        nil,
-			"product_unit_id":        destUnitID,
-			"brand_id":               nil,
-			"base_price":             pData.BasePrice,
-			"cost_price":             pData.CostPrice,
-			"special_price":          pData.SpecialPrice,
-			"special_price_start_at": pData.SpecialPriceStartAt,
-			"special_price_end_at":   pData.SpecialPriceEndAt,
-			"is_active":              pData.IsActive,
-			"min_stock":              pData.MinStock,
-			"max_stock":              pData.MaxStock,
-			"product_code":           nilEmpty(pData.ProductCode),
-			"description":            nilEmpty(pData.Description),
-			"storage_location":       nilEmpty(pData.StorageLocation),
-			"created_at":             now,
-			"updated_at":             now,
-		}).Error; err != nil {
-			return "", nil, nil, err
-		}
-		productIDMap[srcPID] = destPID
-	}
-
-	return newWarehouseID, locationIDMap, productIDMap, nil
+		return nil
+	})
 }

@@ -9,7 +9,7 @@ import (
 
 func newPurchasingHandler(db *gorm.DB) purchasing.Handler {
 	repo := purchasing.NewPostgresRepository(db)
-	service := purchasing.NewService(repo)
+	service := purchasing.NewService(repo, db)
 	return purchasing.NewHandler(service)
 }
 

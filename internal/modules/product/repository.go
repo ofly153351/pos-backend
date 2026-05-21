@@ -19,6 +19,8 @@ type Repository interface {
 	BarcodeExists(ctx context.Context, storeID, barcode string) (bool, error)
 	ListProductIDsWithoutSKU(ctx context.Context, storeID string) ([]string, error)
 	Delete(ctx context.Context, storeID, productID string) error
+	SoftDelete(ctx context.Context, storeID, productID string) error
+	ExistsByID(ctx context.Context, storeID, productID string) (bool, error)
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
 	BrandExists(ctx context.Context, storeID, brandID string) (bool, error)
@@ -270,6 +272,40 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, productID strin
 		return ErrProductNotFound
 	}
 	return nil
+}
+
+func (r PostgresRepository) ExistsByID(ctx context.Context, storeID, productID string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&Product{}).
+		Where("store_id = ? AND id = ?", storeID, productID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+func (r PostgresRepository) SoftDelete(ctx context.Context, storeID, productID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Zero all stock quantities
+		if err := tx.Exec(`UPDATE stocks SET quantity = 0, updated_at = NOW() WHERE product_id = ?`, productID).Error; err != nil {
+			return err
+		}
+		// 2. Delete warehouse inventory
+		if err := tx.Exec(`DELETE FROM warehouse_inventory WHERE product_id = ?`, productID).Error; err != nil {
+			return err
+		}
+		// 3. Delete stock movements for this product
+		if err := tx.Exec(`DELETE FROM stock_movements WHERE product_id = ?`, productID).Error; err != nil {
+			return err
+		}
+		// 4. Set product inactive (soft delete)
+		if err := tx.Model(&Product{}).
+			Where("store_id = ? AND id = ?", storeID, productID).
+			Update("is_active", false).
+			Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func (r PostgresRepository) UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error {

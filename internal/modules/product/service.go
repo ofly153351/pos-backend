@@ -273,6 +273,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, productID string) error {
+	if strings.TrimSpace(storeID) == "" || strings.TrimSpace(productID) == "" {
+		return ErrProductNotFound
+	}
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
 		return err
@@ -280,7 +283,17 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, product
 	if !allowed {
 		return ErrForbiddenStoreAccess
 	}
-	return s.repo.Delete(ctx, storeID, productID)
+
+	// Verify product exists and belongs to store
+	exists, err := s.repo.ExistsByID(ctx, storeID, productID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrProductNotFound
+	}
+
+	return s.repo.SoftDelete(ctx, storeID, productID)
 }
 
 func (s Service) GenerateMissingSKU(ctx context.Context, actor auth.Claims, storeID string) (GenerateMissingSKUResult, error) {

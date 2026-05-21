@@ -41,7 +41,7 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 		}
 
 		// Check stock availability from sale-point locations
-		if err := r.checkAndDeductSaleStock(ctx, tx, sale.StoreID, item.ProductID, item.Quantity, sale.ID); err != nil {
+		if err := r.checkAndDeductSaleStock(ctx, tx, sale.StoreID, item.ProductID, item.Quantity, sale.ID, sale.CashierUserID); err != nil {
 			return Sale{}, err
 		}
 
@@ -191,18 +191,26 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 
 // checkAndDeductSaleStock checks stock availability in sale-point locations
 // and deducts proportionally from them, creating stock_movement records.
-func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gorm.DB, storeID, productID string, qty int, saleID string) error {
+func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gorm.DB, storeID, productID string, qty int, saleID, cashierUserID string) error {
 	// Lock and check total available stock in sale-point locations
 	var totalAvailable int
+	// Lock individual rows first (FOR UPDATE can't be used with aggregate functions)
+	type lockedStock struct {
+		Quantity int
+	}
+	var lockedRows []lockedStock
 	err := tx.WithContext(ctx).
 		Table("stocks").
-		Select("COALESCE(SUM(quantity), 0)").
+		Select("stocks.quantity").
 		Joins("JOIN locations ON locations.id = stocks.location_id").
-		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true", productID, storeID).
+		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true AND stocks.quantity > 0", productID, storeID).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Scan(&totalAvailable).Error
+		Find(&lockedRows).Error
 	if err != nil {
 		return err
+	}
+	for _, row := range lockedRows {
+		totalAvailable += row.Quantity
 	}
 	if totalAvailable < qty {
 		return fmt.Errorf("%w for product %s", ErrInsufficientStock, productID)
@@ -259,7 +267,7 @@ func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gor
 			"type":            "SALE",
 			"reference_id":    saleID,
 			"note":            "sale deduction",
-			"created_by":      "system",
+			"created_by":      cashierUserID,
 			"created_at":      now,
 			"updated_at":      now,
 		}).Error; err != nil {

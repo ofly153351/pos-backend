@@ -255,21 +255,82 @@ func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID, 
 	var destID string
 	switch req.DestinationType {
 	case "warehouse":
-		destID = req.DestinationID
-		if destID == "" {
-			return ErrTransferInvalidDestination
-		}
-		// Verify destination warehouse is different from source
-		if destID == warehouseID {
-			return ErrTransferSameWarehouse
-		}
-		// Verify destination warehouse exists and belongs to store
-		if _, err := s.repo.GetByID(ctx, storeID, destID); err != nil {
-			return err
+		isCrossStore := req.DestinationStoreID != "" && req.DestinationStoreID != storeID
+		if isCrossStore {
+			// Cross-store: the repository auto-clones the warehouse in the target store.
+			// A specific destination_id is optional — if given, it must exist in the target store.
+			destID = req.DestinationID
+			if destID != "" {
+				if destID == warehouseID {
+					return ErrTransferSameWarehouse
+				}
+				if _, err := s.repo.GetByID(ctx, req.DestinationStoreID, destID); err != nil {
+					return err
+				}
+			}
+		} else {
+			// Same-store: destination warehouse must be provided and must differ from source.
+			destID = req.DestinationID
+			if destID == "" {
+				return ErrTransferInvalidDestination
+			}
+			if destID == warehouseID {
+				return ErrTransferSameWarehouse
+			}
+			if _, err := s.repo.GetByID(ctx, storeID, destID); err != nil {
+				return err
+			}
 		}
 	case "stock":
 		destID = "stock"
 	}
 
 	return s.repo.TransferStock(ctx, storeID, warehouseID, req.ProductID, req.Quantity, destID, req.DestinationStoreID, req.Note, actor.UserID)
+}
+
+// ──────────────────────────────────────────────
+// Warehouse Inventory service methods
+// ──────────────────────────────────────────────
+
+func (s Service) ListInventory(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]WarehouseInventory, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrForbiddenStoreAccess
+	}
+
+	// Verify warehouse belongs to store
+	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
+		return nil, err
+	}
+
+	return s.repo.ListWarehouseInventory(ctx, warehouseID)
+}
+
+func (s Service) AllocateInventory(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string, req AllocateInventoryRequest) error {
+	if req.Quantity <= 0 {
+		return ErrAllocateZeroQty
+	}
+
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbiddenStoreAccess
+	}
+
+	// Verify warehouse belongs to store
+	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
+		return err
+	}
+
+	// Verify product belongs to store
+	if _, err := s.repo.ProductBelongsToStore(ctx, storeID, productID); err != nil {
+		return err
+	}
+
+	return s.repo.AllocateInventoryToStock(ctx, storeID, warehouseID, productID, req.Quantity, req.Note, actor.UserID)
 }

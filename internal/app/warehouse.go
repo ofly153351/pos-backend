@@ -31,4 +31,8 @@ func registerWarehouseRoutes(protected fiber.Router, deps appDependencies) {
 
 	// Warehouse Transfer
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/transfer", handler.TransferStock)
+
+	// Warehouse Inventory (cross-store transfers awaiting allocation)
+	protected.Get("/stores/:storeID/warehouses/:warehouseID/inventory", handler.ListInventory)
+	protected.Post("/stores/:storeID/warehouses/:warehouseID/inventory/:productID/allocate", handler.AllocateInventory)
 }

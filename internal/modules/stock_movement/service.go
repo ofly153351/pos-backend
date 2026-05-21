@@ -2,6 +2,7 @@ package stock_movement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +42,38 @@ func (s Service) productExistsInStore(ctx context.Context, storeID, productID st
 	return count > 0, err
 }
 
+// findDefaultStockLocation returns the first active sale-point location for the store.
+// Falls back to any active location so stock is always recorded in the stocks table.
+func (s Service) findDefaultStockLocation(ctx context.Context, storeID string) (string, error) {
+	var locID string
+	err := s.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("store_id = ? AND is_sale_point = TRUE AND is_active = TRUE", storeID).
+		Order("created_at ASC").
+		Take(&locID).Error
+	if err == nil {
+		return locID, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	// Fallback: any active location in the store
+	err = s.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("store_id = ? AND is_active = TRUE", storeID).
+		Order("created_at ASC").
+		Take(&locID).Error
+	if err == nil {
+		return locID, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	return "", err
+}
+
 // AddStock creates IN movements and adds stock to locations
 func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string, input AddStockRequest) (AdditionResult, error) {
 	if strings.TrimSpace(storeID) == "" {
@@ -77,16 +110,27 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 			return AdditionResult{}, ErrProductNotFound
 		}
 
-		var locID *string
-		if item.LocationID != "" {
-			locID = &item.LocationID
+		// Resolve the target location: use the provided one, or auto-find the
+		// store's first active sale-point location so the stocks table is always updated.
+		resolvedLocID := item.LocationID
+		if resolvedLocID == "" {
+			defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
+			if err != nil {
+				return AdditionResult{}, err
+			}
+			resolvedLocID = defaultLoc
+		}
+
+		var locPtr *string
+		if resolvedLocID != "" {
+			locPtr = &resolvedLocID
 		}
 
 		mg := StockMovement{
 			ID:             newID(),
 			StoreID:        storeID,
 			ProductID:      item.ProductID,
-			LocationID:     locID,
+			LocationID:     locPtr,
 			QuantityChange: item.Quantity,
 			Type:           MovementTypeIn,
 			Note:           strings.TrimSpace(item.Note),
@@ -100,8 +144,8 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 		}
 
 		// Update stock in the locations table
-		if item.LocationID != "" {
-			if err := s.repo.UpsertStock(ctx, storeID, item.ProductID, item.LocationID, item.Quantity); err != nil {
+		if resolvedLocID != "" {
+			if err := s.repo.UpsertStock(ctx, storeID, item.ProductID, resolvedLocID, item.Quantity); err != nil {
 				return AdditionResult{}, err
 			}
 		}
@@ -320,6 +364,13 @@ func (s Service) RecordSaleMovement(ctx context.Context, actor auth.Claims, stor
 func (s Service) ListMovements(ctx context.Context, actor auth.Claims, storeID string, q ListMovementsQuery) (MovementResponse, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return MovementResponse{}, fmt.Errorf("storeID is required")
+	}
+	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return MovementResponse{}, err
+	}
+	if !allowed {
+		return MovementResponse{}, ErrStockForbidden
 	}
 	return s.repo.ListByStore(ctx, storeID, q)
 }

@@ -2,13 +2,13 @@ package warehouse
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
 	"pos-backend/internal/middleware"
 	"pos-backend/internal/platform/httpx"
 )
-
 type Handler struct{ service Service }
 
 func NewHandler(service Service) Handler { return Handler{service: service} }
@@ -74,6 +74,12 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrInsufficientStock):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrInventoryNotFound):
+		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	case errors.Is(err, ErrInventoryInsufficientQty), errors.Is(err, ErrAllocateExceedsQty):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrAllocateZeroQty):
+		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
@@ -139,7 +145,30 @@ func (h Handler) TransferStock(c *fiber.Ctx) error {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
 	if err := h.service.TransferStock(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), req); err != nil {
+		log.Printf("TransferStock error: %v", err)
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "stock transferred successfully", nil)
+}
+
+// ListInventory lists warehouse inventory items (transferred but not yet allocated).
+func (h Handler) ListInventory(c *fiber.Ctx) error {
+	result, err := h.service.ListInventory(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse inventory fetched", result)
+}
+
+// AllocateInventory allocates inventory to sellable stock.
+func (h Handler) AllocateInventory(c *fiber.Ctx) error {
+	var req AllocateInventoryRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if err := h.service.AllocateInventory(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), c.Params("productID"), req); err != nil {
+		log.Printf("AllocateInventory error: %v", err)
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "inventory allocated successfully", nil)
 }

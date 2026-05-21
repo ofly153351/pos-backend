@@ -3,16 +3,18 @@ package warehouse
 import "time"
 
 type Warehouse struct {
-	ID          string    `json:"id" gorm:"column:id;primaryKey"`
-	StoreID     string    `json:"store_id" gorm:"column:store_id"`
-	Name        string    `json:"name" gorm:"column:name"`
-	Code        string    `json:"code,omitempty" gorm:"column:code"`
-	Address     string    `json:"address,omitempty" gorm:"column:address"`
-	Phone       string    `json:"phone,omitempty" gorm:"column:phone"`
-	ContactName string    `json:"contact_name,omitempty" gorm:"column:contact_name"`
-	IsActive    bool      `json:"is_active" gorm:"column:is_active"`
-	CreatedAt   time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt   time.Time `json:"updated_at" gorm:"column:updated_at"`
+	ID                string    `json:"id" gorm:"column:id;primaryKey"`
+	StoreID           string    `json:"store_id" gorm:"column:store_id"`
+	Name              string    `json:"name" gorm:"column:name"`
+	Code              string    `json:"code,omitempty" gorm:"column:code"`
+	Address           string    `json:"address,omitempty" gorm:"column:address"`
+	Phone             string    `json:"phone,omitempty" gorm:"column:phone"`
+	ContactName       string    `json:"contact_name,omitempty" gorm:"column:contact_name"`
+	IsActive          bool      `json:"is_active" gorm:"column:is_active"`
+	SourceStoreID     string    `json:"source_store_id,omitempty" gorm:"column:source_store_id"`
+	SourceWarehouseID string    `json:"source_warehouse_id,omitempty" gorm:"column:source_warehouse_id"`
+	CreatedAt         time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (Warehouse) TableName() string {
@@ -79,4 +81,30 @@ type WarehouseTransferRequest struct {
 	DestinationID      string `json:"destination_id"`      // warehouse_id if destination_type="warehouse", ignored if "stock"
 	DestinationStoreID string `json:"destination_store_id"` // optional, used when destination_type="stock" to target a different store's sale point
 	Note               string `json:"note"`
+}
+
+// WarehouseInventory represents stock transferred from another store but not yet allocated.
+type WarehouseInventory struct {
+	ID               string    `json:"id" gorm:"column:id;primaryKey"`
+	StoreID          string    `json:"store_id" gorm:"column:store_id"`
+	WarehouseID      string    `json:"warehouse_id" gorm:"column:warehouse_id"`
+	ProductID        string    `json:"product_id" gorm:"column:product_id"`
+	Quantity         int       `json:"quantity" gorm:"column:quantity"`
+	SourceStoreID    string    `json:"source_store_id,omitempty" gorm:"column:source_store_id"`
+	SourceWarehouseID string   `json:"source_warehouse_id,omitempty" gorm:"column:source_warehouse_id"`
+	TransferredAt    time.Time `json:"transferred_at" gorm:"column:transferred_at"`
+	CreatedAt        time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt        time.Time `json:"updated_at" gorm:"column:updated_at"`
+	// Joined fields for read
+	ProductName     string `json:"product_name,omitempty" gorm:"-"`
+	ProductSKU      string `json:"product_sku,omitempty" gorm:"-"`
+	SourceStoreName string `json:"source_store_name,omitempty" gorm:"-"`
+}
+
+func (WarehouseInventory) TableName() string { return "warehouse_inventory" }
+
+// AllocateInventoryRequest is the request to allocate inventory to sellable stock.
+type AllocateInventoryRequest struct {
+	Quantity int    `json:"quantity"`
+	Note     string `json:"note"`
 }

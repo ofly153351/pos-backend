@@ -6,15 +6,18 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"pos-backend/internal/modules/auth"
 )
 
 type Service struct {
 	repo Repository
+	db   *gorm.DB
 }
 
-func NewService(repo Repository) Service {
-	return Service{repo: repo}
+func NewService(repo Repository, db *gorm.DB) Service {
+	return Service{repo: repo, db: db}
 }
 
 // ---- Suppliers ----
@@ -164,30 +167,38 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 		CreatedAt:   now,
 	}
 
-	created, err := s.repo.CreatePO(ctx, po)
-	if err != nil {
+	var createdID string
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewPostgresRepository(tx)
+
+		created, err := txRepo.CreatePO(ctx, po)
+		if err != nil {
+			return err
+		}
+		createdID = created.ID
+
+		for _, item := range input.Items {
+			itemLineTotal := float64(item.Quantity) * item.UnitCost
+			poItem := PurchaseOrderItem{
+				ID:              newID(),
+				PurchaseOrderID: created.ID,
+				ProductID:       item.ProductID,
+				Quantity:        item.Quantity,
+				UnitCost:        item.UnitCost,
+				LineTotal:       itemLineTotal,
+				CreatedAt:       now,
+			}
+			if err := txRepo.CreatePOItem(ctx, poItem); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return PurchaseOrder{}, err
 	}
 
-	// Create items
-	for _, item := range input.Items {
-		itemLineTotal := float64(item.Quantity) * item.UnitCost
-		poItem := PurchaseOrderItem{
-			ID:              newID(),
-			PurchaseOrderID: created.ID,
-			ProductID:       item.ProductID,
-			Quantity:        item.Quantity,
-			UnitCost:        item.UnitCost,
-			LineTotal:       itemLineTotal,
-			CreatedAt:       now,
-		}
-		if err := s.repo.CreatePOItem(ctx, poItem); err != nil {
-			return PurchaseOrder{}, err
-		}
-	}
-
 	// Reload with relations
-	return s.repo.GetPO(ctx, storeID, created.ID)
+	return s.repo.GetPO(ctx, storeID, createdID)
 }
 
 func (s Service) ListPOs(ctx context.Context, actor auth.Claims, storeID string) ([]PurchaseOrder, error) {
