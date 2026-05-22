@@ -1,99 +1,99 @@
 # System Flow
 
-เอกสารนี้อธิบาย flow หลักของระบบ POS จากมุมมองการใช้งานจริงของร้านค้า
+This document describes the main flow of the POS system from the perspective of real store usage.
 
-## 1. สมัครสมาชิกและเข้าสู่ระบบ
+## 1. Registration and Login
 
-เริ่มจากสร้าง user account แล้ว login เพื่อรับ `access_token`
+Start by creating a user account and then logging in to receive an `access_token`.
 
-ลำดับ:
+Steps:
 1. `POST /api/v1/auth/register`
 2. `POST /api/v1/auth/login`
-3. เก็บ `access_token` แล้วส่งผ่าน `Authorization: Bearer <token>`
+3. Store the `access_token` and send it via `Authorization: Bearer <token>`
 
-หมายเหตุ:
-- user ที่สมัครใหม่จะใช้ token นี้ไปสร้างร้านและจัดการข้อมูลของร้านตัวเอง
+Notes:
+- Newly registered users use this token to create a store and manage their own store data
 
-## 2. สร้างร้าน
+## 2. Create a Store
 
-หลัง login แล้ว owner ต้องสร้างร้านก่อน เพราะข้อมูลอื่นทั้งหมดผูกกับ `store_id`
+After logging in, the owner must create a store first because all other data is tied to a `store_id`.
 
-ลำดับ:
+Steps:
 1. `POST /api/v1/stores`
-2. ระบบจะสร้าง:
-   - row ใน `stores`
-   - row owner ใน `store_members`
-   - row แรกใน `store_subscriptions`
+2. The system creates:
+   - A row in `stores`
+   - An owner row in `store_members`
+   - The first row in `store_subscriptions`
 
-ผลลัพธ์:
-- จะได้ `store_id` ของร้าน
-- ถ้ามี logo ร้าน ระบบจะเก็บไฟล์และบันทึก path ลง `logo_url`
+Result:
+- The store's `store_id` is returned
+- If a logo is provided, the file is stored and its path is saved in `logo_url`
 
-## 3. ดูและเลือกแผน subscription
+## 3. View and Select a Subscription Plan
 
-ร้านมี subscription ระดับร้าน ไม่ใช่ระดับ user
+Subscriptions are at the store level, not the user level.
 
-ลำดับ:
+Steps:
 1. `GET /api/v1/subscriptions/plans`
 2. `GET /api/v1/stores/:storeID/subscription`
-3. ถ้าต้องการเปลี่ยนแผน ใช้ `PUT /api/v1/stores/:storeID/subscription`
+3. To change the plan, use `PUT /api/v1/stores/:storeID/subscription`
 
-หมายเหตุ:
-- ผู้ที่เปลี่ยนแผนได้ต้องเป็น `owner`, `manager` หรือ `platform_admin`
+Notes:
+- Only `owner`, `manager`, or `platform_admin` can change the plan
 
-## 4. สร้าง product type ของร้าน
+## 4. Create Product Types for the Store
 
-แต่ละร้านมีหมวดสินค้าของตัวเอง เช่น `กาแฟ`, `ขนม`, `ของใช้`
+Each store has its own product categories, e.g. `Coffee`, `Bakery`, `Supplies`.
 
-ลำดับ:
+Steps:
 1. `POST /api/v1/stores/:storeID/product-types`
 2. `GET /api/v1/stores/:storeID/product-types`
-3. แก้ไขด้วย `PATCH`
-4. ลบด้วย `DELETE`
+3. Update with `PATCH`
+4. Remove with `DELETE`
 
-ผลลัพธ์:
-- จะได้ `product_type_id` สำหรับนำไปผูกกับสินค้า
+Result:
+- A `product_type_id` is returned for linking to products
 
-## 5. สร้างสินค้า
+## 5. Create Products
 
-สินค้าแต่ละตัวอยู่ใต้ร้าน และอาจอ้าง `product_type_id` ของร้านนั้น
+Each product belongs to a store and may reference a `product_type_id` from that store.
 
-ลำดับ:
+Steps:
 1. `POST /api/v1/stores/:storeID/products`
-2. ส่งข้อมูลแบบ `multipart/form-data`
-3. แนบไฟล์รูปผ่าน field `image` ได้
+2. Send data as `multipart/form-data`
+3. Optionally attach an image via the `image` field
 
-โครงสร้างสำคัญ:
-- `product_type_id` = หมวดสินค้า
-- `unit_type` = หน่วยขาย เช่น `piece` หรือ `pair`
-- `quantity` = จำนวนสินค้าคงเหลือ
-- `base_price` = ราคาปกติ
-- `special_price` = ราคาพิเศษ
+Key fields:
+- `product_type_id` — product category
+- `unit_type` — selling unit, e.g. `piece` or `pair`
+- `quantity` — current stock on hand
+- `base_price` — regular price
+- `special_price` — promotional price
 
-## 6. จัดการสินค้า
+## 6. Manage Products
 
-หลังสร้างสินค้าแล้ว สามารถจัดการต่อได้
+After creating products, further management is available.
 
-ลำดับ:
+Steps:
 1. `GET /api/v1/stores/:storeID/products`
 2. `GET /api/v1/stores/:storeID/products/:productID`
 3. `PATCH /api/v1/stores/:storeID/products/:productID`
 4. `DELETE /api/v1/stores/:storeID/products/:productID`
 
-หมายเหตุ:
-- `PATCH` รองรับการเปลี่ยนรูปสินค้า
-- ระบบจะคำนวณ `effective_price` จาก special price window ให้
+Notes:
+- `PATCH` supports changing the product image
+- The system calculates `effective_price` from the special price window automatically
 
-## 7. สิทธิ์การเข้าถึง
+## 7. Access Permissions
 
-ระบบตรวจสิทธิ์จาก `store_members`
+The system checks permissions from `store_members`:
 
-- `owner`: จัดการร้าน, subscription, product types, products ได้
-- `manager`: จัดการข้อมูลร้านในระดับปฏิบัติการได้
-- `cashier`: ไม่ควรใช้จัดการ config ของร้าน
-- `platform_admin`: เข้าถึงได้ทุก store
+- `owner`: can manage store, subscription, product types, and products
+- `manager`: can manage store data at the operational level
+- `cashier`: should not manage store configuration
+- `platform_admin`: can access all stores
 
-ถ้าขึ้น error:
+If this error appears:
 
 ```json
 {
@@ -102,26 +102,24 @@
 }
 ```
 
-แปลว่า user จาก token ไม่มีสิทธิ์ใน `store_id` นั้น หรือไม่ได้อยู่ใน `store_members`
+It means the user from the token has no permission for that `store_id`, or is not in `store_members`.
 
-## 8. หน้าขาย POS
+## 8. POS Sales Screen
 
-เมื่อมีสินค้าในระบบแล้ว `cashier`, `manager`, `owner` สามารถเปิดหน้าขายเพื่อสร้างบิล
+Once products are in the system, `cashier`, `manager`, and `owner` can open the sales screen to create bills.
 
-ลำดับ:
+Steps:
 1. `GET /api/v1/stores/:storeID/products`
-2. เลือกสินค้าและจำนวนที่ต้องขาย
+2. Select the products and quantities to sell
 3. `POST /api/v1/stores/:storeID/sales`
-4. ถ้าต้องการเปิดใบเสร็จย้อนหลังใช้ `GET /api/v1/stores/:storeID/sales/:saleID`
+4. To view a past receipt, use `GET /api/v1/stores/:storeID/sales/:saleID`
 
-ข้อมูลสำคัญ:
-- ระบบจะหัก `product.quantity` ทันทีเมื่อขายสำเร็จ
-- ระบบจะเก็บ snapshot ของชื่อสินค้า, ราคา, จำนวน ที่ขายใน `sale_items`
-- หน้าขายสามารถโหลดประวัติด้วย `GET /api/v1/stores/:storeID/sales`
+Key details:
+- The system immediately deducts `product.quantity` upon a successful sale
+- A snapshot of product name, price, and quantity sold is stored in `sale_items`
+- The sales screen can load history via `GET /api/v1/stores/:storeID/sales`
 
-## Recommended Flow
-
-สำหรับร้านใหม่:
+## Recommended Flow for a New Store
 
 1. register
 2. login
@@ -129,4 +127,4 @@
 4. get current subscription
 5. create product types
 6. create products
-7. update subscription เมื่อร้านต้องการเปลี่ยนแผน
+7. update subscription when the store needs to change plans

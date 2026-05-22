@@ -1,29 +1,31 @@
-# Product Brand Integration (Current Status)
+# Product Brand Integration
 
-เอกสารนี้สรุปเฉพาะ endpoint ที่เกี่ยวข้องกับแบรนด์สินค้า (`brand`) ตามโค้ดที่ implement แล้ว ณ ปัจจุบัน
+This document summarizes the endpoints related to product brands (`brand`) as currently implemented.
+
+All endpoints require: `Authorization: Bearer <token>`
 
 ## Data Model
 
-- ใช้ตาราง `product_brands` แยกจาก `products`
-- `products.brand_id` เป็น FK ไป `product_brands.id`
-- response ของ product จะคืน:
+- Uses a `product_brands` table separate from `products`
+- `products.brand_id` is a FK to `product_brands.id`
+- Product responses return:
   - `brand_id`
-  - `brand_name` (มาจาก join `product_view`)
+  - `brand_name` (from a join on `product_view`)
 
-Migration ที่เกี่ยวข้อง:
+Related migration:
 - `init-db/026_product_brands_refactor.sql`
 
-## Endpoints ที่ Implement แล้ว (เกี่ยวกับ Brand)
+## Implemented Endpoints (Brand-related)
 
 ### 1) POST /api/v1/stores/:storeID/products
 
-สร้างสินค้าใหม่ และสามารถแนบ `brand_id` ได้
+Creates a new product and optionally attaches a `brand_id`.
 
-Field ที่เกี่ยวกับแบรนด์:
+Brand-related field:
 - `brand_id` optional
-- ถ้าส่งมา ต้องเป็น `brand_id` ของร้านเดียวกัน ไม่งั้นได้ `400` (`brand does not belong to this store`)
+- If provided, it must belong to the same store; otherwise returns `400` (`brand does not belong to this store`)
 
-ตัวอย่าง:
+Example:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
@@ -36,20 +38,20 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
 
 ### 2) GET /api/v1/stores/:storeID/products
 
-ดึงรายการสินค้า โดยแต่ละ item จะมี `brand_id` และ `brand_name`
+Returns the product list. Each item includes `brand_id` and `brand_name`.
 
 ### 3) GET /api/v1/stores/:storeID/products/:productID
 
-ดึงสินค้า 1 รายการ พร้อม `brand_id` และ `brand_name`
+Returns a single product with `brand_id` and `brand_name`.
 
 ### 4) PATCH /api/v1/stores/:storeID/products/:productID
 
-อัปเดตสินค้า และเปลี่ยน `brand_id` ได้
+Updates a product and can change the `brand_id`.
 
-Field ที่เกี่ยวกับแบรนด์:
+Brand-related field:
 - `brand_id` optional
 
-ตัวอย่าง:
+Example:
 
 ```bash
 curl -X PATCH http://localhost:8080/api/v1/stores/{storeID}/products/{productID} \
@@ -59,20 +61,20 @@ curl -X PATCH http://localhost:8080/api/v1/stores/{storeID}/products/{productID}
 
 ### 5) POST /api/v1/stores/:storeID/products/generate-missing-barcodes
 
-endpoint นี้ไม่แก้ brand โดยตรง แต่ยังอยู่ใน product module เดียวกันและทำงานร่วมกับสินค้าที่มี/ไม่มี `brand_id` ได้ตามปกติ
+This endpoint does not directly modify brands, but lives in the same product module and works normally with products that have or do not have a `brand_id`.
 
-## Endpoints ที่ยังไม่ Implement
+## Not Yet Implemented
 
-ตอนนี้ **ยังไม่มี** route สำหรับจัดการตาราง `product_brands` โดยตรง เช่น:
+There are currently **no** routes for managing the `product_brands` table directly, such as:
 
 - `POST /api/v1/stores/:storeID/product-brands`
 - `GET /api/v1/stores/:storeID/product-brands`
 - `PATCH /api/v1/stores/:storeID/product-brands/:brandID`
 - `DELETE /api/v1/stores/:storeID/product-brands/:brandID`
 
-ดังนั้นการยิง `GET /api/stores/:storeID/product-brands` จะได้ `404` ตามที่พบ
+Calling `GET /api/stores/:storeID/product-brands` will therefore return `404`.
 
 ## Notes
 
-- ถ้าต้องการใช้งานหน้าจอเลือกแบรนด์จาก master data จำเป็นต้อง implement product-brand CRUD/list API เพิ่ม
-- ในสภาพปัจจุบัน backend รองรับการอ้าง `brand_id` แล้ว แต่ยังต้องมีวิธีเตรียม `product_brands` data แยกต่างหาก (เช่น seed SQL/manual insert)
+- If a brand selection screen from master data is needed, the product-brand CRUD/list API must be implemented first
+- The backend already supports referencing a `brand_id`, but populating the `product_brands` data must be done separately (e.g. via seed SQL or manual insert)

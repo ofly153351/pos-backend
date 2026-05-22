@@ -1,29 +1,32 @@
 # Product Structure Guide
 
+All endpoints require: `Authorization: Bearer <token>`
+
 ## Purpose
+
 Each store defines its own:
 
 - **Product types** (categories such as `coffee`, `bakery`, `accessories`)
 - **Product units** (measurement units like `piece`, `set`, `bottle`)
 
-These tables allow frontend to build selectors without hardcoding values.
+These tables allow the frontend to build selectors without hardcoding values.
 
 ## Product Types (per store)
 
 Fields:
 - `name` identifies the category
 - `description` for UI hints
-- `is_active` to soft hide unused types
+- `is_active` to soft-hide unused types
 
 API:
-1. `POST /api/v1/stores/:storeID/product-types` → create
-2. `GET /api/v1/stores/:storeID/product-types` → list
-3. `PATCH .../:productTypeID` → update
-4. `DELETE .../:productTypeID` → remove
+1. `POST /api/v1/stores/:storeID/product-types` — create
+2. `GET /api/v1/stores/:storeID/product-types` — list
+3. `PATCH .../:productTypeID` — update
+4. `DELETE .../:productTypeID` — remove
 
 Frontend workflow:
 1. Fetch types after selecting a store.
-2. Populate dropdown for product’s `product_type_id`.
+2. Populate dropdown for product's `product_type_id`.
 
 ## Product Units (per store)
 
@@ -44,15 +47,15 @@ Frontend workflow:
 
 ## Product Creation
 
-When creating/updating a product, send both:
+When creating or updating a product, send:
 
 - `product_type_id` (optional but recommended)
-- `unit_type` (required string; ถ้าไม่ส่งจะ default เป็น `piece`)
+- `unit_id` (required; references `product_units.id`)
 - `quantity` (optional integer, default `0`)
 
-Also submit optional `special_price` window to calculate `effective_price`.
+Also submit an optional `special_price` window to calculate `effective_price`.
 
 ## Notes
 
-- Types/units belong to store; permissions enforced via `store_members`.
-- Use the provided APIs instead of inline constants to keep frontend synced.
+- Types and units belong to a store; permissions are enforced via `store_members`.
+- Use the provided APIs instead of inline constants to keep the frontend synced.

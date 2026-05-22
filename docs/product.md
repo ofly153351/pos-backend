@@ -1,30 +1,24 @@
 # Product API
 
-API นี้ใช้จัดการสินค้าในร้าน โดยแยก 2 แนวคิด:
+All endpoints require: `Authorization: Bearer <token>`
 
-- `product_type` ของร้าน: หมวดสินค้า เช่น `กาแฟ`, `เบเกอรี่`, `อุปกรณ์`
-- `product_unit` ของร้าน: หน่วยขาย เช่น `ชิ้น`, `คู่`, `กล่อง`
+This API manages products within a store. It separates two concepts:
 
-สินค้าแต่ละตัวจะอ้าง `product_type_id` ของร้าน รองรับการอ้างแบรนด์ผ่าน `brand_id`, รูปสินค้า, ราคาพิเศษ และจำนวนคงเหลือ (`quantity`)
+- `product_type` per store: product categories, e.g. `Coffee`, `Bakery`, `Accessories`
+- `product_unit` per store: selling units, e.g. `Piece`, `Pair`, `Box`
 
-## Base
-
-ทุกเส้นต้องส่ง Bearer token:
-
-```http
-Authorization: Bearer <access_token>
-```
+Each product references its store's `product_type_id`, supports a brand via `brand_id`, a product image, a special price, and a stock quantity (`quantity`).
 
 ## Product Unit
 
-- สินค้าจะอ้างอิงหน่วยผ่าน `unit_id` (FK ไป `product_units.id`)
-- ต้องสร้างหน่วยด้วย `POST /api/v1/stores/:storeID/product-units` ก่อน แล้วค่อยผูกกับสินค้า
+- Products reference a unit via `unit_id` (FK to `product_units.id`)
+- Create a unit with `POST /api/v1/stores/:storeID/product-units` before linking it to a product
 
 ## Product Brand
 
-- สินค้าจะอ้างอิงแบรนด์ผ่าน `brand_id` (FK ไป `product_brands.id`)
-- ตาราง `product_brands` เป็นข้อมูลแยกตามร้าน (`store_id`)
-- response สินค้าจะคืนทั้ง `brand_id` และ `brand_name`
+- Products reference a brand via `brand_id` (FK to `product_brands.id`)
+- The `product_brands` table is store-scoped (`store_id`)
+- Product responses include both `brand_id` and `brand_name`
 
 ## Product Type APIs
 
@@ -46,15 +40,15 @@ Authorization: Bearer <access_token>
 
 ## POST /api/v1/stores/:storeID/products
 
-สร้างสินค้าใหม่ด้วย `multipart/form-data`
+Creates a new product using `multipart/form-data`.
 
 Fields:
 - `name` required
-- `brand_id` optional (ต้องเป็นแบรนด์ของร้านนั้น)
-- `sku` optional (ถ้าไม่ส่ง ระบบจะ generate barcode ให้เป็น EAN-13 อัตโนมัติ)
-- `product_type_id` optional, ต้องเป็น type ของร้านนั้น
-- `unit_id` required, ต้องเป็น unit ของร้านนั้น
-- `quantity` optional, default `0`, ต้องเป็นจำนวนเต็มตั้งแต่ `0` ขึ้นไป
+- `brand_id` optional (must belong to the same store)
+- `sku` optional (if not provided, the system auto-generates an EAN-13 barcode)
+- `product_type_id` optional, must be a type belonging to the same store
+- `unit_id` required, must be a unit belonging to the same store
+- `quantity` optional, default `0`, must be a non-negative integer
 - `base_price` required
 - `special_price` optional
 - `special_price_start_at` optional, RFC3339
@@ -62,7 +56,7 @@ Fields:
 - `is_active` optional, default `true`
 - `image` optional, file
 
-ตัวอย่าง (อัปโหลดรูปสินค้า):
+Example (with product image upload):
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/stores/{storeID}/products \
@@ -107,13 +101,13 @@ Success Response (`201 Created`)
 
 ## GET /api/v1/stores/:storeID/products
 
-ดึงรายการสินค้าแบบ pagination เพื่อลด response size
+Returns a paginated product list to reduce response size.
 
 Query params:
 - `page` optional, default `1`
 - `limit` optional, default `50`, max `200`
 
-ตัวอย่าง:
+Example:
 
 ```bash
 curl "http://localhost:8080/api/v1/stores/{storeID}/products?page=1&limit=50" \
@@ -148,13 +142,13 @@ Success Response (`200 OK`)
 
 ## GET /api/v1/stores/:storeID/products/:productID
 
-ดึงข้อมูลสินค้า 1 รายการ
+Returns a single product's details.
 
 ## PATCH /api/v1/stores/:storeID/products/:productID
 
-อัปเดตสินค้าแบบ `multipart/form-data`
+Updates a product using `multipart/form-data`.
 
-Fields ที่รองรับ:
+Supported fields:
 - `name`
 - `brand_id`
 - `sku`
@@ -170,7 +164,7 @@ Fields ที่รองรับ:
 - `is_active`
 - `image`
 
-ตัวอย่าง (เปลี่ยนรูปสินค้า):
+Example (changing the product image):
 
 ```bash
 curl -X PATCH http://localhost:8080/api/v1/stores/{storeID}/products/{productID} \
@@ -208,11 +202,11 @@ Success Response (`200 OK`)
 
 ## DELETE /api/v1/stores/:storeID/products/:productID
 
-ลบสินค้าออกจากระบบ
+Removes a product from the system.
 
 ## POST /api/v1/stores/:storeID/products/generate-missing-barcodes
 
-ใช้ generate barcode (เก็บใน `sku`) ให้สินค้าที่ `sku` ว่างทั้งหมดในร้าน
+Generates barcodes (stored in `sku`) for all products in the store that currently have an empty `sku`.
 
 Success Response (`200 OK`)
 
@@ -228,14 +222,14 @@ Success Response (`200 OK`)
 
 ## Notes
 
-- ราคาที่ตอบกลับจะมี `effective_price` คำนวณจาก special price window
-- response ของสินค้าแต่ละรายการจะมี `quantity` เป็นจำนวนคงเหลือปัจจุบัน
-- response ของสินค้าแต่ละรายการจะมี `brand_id` และ `brand_name` (ถ้าไม่ตั้งค่า จะเป็นค่าว่าง)
-- list endpoint ใช้ pagination เสมอเพื่อลด payload (`page/limit`)
-- รูปสินค้าจะถูกอัปโหลดไปที่ MinIO path `products/<generated-filename>` และระบบจะคืนค่าในฟิลด์ `image_url`
-- ถ้าไม่ส่ง `image` ตอน `PATCH` ระบบจะคงรูปเดิมไว้
-- ถ้า `image_url` ว่างจะไม่ถูกส่งกลับใน JSON (เพราะ `omitempty`)
-- ถ้าไม่ส่ง `sku` ตอนสร้างสินค้า ระบบจะ generate barcode แบบ EAN-13 ให้อัตโนมัติ
-- ถ้าต้องการเติม barcode ให้ข้อมูลเดิมที่ยังว่าง ใช้ endpoint `generate-missing-barcodes`
-- แนะนำให้สร้าง `product_type` ของร้านก่อนแล้วค่อยสร้างสินค้า
-- ต้องสร้างหน่วยใน `product-units` ก่อน แล้วส่ง `unit_id` ตอนสร้าง/แก้สินค้า
+- The returned price includes `effective_price` calculated from the special price window
+- Each product response includes `quantity` as the current stock on hand
+- Each product response includes `brand_id` and `brand_name` (empty if not set)
+- The list endpoint always uses pagination to reduce payload (`page/limit`)
+- Product images are uploaded to MinIO at path `products/<generated-filename>` and the URL is returned in `image_url`
+- If `image` is not sent during `PATCH`, the existing image is preserved
+- If `image_url` is empty it is not included in the JSON response (due to `omitempty`)
+- If `sku` is not provided when creating a product, an EAN-13 barcode is auto-generated
+- To backfill barcodes for existing products with empty SKUs, use the `generate-missing-barcodes` endpoint
+- It is recommended to create store `product_type` entries before creating products
+- Units must be created in `product-units` first, then the `unit_id` is sent when creating or updating a product

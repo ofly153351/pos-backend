@@ -1,20 +1,20 @@
 # Auth API
 
-เอกสารนี้อธิบายการใช้งาน Auth API ของระบบ POS backend ปัจจุบันที่พัฒนาด้วย Go และ Fiber
+This document describes the Auth API for the POS backend system, built with Go and Fiber.
 
 ## Base URL
 
-สำหรับ local:
+For local development:
 
 ```bash
 http://localhost:8080
 ```
 
-ถ้าเปลี่ยน `APP_PORT` ให้ใช้ port ตาม env นั้น
+If `APP_PORT` is changed, use the port from that environment variable.
 
 ## Common Response Format
 
-ทุก endpoint จะตอบกลับในรูปแบบนี้:
+All endpoints respond in this format:
 
 ```json
 {
@@ -24,7 +24,7 @@ http://localhost:8080
 }
 ```
 
-error response:
+Error response:
 
 ```json
 {
@@ -36,7 +36,7 @@ error response:
 
 ## POST /api/v1/auth/register
 
-ใช้สำหรับสมัครผู้ใช้งานใหม่
+Registers a new user.
 
 ### Request Body
 
@@ -50,9 +50,9 @@ error response:
 
 ### Validation
 
-- `name` ต้องไม่ว่าง
-- `email` ต้องเป็น email ที่ถูกต้อง
-- `password` ต้องยาวอย่างน้อย 8 ตัวอักษร
+- `name` must not be empty
+- `email` must be a valid email address
+- `password` must be at least 8 characters
 
 ### Example
 
@@ -90,16 +90,16 @@ Status: `201 Created`
 
 ### Error Status
 
-- `400 Bad Request` ข้อมูลไม่ถูกต้อง
-- `409 Conflict` email ถูกใช้งานแล้ว
-- `500 Internal Server Error` server error
+- `400 Bad Request` — invalid input
+- `409 Conflict` — email already in use
+- `500 Internal Server Error`
 
-หมายเหตุ:
-- `store_id` จะถูกส่งกลับเมื่อ user คนนี้มีร้านอยู่แล้วใน `store_members`
+Notes:
+- `store_id` is returned when this user already has a store in `store_members`
 
 ## POST /api/v1/auth/login
 
-ใช้สำหรับเข้าสู่ระบบ
+Authenticates a user.
 
 ### Request Body
 
@@ -145,15 +145,15 @@ Status: `200 OK`
 
 ### Error Status
 
-- `400 Bad Request` request body ไม่ถูกต้อง
-- `401 Unauthorized` email หรือ password ไม่ถูกต้อง
-- `500 Internal Server Error` server error
+- `400 Bad Request` — invalid request body
+- `401 Unauthorized` — incorrect email or password
+- `500 Internal Server Error`
 
 ## POST /api/v1/auth/logout
 
-ใช้สำหรับออกจากระบบแบบ full logout (revoke token)
+Performs a full logout (revokes the token).
 
-Endpoint นี้ต้องส่ง Bearer token ที่ยังใช้งานได้:
+This endpoint requires a valid Bearer token:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/logout \
@@ -163,16 +163,16 @@ curl -X POST http://localhost:8080/api/v1/auth/logout \
 Success:
 
 - Status `200 OK`
-- token ปัจจุบันและ token เก่าของ user เดียวกันจะถูกยกเลิกทั้งหมดทันที
+- The current token and all previous tokens for the same user are immediately revoked
 
-หมายเหตุ:
+Notes:
 
-- หลัง logout ต้อง login ใหม่เพื่อรับ token เวอร์ชันใหม่
-- ระบบรองรับทั้ง `/api/v1/auth/logout` และ `/api/auth/logout`
+- After logout, the user must log in again to receive a new token version
+- Both `/api/v1/auth/logout` and `/api/auth/logout` are supported
 
 ## Health Check
 
-ใช้ตรวจสอบว่า API ยังทำงานอยู่
+Used to verify the API is running.
 
 ### GET /health
 
@@ -190,7 +190,7 @@ Response:
 
 ## Notes
 
-- token ที่ส่งกลับอยู่ใน field `access_token`
-- หลัง login ระบบจะพยายามส่ง `store_id` แรกของ user กลับมาด้วย ถ้ามี membership อยู่แล้ว
-- token type ปัจจุบันคือ `Bearer`
-- auth data ตอนนี้เก็บแบบ in-memory จึงจะหายเมื่อ restart service
+- The token is returned in the `access_token` field
+- After login, the system attempts to return the user's first `store_id` if a membership already exists
+- The current token type is `Bearer`
+- Auth data is currently stored in-memory and will be lost on service restart

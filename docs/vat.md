@@ -2,10 +2,9 @@
 
 Endpoints in this module help the frontend display VAT-inclusive amounts while keeping the backend as the source of truth for tax math.
 
-## Base
+All endpoints require: `Authorization: Bearer <token>` (owner/manager/cashier/platform_admin)
 
-- `Authorization: Bearer <token>` (owner/manager/cashier/platform_admin)
-- base path: `/api/v1` (compatibility `/api`)
+Base path: `/api/v1` (compatibility: `/api`)
 
 ## POST /api/v1/stores/:storeID/vat/calculate
 
@@ -16,7 +15,7 @@ Request body:
   "items": [
     {
       "code": "A S000001",
-      "name": "ส้มโอตก 10kg",
+      "name": "Pomelo 10kg",
       "qty": 1,
       "price": 20.00,
       "discount_per_unit": 1.00
@@ -28,11 +27,11 @@ Request body:
 }
 ```
 
-- `items`: array of line items (code/name optional metadata)  
-- `qty`, `price`, `discount_per_unit` describe the per-line totals  
-- `discount_bill`: additional bill-level discount  
-- `vat_percent`: optional override, default `7`  
-- `vat_included`: defaults to `true`; set `false` when supplying net amounts to add VAT
+- `items`: array of line items (`code`/`name` are optional metadata)
+- `qty`, `price`, `discount_per_unit` describe the per-line amounts
+- `discount_bill`: additional bill-level discount
+- `vat_percent`: optional override, default `7`
+- `vat_included`: defaults to `true`; set to `false` when supplying net amounts to add VAT on top
 
 Response:
 
@@ -64,7 +63,7 @@ Example success response:
 
 ### Notes
 
-- When `vat_included` is `true`, the backend treats `after_discount` as the VAT-inclusive `grand_total` and derives `vat_amount = grand_total * vat_percent / (100 + vat_percent)`  
-- When `vat_included` is `false`, the API adds VAT on top of the provided `after_discount`  
+- When `vat_included` is `true`, the backend treats `after_discount` as the VAT-inclusive `grand_total` and derives `vat_amount = grand_total * vat_percent / (100 + vat_percent)`
+- When `vat_included` is `false`, the API adds VAT on top of the provided `after_discount`
 - Use this endpoint before showing the receipt so the frontend and receipt generator share the same numbers
 - For sale creation, send the same VAT mode to `POST /api/v1/stores/:storeID/sales` via `vat_included` and `vat_percent`

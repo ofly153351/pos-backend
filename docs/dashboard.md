@@ -1,10 +1,10 @@
 # Dashboard API
 
-API นี้ใช้สำหรับหน้า dashboard ของร้าน เพื่อดึงภาพรวมยอดขายและสถานะสินค้าในคำขอเดียว
+This API is used for the store's dashboard screen to retrieve a sales overview and product status in a single request.
 
-Base: `Authorization: Bearer <token>`
+All endpoints require: `Authorization: Bearer <token>`
 
-สิทธิ์ที่ใช้งานได้:
+Roles that can access:
 - `owner`
 - `manager`
 - `cashier`
@@ -12,24 +12,24 @@ Base: `Authorization: Bearer <token>`
 
 ## GET /api/v1/stores/:storeID/dashboard
 
-ดึงข้อมูล dashboard ของร้านในช่วงเวลาที่กำหนด
+Returns dashboard data for the store over a specified time period.
 
-รองรับ query params:
+Supported query params:
 - `period` optional: `today` | `7d` | `30d` (default: `today`)
-- `from` optional: RFC3339 หรือ `YYYY-MM-DD` (ต้องใช้คู่กับ `to`)
-- `to` optional: RFC3339 หรือ `YYYY-MM-DD` (ถ้าเป็นรูปแบบวัน จะตีความเป็นปลายวัน)
-- `top_limit` optional: จำนวนสินค้า top selling (default `5`, max `20`)
-- `recent_limit` optional: จำนวนบิลล่าสุด (default `10`, max `50`)
-- `low_stock_limit` optional: จำนวนสินค้าสต็อกต่ำที่ต้องการแสดง (default `10`, max `50`)
-- `low_stock_threshold` optional: เกณฑ์สต็อกต่ำ (default `10`)
+- `from` optional: RFC3339 or `YYYY-MM-DD` (must be used together with `to`)
+- `to` optional: RFC3339 or `YYYY-MM-DD` (if date-only format, interpreted as end of day)
+- `top_limit` optional: number of top-selling products to return (default `5`, max `20`)
+- `recent_limit` optional: number of recent bills to return (default `10`, max `50`)
+- `low_stock_limit` optional: number of low-stock products to show (default `10`, max `50`)
+- `low_stock_threshold` optional: low-stock threshold (default `10`)
 
 Behavior:
-- ถ้าส่ง `from` หรือ `to` มาอย่างใดอย่างหนึ่ง ต้องส่งทั้งคู่
-- ช่วงเวลา custom ต้องเป็น `from < to`
-- ช่วงเวลา custom ยาวได้ไม่เกิน 366 วัน
-- ถ้าไม่ส่ง custom range จะใช้ `period`
+- If either `from` or `to` is provided, both must be provided
+- A custom date range must satisfy `from < to`
+- A custom range cannot exceed 366 days
+- If no custom range is provided, `period` is used
 
-ตัวอย่าง request:
+Example request:
 
 ```bash
 curl "http://localhost:8080/api/v1/stores/{storeID}/dashboard?period=7d&top_limit=5&recent_limit=10&low_stock_threshold=10" \
@@ -114,8 +114,8 @@ Success Response (`200 OK`)
 
 ## Notes
 
-- Endpoint นี้ออกแบบให้หน้า dashboard โหลดได้ใน request เดียว
-- `summary` และ `payment_breakdown` คิดจากข้อมูลในตาราง `sales`
-- `top_products` คิดจาก `sale_items` join กับ `sales`
-- `low_stock_products` อ่านจาก `products` ที่ `is_active = true` และ `quantity <= low_stock_threshold`
-- `recent_sales` จะคืนเฉพาะบิลในช่วงเวลาที่เลือก
+- This endpoint is designed to load the dashboard in a single request
+- `summary` and `payment_breakdown` are calculated from data in the `sales` table
+- `top_products` is calculated from `sale_items` joined with `sales`
+- `low_stock_products` reads from `products` where `is_active = true` and `quantity <= low_stock_threshold`
+- `recent_sales` returns only bills within the selected time range

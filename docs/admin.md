@@ -1,40 +1,40 @@
 # Admin Guide
 
-เอกสารนี้สรุปการใช้งานฝั่ง admin ของระบบ POS backend
+This document summarizes the admin-side usage of the POS backend system.
 
 ## Admin Role
 
-ฝั่ง admin ใช้ role:
+The admin side uses the role:
 
 - `platform_admin`
 
-user ที่มี role นี้จะเข้าถึง route ใต้ `/api/v1/admin/*` ได้ โดยไม่ต้องเป็นสมาชิกใน `store_members` ของร้านนั้น
+Users with this role can access routes under `/api/v1/admin/*` without needing to be a member in `store_members` for the target store.
 
 ## Authentication
 
-ทุกเส้น admin ต้องส่ง Bearer token:
+All admin endpoints require a Bearer token:
 
 ```http
 Authorization: Bearer <access_token>
 ```
 
-ถ้า token ไม่ใช่ของ `platform_admin` ระบบจะตอบกลับ `403 Forbidden`
+If the token does not belong to a `platform_admin`, the system returns `403 Forbidden`.
 
 ## Current Admin APIs
 
-ตอนนี้ระบบเปิด admin API สำหรับจัดการ subscription ของร้าน
+The system currently exposes admin APIs for managing store subscriptions.
 
 ### GET /api/v1/admin/subscriptions
 
-ดึงรายการ subscription ของทุกร้านในระบบ พร้อมข้อมูลร้านและ owner
+Returns the subscription list for all stores in the system, including store and owner details.
 
 ### GET /api/v1/admin/stores/:storeID/subscription
 
-ดึง subscription ปัจจุบันของร้านที่ระบุ
+Returns the current subscription for the specified store.
 
 ### PUT /api/v1/admin/stores/:storeID/subscription
 
-เปลี่ยน plan ของร้าน เช่นจาก `starter` ไป `growth`
+Changes a store's plan, e.g. from `starter` to `growth`.
 
 Request body:
 
@@ -46,7 +46,7 @@ Request body:
 
 ### PATCH /api/v1/admin/stores/:storeID/subscription/status
 
-เปลี่ยนสถานะ subscription ปัจจุบันของร้าน
+Changes the status of the store's current subscription.
 
 Request body:
 
@@ -56,7 +56,7 @@ Request body:
 }
 ```
 
-status ที่รองรับ:
+Supported statuses:
 - `trialing`
 - `active`
 - `past_due`
@@ -65,15 +65,15 @@ status ที่รองรับ:
 
 ## Recommended Admin Flow
 
-1. login ด้วย account ที่มี role `platform_admin`
-2. เรียก `GET /api/v1/admin/subscriptions` เพื่อดูภาพรวม
-3. เลือก `storeID` ที่ต้องการจัดการ
-4. เรียก `GET /api/v1/admin/stores/:storeID/subscription` เพื่อตรวจสถานะล่าสุด
-5. ถ้าต้องการเปลี่ยน plan ใช้ `PUT`
-6. ถ้าต้องการเปลี่ยนสถานะ billing ใช้ `PATCH .../status`
+1. Log in with an account that has the `platform_admin` role
+2. Call `GET /api/v1/admin/subscriptions` to get an overview
+3. Select the `storeID` to manage
+4. Call `GET /api/v1/admin/stores/:storeID/subscription` to check the current status
+5. To change the plan, use `PUT`
+6. To change the billing status, use `PATCH .../status`
 
 ## Related Docs
 
-- [Admin Subscription API](/Users/obx/projects/pos-backend/docs/admin-subscription.md)
-- [Subscription API](/Users/obx/projects/pos-backend/docs/subscription.md)
-- [System Flow](/Users/obx/projects/pos-backend/docs/flow.md)
+- [Admin Subscription API](admin-subscription.md)
+- [Subscription API](subscription.md)
+- [System Flow](flow.md)

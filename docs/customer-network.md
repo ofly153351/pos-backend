@@ -1,6 +1,8 @@
 # Customer Network API
 
-API ชุดนี้ใช้สำหรับให้ร้านค้าสร้างและจัดการลูกค้าโดยกำหนด `level` ตรง (ไม่ใช้ parent customer)
+This API allows stores to create and manage customers by assigning a `level` directly (no parent-customer hierarchy).
+
+All endpoints require: `Authorization: Bearer <token>`
 
 ## Base URL
 
@@ -8,38 +10,32 @@ API ชุดนี้ใช้สำหรับให้ร้านค้า�
 http://localhost:8080
 ```
 
-รองรับทั้ง:
+Supports both:
 
-- `/api/v1/*` (หลัก)
+- `/api/v1/*` (primary)
 - `/api/*` (compatibility)
 
 ## Authorization
 
-ทุก endpoint ต้องส่ง Bearer token:
-
-```http
-Authorization: Bearer <access_token>
-```
-
-role ที่เข้าถึงได้:
+Roles that can access:
 
 - `platform_admin`
-- สมาชิก `store_members` ที่เป็น `owner`, `manager`, `cashier`
+- `store_members` with role `owner`, `manager`, or `cashier`
 
-หมายเหตุ:
-- endpoint จัดการกฎส่วนลดระดับ (`customer-level-discounts`) จำกัดที่ `owner`, `manager`, `platform_admin`
+Note:
+- Endpoints that manage level discount rules (`customer-level-discounts`) are restricted to `owner`, `manager`, and `platform_admin`
 
-## Data Model (ย่อ)
+## Data Model (Summary)
 
-- ลูกค้าแต่ละคนอยู่ใต้ `store_id`
-- ลูกค้าแต่ละคนมี `level` เช่น `1`, `2`, `3`
-- ระบบส่วนลดจะ map จาก `level -> discount_percent`
+- Each customer belongs to a `store_id`
+- Each customer has a `level`, e.g. `1`, `2`, `3`
+- The discount system maps from `level -> discount_percent`
 
 ## Endpoints
 
 ## POST /api/v1/stores/:storeID/customers
 
-สร้างลูกค้า
+Creates a customer.
 
 Request body:
 
@@ -55,21 +51,19 @@ Request body:
 }
 ```
 
-`level` ไม่ส่งได้ จะ default เป็น `1`
+`level` is optional; defaults to `1` if not provided.
 
 ## GET /api/v1/stores/:storeID/customers
 
-ดึงรายการลูกค้าทั้งหมดของร้าน
+Returns all customers for the store.
 
 ## GET /api/v1/stores/:storeID/customers/:customerID
 
-ดึงลูกค้ารายเดียว
+Returns a single customer.
 
 ## PATCH /api/v1/stores/:storeID/customers/:customerID
 
-อัปเดตลูกค้า
-
-Request body (ส่งเฉพาะที่ต้องแก้):
+Updates a customer. Send only the fields to be changed.
 
 ```json
 {
@@ -82,13 +76,13 @@ Request body (ส่งเฉพาะที่ต้องแก้):
 
 ## DELETE /api/v1/stores/:storeID/customers/:customerID
 
-ลบลูกค้า
+Deletes a customer.
 
 ## GET /api/v1/stores/:storeID/customer-level-discounts
 
-ดึงค่าตั้งส่วนลดตามระดับลูกค้าของร้าน
+Returns the store's configured discount rules per customer level.
 
-response ตัวอย่าง:
+Example response:
 
 ```json
 [
@@ -107,7 +101,7 @@ response ตัวอย่าง:
 
 ## PUT /api/v1/stores/:storeID/customer-level-discounts/:level
 
-ตั้งค่าหรือแก้ไขส่วนลดของระดับนั้น (upsert)
+Sets or updates the discount for a given level (upsert).
 
 Request body:
 
@@ -117,26 +111,26 @@ Request body:
 }
 ```
 
-เงื่อนไข:
+Constraints:
 
-- `level` ต้องมากกว่า 0
-- `discount_percent` ต้องอยู่ระหว่าง `0-100`
+- `level` must be greater than `0`
+- `discount_percent` must be between `0` and `100`
 
 ## DELETE /api/v1/stores/:storeID/customer-level-discounts/:level
 
-ลบกฎส่วนลดของระดับนั้น
+Removes the discount rule for the specified level.
 
-## การผูกกับ Sales
+## Integration with Sales
 
-เมื่อสร้าง sale และส่ง `customer_id`, ระบบจะ:
+When creating a sale and providing a `customer_id`, the system will:
 
-1. อ่าน `level` ของลูกค้า
-2. อ่าน `% ส่วนลด` ตาม level ของร้าน
-3. คำนวณส่วนลดเครือข่ายอัตโนมัติในบิล
+1. Read the customer's `level`
+2. Look up the discount `%` for that level from the store's `customer_level_discounts`
+3. Automatically apply the network discount to the bill
 
-## Error Status ที่พบบ่อย
+## Common Error Status Codes
 
-- `400` ข้อมูลไม่ถูกต้อง เช่น `full_name` ว่าง, email format ไม่ถูกต้อง, `level <= 0`
-- `403` ไม่มีสิทธิ์ในร้านนี้
-- `404` ไม่พบลูกค้า
-- `500` internal server error
+- `400` — invalid input, e.g. empty `full_name`, invalid email format, `level <= 0`
+- `403` — no permission for this store
+- `404` — customer not found
+- `500` — internal server error

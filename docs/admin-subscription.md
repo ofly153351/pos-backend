@@ -1,10 +1,8 @@
 # Admin Subscription API
 
-API ชุดนี้สำหรับ `platform_admin` ใช้จัดการ subscription ของร้านทั้งหมดในระบบ
+This API is for `platform_admin` to manage subscriptions for all stores in the system.
 
-## Base
-
-ทุกเส้นต้องส่ง Bearer token ของ user ที่มี role `platform_admin`
+All endpoints require a Bearer token for a user with role `platform_admin`:
 
 ```http
 Authorization: Bearer <access_token>
@@ -12,15 +10,15 @@ Authorization: Bearer <access_token>
 
 ## GET /api/v1/admin/subscriptions
 
-ดึง subscription ของทุกร้าน พร้อมข้อมูลร้านและ owner
+Returns subscriptions for all stores, including store and owner information.
 
 ## GET /api/v1/admin/stores/:storeID/subscription
 
-ดึง subscription ปัจจุบันของร้านใดก็ได้ในฐานะ admin
+Returns the current subscription for any store, accessed as admin.
 
 ## PUT /api/v1/admin/stores/:storeID/subscription
 
-เปลี่ยน plan ของร้าน
+Changes the plan for a store.
 
 Request body:
 
@@ -32,7 +30,7 @@ Request body:
 
 ## PATCH /api/v1/admin/stores/:storeID/subscription/status
 
-เปลี่ยน status ของ subscription ปัจจุบันของร้าน
+Changes the status of the store's current subscription.
 
 Request body:
 
@@ -42,7 +40,7 @@ Request body:
 }
 ```
 
-status ที่รองรับ:
+Supported statuses:
 - `trialing`
 - `active`
 - `past_due`
@@ -51,5 +49,5 @@ status ที่รองรับ:
 
 ## Notes
 
-- route ชุดนี้ไม่ต้องอาศัย `store_members`
-- ใช้สำหรับงาน support, billing, หรือ backoffice admin
+- These routes do not require membership in `store_members`
+- Used for support, billing, or back-office admin operations

@@ -1,35 +1,29 @@
 # Store API
 
-เอกสารนี้อธิบายการใช้งาน API สำหรับจัดการข้อมูลร้านค้า
+This document describes the API for managing store data.
+
+All endpoints require: `Authorization: Bearer <token>`
 
 ## Base URL
 
-สำหรับ local:
+For local development:
 
 ```bash
 http://localhost:8080
 ```
 
-ระบบรองรับ 2 prefix:
+The system supports two prefixes:
 
-- `/api/v1` (หลัก)
+- `/api/v1` (primary)
 - `/api` (compatibility path)
 
-ตัวอย่าง endpoint ต่อไปนี้จะใช้ `/api/v1` เป็นหลัก ถ้าฝั่ง frontend เรียกผ่าน `/api` ก็ใช้งานได้เหมือนกัน
-
-## Authentication
-
-ทุก endpoint ในเอกสารนี้ต้องส่ง Bearer token:
-
-```http
-Authorization: Bearer <access_token>
-```
+The examples below use `/api/v1`. Calls via `/api` work identically.
 
 ## GET /api/v1/me/stores
 
-ดึงรายการร้านของ user ปัจจุบัน
+Returns the list of stores belonging to the current user.
 
-หมายเหตุ: มี alias เป็น `GET /api/v1/stores` เช่นกัน เพื่อความเข้ากันได้กับ frontend บาง flow
+Note: Also aliased as `GET /api/v1/stores` for compatibility with certain frontend flows.
 
 ### Example
 
@@ -67,12 +61,12 @@ Status: `200 OK`
 
 ### Access Rules
 
-- `owner` และ `manager` จะเห็นเฉพาะร้านที่ตัวเองเป็นสมาชิก
-- `platform_admin` จะเห็นทุกร้าน
+- `owner` and `manager` see only stores they are members of
+- `platform_admin` sees all stores
 
 ## POST /api/v1/stores
 
-สร้างร้านใหม่ (multipart/form-data)
+Creates a new store (multipart/form-data).
 
 ### Request Fields
 
@@ -125,13 +119,13 @@ Status: `201 Created`
 
 ### Error Status
 
-- `400 Bad Request` ข้อมูลไม่ถูกต้อง
-- `401 Unauthorized` ไม่มี/token ไม่ถูกต้อง
+- `400 Bad Request` — invalid input
+- `401 Unauthorized` — missing or invalid token
 - `500 Internal Server Error`
 
 ## GET /api/v1/stores/:storeID
 
-ดึงข้อมูลร้านตาม `storeID` (รวมข้อมูล subscription ล่าสุดของร้าน)
+Returns store data by `storeID`, including the store's latest subscription details.
 
 ### Example
 
@@ -140,7 +134,7 @@ curl http://localhost:8080/api/v1/stores/65b493e98058f410a890859f \
   -H "Authorization: Bearer <token>"
 ```
 
-compatibility path:
+Compatibility path:
 
 ```bash
 curl http://localhost:8080/api/stores/65b493e98058f410a890859f \
@@ -174,20 +168,20 @@ Status: `200 OK`
 
 ### Access Rules
 
-- `platform_admin` เข้าถึงได้ทุกร้าน
-- `owner` และ `manager` เข้าถึงเฉพาะร้านที่ตนเป็นสมาชิก
-- role อื่นหรือไม่ใช่สมาชิกจะได้ `403 Forbidden`
+- `platform_admin` can access any store
+- `owner` and `manager` can only access stores they are members of
+- Other roles or non-members receive `403 Forbidden`
 
 ### Error Status
 
 - `401 Unauthorized`
 - `403 Forbidden`
-- `404 Not Found` ไม่พบร้าน
+- `404 Not Found` — store not found
 - `500 Internal Server Error`
 
 ## PUT /api/v1/stores/:storeID
 
-แก้ไขข้อมูลร้าน รองรับทั้ง `application/json` และ `multipart/form-data` (สำหรับอัปโหลดโลโก้)
+Updates store data. Supports both `application/json` and `multipart/form-data` (for logo upload).
 
 ### Request Fields
 
@@ -247,13 +241,13 @@ Status: `200 OK`
 
 ### Access Rules
 
-- `platform_admin` เข้าถึงได้ทุกร้าน
-- `owner` และ `manager` แก้ไขได้เฉพาะร้านที่ตนเป็นสมาชิก
-- role อื่นหรือไม่ใช่สมาชิกจะได้ `403 Forbidden`
+- `platform_admin` can access any store
+- `owner` and `manager` can only edit stores they are members of
+- Other roles or non-members receive `403 Forbidden`
 
 ### Error Status
 
-- `400 Bad Request` ข้อมูลไม่ถูกต้อง
+- `400 Bad Request` — invalid input
 - `401 Unauthorized`
 - `403 Forbidden`
 - `404 Not Found`

@@ -1,10 +1,10 @@
 # Sales API
 
-API ชุดนี้ใช้สำหรับหน้าขาย POS เพื่อสร้างบิลขาย ดูประวัติการขาย และเปิดรายละเอียดใบเสร็จ
+This API is used for the POS sales screen to create sale bills, view sales history, and open receipt details.
 
-Base: `Authorization: Bearer <token>`
+All endpoints require: `Authorization: Bearer <token>`
 
-สิทธิ์ที่ใช้งานได้:
+Roles that can access:
 - `owner`
 - `manager`
 - `cashier`
@@ -12,7 +12,7 @@ Base: `Authorization: Bearer <token>`
 
 ## POST /api/v1/stores/:storeID/sales
 
-สร้างบิลขายและตัดจำนวนสินค้า (`product.quantity`) ใน transaction เดียว โดยรองรับ discount รายการสินค้าแบบต่อหน่วย
+Creates a sale bill and deducts product quantities (`product.quantity`) in a single transaction. Supports per-item discounts on a per-unit basis.
 
 ```json
 {
@@ -41,25 +41,25 @@ Base: `Authorization: Bearer <token>`
 ```
 
 Behavior:
-- ใช้ราคาปัจจุบันของสินค้า ณ เวลาขาย (`effective price`)
-- `discount_type` รองรับ `amount` และ `percent`
-- ถ้าไม่ส่ง `discount_type` และ `discount_value` จะถือว่าไม่มีส่วนลด
-- `discount_value` ของ `amount` คือส่วนลดต่อหน่วย
-- `discount_value` ของ `percent` ต้องอยู่ในช่วง `0-100`
-- `discount_bill` คือส่วนลดท้ายบิล (บาท) หลังหักส่วนลดรายรายการแล้ว
-- `discount_bill` ห้ามน้อยกว่า `0` และห้ามมากกว่ายอดที่ต้องจ่ายก่อน VAT
-- ถ้าส่ง `customer_id` ระบบจะคำนวณส่วนลดเครือข่ายเพิ่มตาม level ของลูกค้า (LV1/LV2/...) โดยอิงจาก `customer_level_discounts`
-- ส่วนลดเครือข่ายคำนวณต่อหน่วยบนยอดหลังหักส่วนลด manual ของรายการนั้น
-- ถ้าสต็อกไม่พอจะไม่สร้างบิล
-- ถ้าสินค้า inactive จะไม่ขาย
-- ถ้า `paid_amount < total_amount` จะ reject
-- รองรับ VAT ด้วย `vat_included` และ `vat_percent` (default `true` และ `7`)
-- บันทึก `subtotal_amount`, `discount_amount`, `vat_amount`, `total_amount`, `change_amount`
-- บันทึก `bill_discount_amount` แยกจาก `discount_amount` (ซึ่งเป็นส่วนลดรวม)
-- ถ้า `vat_included=true`: `total_amount` คือยอดรวมที่มี VAT อยู่แล้ว
-- ถ้า `vat_included=false`: `total_amount` คือยอดหลังหักส่วนลด + VAT เพิ่ม
+- Uses the product's current price at the time of sale (`effective price`)
+- `discount_type` supports `amount` and `percent`
+- If `discount_type` and `discount_value` are not sent, no discount is applied
+- `discount_value` for `amount` is the discount per unit
+- `discount_value` for `percent` must be in the range `0-100`
+- `discount_bill` is the bill-level discount (in currency) applied after per-item discounts
+- `discount_bill` must not be less than `0` and must not exceed the amount due before VAT
+- If `customer_id` is provided, the system automatically calculates a network discount based on the customer's level (LV1/LV2/...) using `customer_level_discounts`
+- Network discount is calculated per unit on the amount after the manual per-item discount
+- If stock is insufficient, the bill will not be created
+- If a product is inactive, it will not be sold
+- If `paid_amount < total_amount`, the request is rejected
+- Supports VAT via `vat_included` and `vat_percent` (defaults: `true` and `7`)
+- Records `subtotal_amount`, `discount_amount`, `vat_amount`, `total_amount`, `change_amount`
+- Records `bill_discount_amount` separately from `discount_amount` (which is the total combined discount)
+- If `vat_included=true`: `total_amount` is the grand total with VAT already included
+- If `vat_included=false`: `total_amount` is the amount after discounts plus VAT added on top
 
-Response shape หลัก:
+Response shape:
 
 ```json
 {
@@ -100,7 +100,7 @@ Response shape หลัก:
 
 ## GET /api/v1/stores/:storeID/sales
 
-ดึงประวัติการขายของร้าน เรียงล่าสุดก่อน พร้อมยอด:
+Retrieves the store's sales history, ordered by most recent first. Each record includes:
 - `subtotal_amount`
 - `discount_amount`
 - `vat_included`
@@ -114,7 +114,7 @@ Response shape หลัก:
 
 ## GET /api/v1/stores/:storeID/sales/:saleID
 
-ดึงรายละเอียดบิลขาย 1 รายการ พร้อม `items` ที่เก็บ snapshot ของ:
+Retrieves details of a single sale bill, including `items` which store a snapshot of:
 - `unit_price`
 - `discount_type`
 - `discount_value`
@@ -125,7 +125,7 @@ Response shape หลัก:
 
 ## GET /api/v1/stores/:storeID/sales/:saleID/receipt
 
-สร้างใบเสร็จแบบ HTML สำหรับพิมพ์ (thermal style) ตาม template:
+Generates an HTML receipt for printing (thermal style) based on the template:
 - `store` (name/address/tax_id/vat_included)
 - `order` (order_no/staff/datetime)
 - `customer`
@@ -135,22 +135,22 @@ Response shape หลัก:
 - `footer`
 
 PromptPay QR:
-- ถ้าร้านมี `promptpay_id` ระบบจะแสดงเลขพร้อมเพย์และ QR ที่ท้ายบิลอัตโนมัติ
-- QR จะ encode ยอด `grand_total` ของบิลนั้นให้พร้อมสแกนจ่าย
-- ถ้าร้านยังไม่มี `promptpay_id` จะไม่แสดง block QR
+- If the store has a `promptpay_id`, the system automatically displays the PromptPay number and a QR code at the bottom of the receipt
+- The QR encodes the `grand_total` of that bill, ready to scan and pay
+- If the store has no `promptpay_id`, the QR block is not shown
 
 Response:
 - `200 OK`
 - `Content-Type: text/html; charset=utf-8`
 
-ตัวอย่าง:
+Example:
 
 ```bash
 curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt \
   -H "Authorization: Bearer <token>"
 ```
 
-compatibility path:
+Compatibility path:
 
 ```bash
 curl http://localhost:8080/api/stores/{storeID}/sales/{saleID}/receipt \
@@ -159,7 +159,7 @@ curl http://localhost:8080/api/stores/{storeID}/sales/{saleID}/receipt \
 
 ## GET /api/v1/stores/:storeID/sales/:saleID/receipt/preview
 
-คืนหน้า HTML preview พร้อมปุ่ม `Print` ในตัว (เหมาะกับ browser flow)
+Returns an HTML preview page with a built-in `Print` button (suitable for browser flow).
 
 Response:
 - `200 OK`
@@ -170,18 +170,18 @@ curl http://localhost:8080/api/v1/stores/{storeID}/sales/{saleID}/receipt/previe
   -H "Authorization: Bearer <token>"
 ```
 
-compatibility path:
+Compatibility path:
 
 ```bash
 curl http://localhost:8080/api/stores/{storeID}/sales/{saleID}/receipt/preview \
   -H "Authorization: Bearer <token>"
 ```
 
-แนวทาง frontend ที่ไม่เจอ `about:blank`:
-- เรียก endpoint ด้วย `fetch` และแนบ `Authorization` header
-- เอา HTML response ไป `document.write()` ลงหน้าต่างใหม่ แล้วค่อยกด `Print`
+Frontend approach to avoid `about:blank` issues:
+- Call the endpoint using `fetch` and attach the `Authorization` header
+- Take the HTML response and use `document.write()` into a new window, then trigger `Print`
 
-ตัวอย่าง:
+Example:
 
 ```javascript
 const res = await fetch(`/api/v1/stores/${storeID}/sales/${saleID}/receipt/preview`, {
@@ -196,12 +196,12 @@ if (popup) {
 }
 ```
 
-หมายเหตุ VAT:
-- ใบเสร็จอ่านค่า `vat_included`, `vat_percent`, `vat_amount` จากข้อมูล sale ที่บันทึกจริง
+VAT note:
+- The receipt reads `vat_included`, `vat_percent`, and `vat_amount` from the actual saved sale record.
 
 ## Notes
 
-- หน้าขายควรใช้ `GET /api/v1/stores/:storeID/products` เพื่อดึงสินค้าที่เหลือก่อนเริ่มขาย
-- หลังสร้าง sale สำเร็จ ควร refresh product list เพราะ `quantity` ถูกหักแล้ว
-- response จาก backend ควรใช้เป็น source of truth สำหรับ order summary และ receipt
-- ถ้าต้องการ PromptPay QR ในใบเสร็จ ให้ตั้งค่า `promptpay_id` ของร้านก่อนที่ `PUT /api/v1/stores/:storeID` (ดู `docs/store.md`)
+- The sales screen should use `GET /api/v1/stores/:storeID/products` to fetch available products before starting a sale
+- After a sale is successfully created, refresh the product list because `quantity` has already been deducted
+- The backend response should be used as the source of truth for the order summary and receipt
+- To show PromptPay QR in the receipt, configure the store's `promptpay_id` first via `PUT /api/v1/stores/:storeID` (see `docs/store.md`)

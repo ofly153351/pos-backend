@@ -1,21 +1,20 @@
 # Invoice API
 
-API สำหรับออกบิลค้างชำระให้ลูกค้าในเครือ และออกรายงาน PDF
+API for issuing credit invoices to network customers and generating PDF reports.
 
-## Base
+All endpoints require: `Authorization: Bearer <token>`
 
-- `Authorization: Bearer <access_token>`
-- รองรับทั้ง `/api/v1/*` และ `/api/*`
+Supports both `/api/v1/*` and `/api/*`.
 
 ## POST /api/v1/stores/:storeID/invoices
 
-สร้างบิลค้างชำระ (สถานะเริ่มต้น `unpaid`)
+Creates a credit invoice (initial status: `unpaid`).
 
 ```json
 {
   "customer_id": "7e9d5ccccf930438e6ba0d0f",
   "due_at": "2026-04-30T00:00:00Z",
-  "note": "เครดิต 30 วัน",
+  "note": "30-day credit",
   "vat_included": false,
   "vat_percent": 7,
   "items": [
@@ -30,55 +29,55 @@ API สำหรับออกบิลค้างชำระให้ลู�
 ```
 
 Behavior:
-- ต้องเป็นลูกค้าในเครือ (`customer_id`) เท่านั้น
-- คำนวณส่วนลดเครือข่ายอัตโนมัติตาม `customer_level_discounts`
-- ตัดสต็อกสินค้าใน transaction เดียวกับการสร้าง invoice
-- รองรับ VAT ด้วย `vat_included` และ `vat_percent` (default `true` และ `7`)
-- บันทึก `vat_amount` ลง invoice และใช้ยอดนี้ทั้งตอนชำระและตอนออก PDF
-- ถ้า `vat_included=true`: `total_amount` คือยอดที่มี VAT อยู่แล้ว
-- ถ้า `vat_included=false`: `total_amount` คือยอดหลังหักส่วนลด + VAT เพิ่ม
+- Must be a network customer (`customer_id`)
+- Network discount is automatically calculated based on `customer_level_discounts`
+- Stock is deducted in the same transaction as invoice creation
+- Supports VAT via `vat_included` and `vat_percent` (defaults: `true` and `7`)
+- Records `vat_amount` on the invoice; this value is used for both payment and PDF generation
+- If `vat_included=true`: `total_amount` is the grand total with VAT already included
+- If `vat_included=false`: `total_amount` is the amount after discounts plus VAT added on top
 
 ## GET /api/v1/stores/:storeID/invoices
 
-ดึงรายการบิลค้างชำระของร้าน
+Returns the list of credit invoices for the store.
 
 ## GET /api/v1/stores/:storeID/invoices/:invoiceID
 
-ดึงรายละเอียดบิล 1 ใบ พร้อม `items` และ `payments`
+Returns details of a single invoice, including `items` and `payments`.
 
 ## POST /api/v1/stores/:storeID/invoices/:invoiceID/payments
 
-บันทึกการชำระบางส่วนหรือปิดบิล พร้อมแนบหลักฐานการชำระเงินได้
+Records a partial or full payment on the invoice. Optionally attach proof of payment.
 
-รองรับ 2 รูปแบบ:
-- `application/json` (เดิม)
-- `multipart/form-data` (แนะนำเมื่อมีไฟล์หลักฐาน)
+Supports two formats:
+- `application/json` (legacy)
+- `multipart/form-data` (recommended when attaching a proof file)
 
 ```json
 {
   "paid_amount": 500,
   "payment_method": "bank_transfer",
-  "note": "โอนงวดแรก"
+  "note": "first installment"
 }
 ```
 
-ตัวอย่างแนบหลักฐาน (รูปหรือ PDF):
+Example with proof attachment (image or PDF):
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/payments \
   -H "Authorization: Bearer <token>" \
   -F "paid_amount=500" \
   -F "payment_method=bank_transfer" \
-  -F "note=โอนงวดแรก" \
+  -F "note=first installment" \
   -F "proof=@/path/to/slip.pdf"
 ```
 
-ข้อกำหนดไฟล์ `proof`:
-- รองรับ `image/jpeg`, `image/png`, `image/webp`, `application/pdf`
-- ขนาดไฟล์สูงสุด `10MB`
-- จัดเก็บใน MinIO และจะได้ URL ในข้อมูล payment (`proof_url`)
+`proof` file requirements:
+- Accepted types: `image/jpeg`, `image/png`, `image/webp`, `application/pdf`
+- Maximum file size: `10MB`
+- Stored in MinIO; URL is returned in the payment record as `proof_url`
 
-ตัวอย่างฟิลด์ที่เพิ่มใน `payments[]`:
+Example fields added to `payments[]`:
 
 ```json
 {
@@ -91,56 +90,56 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/
 }
 ```
 
-Status transition:
+Status transitions:
 - `unpaid` -> `partially_paid` -> `paid`
 
 ## GET /api/v1/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof
 
-เปิดดูหลักฐานการชำระเงินของ payment รายการนั้น (redirect ไปไฟล์ใน MinIO)
+Opens the proof of payment for a specific payment record (redirects to the file in MinIO).
 
 ```bash
 curl -L http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/payments/{paymentID}/proof \
   -H "Authorization: Bearer <token>"
 ```
 
-หมายเหตุ:
-- `paymentID` เอาจาก `payments[].id` ใน `GET /invoices/:invoiceID`
-- ถ้า payment นั้นไม่มีหลักฐาน จะได้ `404 payment proof not found`
+Notes:
+- `paymentID` comes from `payments[].id` in `GET /invoices/:invoiceID`
+- If the payment has no proof attached, returns `404 payment proof not found`
 
 ## POST /api/v1/stores/:storeID/invoices/:invoiceID/unpay
 
-ใช้เมื่อชำระผิดพลาดจาก user error แล้วต้องการย้อนสถานะกลับเป็น `unpaid`
+Use when a payment was recorded in error and needs to be reversed back to `unpaid`.
 
 ```json
 {
-  "reason": "บันทึกชำระผิดใบแจ้งหนี้"
+  "reason": "recorded payment on wrong invoice"
 }
 ```
 
 Behavior:
-- ต้องส่ง `reason` ทุกครั้ง (เก็บ audit)
-- ระบบจะ mark payment ที่เคยบันทึกไว้ทั้งหมดเป็น `is_voided=true` (ไม่ลบทิ้ง)
-- รีเซ็ต invoice เป็น:
+- `reason` is required (stored for audit purposes)
+- All previously recorded payments are marked as `is_voided=true` (not deleted)
+- The invoice is reset to:
   - `status = unpaid`
   - `paid_amount = 0`
   - `remaining_amount = total_amount`
   - `payment_method = null`
 
-หมายเหตุ:
-- ใน `payments[]` จะเห็นข้อมูล audit เพิ่ม เช่น `is_voided`, `voided_at`, `voided_by_user_id`, `void_reason`
+Notes:
+- In `payments[]`, the audit fields are visible: `is_voided`, `voided_at`, `voided_by_user_id`, `void_reason`
 
 ## GET /api/v1/stores/:storeID/invoices/:invoiceID/pdf
 
-สร้างเอกสาร PDF ของ invoice แล้วส่งกลับเป็น `application/pdf`
+Generates a PDF document of the invoice and returns it as `application/pdf`.
 
-สามารถเปิดตรงใน browser หรือดาวน์โหลดได้ทันที
+Can be opened directly in a browser or downloaded immediately.
 
-หมายเหตุ VAT ใน PDF:
-- แสดง `VAT %`, `VAT amount`, และ `VAT mode (Included/Excluded)` จากค่าที่บันทึกจริงใน invoice
+VAT notes in PDF:
+- Displays `VAT %`, `VAT amount`, and `VAT mode (Included/Excluded)` from the values actually saved on the invoice.
 
-## Error ที่พบบ่อย
+## Common Errors
 
-- `400` ข้อมูลไม่ถูกต้อง, จ่ายเกินยอดคงเหลือ, บิลปิดแล้ว
-- `403` ไม่มีสิทธิ์ในร้าน
-- `404` ไม่พบ invoice / customer / product
-- `500` internal server error
+- `400` — invalid input, payment exceeds remaining balance, invoice already closed
+- `403` — no permission for this store
+- `404` — invoice / customer / product not found
+- `500` — internal server error

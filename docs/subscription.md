@@ -1,18 +1,12 @@
 # Subscription API
 
-API นี้ใช้ดูแผน subscription และเปลี่ยนแผนของร้าน
+This API is used to view subscription plans and change a store's plan.
 
-## Base
-
-ทุกเส้นต้องส่ง Bearer token:
-
-```http
-Authorization: Bearer <access_token>
-```
+All endpoints require: `Authorization: Bearer <token>`
 
 ## GET /api/v1/subscriptions/plans
 
-ดึงรายการแผนทั้งหมดที่เปิดใช้งาน
+Returns all active subscription plans.
 
 Example:
 
@@ -23,11 +17,11 @@ curl http://localhost:8080/api/v1/subscriptions/plans \
 
 ## GET /api/v1/stores/:storeID/subscription
 
-ดึง subscription ปัจจุบันของร้าน
+Returns the current subscription for the store.
 
 ## PUT /api/v1/stores/:storeID/subscription
 
-เปลี่ยนแผนของร้าน
+Changes the store's plan.
 
 Request body:
 
@@ -48,5 +42,5 @@ curl -X PUT http://localhost:8080/api/v1/stores/ad65bd37a3b3da7828ec9111/subscri
 
 ## Notes
 
-- การเปลี่ยนแผนจะปิด subscription เดิมที่ยัง active อยู่ก่อน แล้วสร้าง row ใหม่
-- สิทธิ์เปลี่ยนแผนต้องเป็น `owner`, `manager` หรือ `platform_admin`
+- Changing a plan closes the current active subscription first, then creates a new row
+- Permission to change a plan requires role `owner`, `manager`, or `platform_admin`
