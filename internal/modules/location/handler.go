@@ -47,6 +47,8 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 		switch err {
 		case ErrLocationForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+		case ErrInvalidWarehouse:
+			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		default:
 			return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 		}

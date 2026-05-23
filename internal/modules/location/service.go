@@ -80,6 +80,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		WarehouseID: input.WarehouseID,
 		Name:        strings.TrimSpace(input.Name),
 		Code:        strings.TrimSpace(input.Code),
+		ZoneName:    strings.TrimSpace(input.ZoneName),
+		FloorName:   strings.TrimSpace(input.FloorName),
 		IsSalePoint: input.IsSalePoint,
 		IsActive:    true,
 		CreatedAt:   now,
@@ -91,12 +93,22 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID, wa
 	if strings.TrimSpace(storeID) == "" {
 		return nil, ErrLocationForbidden
 	}
+	warehouseID = strings.TrimSpace(warehouseID)
 	allowed, err := s.canView(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
 		return nil, err
 	}
 	if !allowed {
 		return nil, ErrLocationForbidden
+	}
+	if warehouseID != "" {
+		ok, err := s.warehouseBelongsToStore(ctx, storeID, warehouseID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrInvalidWarehouse
+		}
 	}
 	return s.repo.ListByStore(ctx, storeID, warehouseID)
 }
@@ -135,6 +147,12 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, locatio
 	}
 	if input.Code != nil {
 		current.Code = strings.TrimSpace(*input.Code)
+	}
+	if input.ZoneName != nil {
+		current.ZoneName = strings.TrimSpace(*input.ZoneName)
+	}
+	if input.FloorName != nil {
+		current.FloorName = strings.TrimSpace(*input.FloorName)
 	}
 	if input.IsSalePoint != nil {
 		current.IsSalePoint = *input.IsSalePoint

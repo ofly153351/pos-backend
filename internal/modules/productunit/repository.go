@@ -48,8 +48,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var list []ProductUnit
 	err := r.db.WithContext(ctx).
 		Model(&ProductUnit{}).
-		Where("store_id = ?", storeID).
-		Order("name ASC").
+		Select("product_units.*, COALESCE((SELECT COUNT(*) FROM products p WHERE p.product_unit_id = product_units.id), 0) AS product_count").
+		Where("product_units.store_id = ?", storeID).
+		Order("product_units.name ASC").
 		Find(&list).Error
 	return list, err
 }

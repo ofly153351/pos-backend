@@ -31,6 +31,8 @@ type locationQueryRow struct {
 	WarehouseID   string    `gorm:"column:warehouse_id"`
 	Name          string    `gorm:"column:name"`
 	Code          *string   `gorm:"column:code"`
+	ZoneName      *string   `gorm:"column:zone_name"`
+	FloorName     *string   `gorm:"column:floor_name"`
 	IsSalePoint   bool      `gorm:"column:is_sale_point"`
 	IsActive      bool      `gorm:"column:is_active"`
 	CreatedAt     time.Time `gorm:"column:created_at"`
@@ -53,6 +55,12 @@ func (r *locationQueryRow) toLocation() Location {
 	if r.Code != nil {
 		loc.Code = *r.Code
 	}
+	if r.ZoneName != nil {
+		loc.ZoneName = *r.ZoneName
+	}
+	if r.FloorName != nil {
+		loc.FloorName = *r.FloorName
+	}
 	return loc
 }
 
@@ -60,7 +68,7 @@ func (r PostgresRepository) locationBaseQuery() *gorm.DB {
 	return r.db.Table("locations").
 		Select(`
 			locations.id, locations.store_id, locations.warehouse_id,
-			locations.name, locations.code,
+			locations.name, locations.code, locations.zone_name, locations.floor_name,
 			locations.is_sale_point, locations.is_active,
 			locations.created_at, locations.updated_at,
 			COALESCE(warehouses.name, '') AS warehouse_name
@@ -83,6 +91,16 @@ func (r PostgresRepository) Create(ctx context.Context, loc Location) (Location,
 		payload["code"] = nil
 	} else {
 		payload["code"] = loc.Code
+	}
+	if strings.TrimSpace(loc.ZoneName) == "" {
+		payload["zone_name"] = nil
+	} else {
+		payload["zone_name"] = strings.TrimSpace(loc.ZoneName)
+	}
+	if strings.TrimSpace(loc.FloorName) == "" {
+		payload["floor_name"] = nil
+	} else {
+		payload["floor_name"] = strings.TrimSpace(loc.FloorName)
 	}
 	if err := r.db.WithContext(ctx).Table("locations").Create(payload).Error; err != nil {
 		if strings.Contains(err.Error(), "SQLSTATE 23505") {
@@ -134,6 +152,16 @@ func (r PostgresRepository) Update(ctx context.Context, loc Location) (Location,
 		updates["code"] = nil
 	} else {
 		updates["code"] = loc.Code
+	}
+	if strings.TrimSpace(loc.ZoneName) == "" {
+		updates["zone_name"] = nil
+	} else {
+		updates["zone_name"] = strings.TrimSpace(loc.ZoneName)
+	}
+	if strings.TrimSpace(loc.FloorName) == "" {
+		updates["floor_name"] = nil
+	} else {
+		updates["floor_name"] = strings.TrimSpace(loc.FloorName)
 	}
 
 	result := r.db.WithContext(ctx).
