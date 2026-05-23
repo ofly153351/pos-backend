@@ -31,7 +31,7 @@ func normalizeDiscountType(value string) string {
 func calculateDiscount(unitPrice float64, discountType string, discountValue *float64) (float64, error) {
 	normalized := normalizeDiscountType(discountType)
 	if normalized == "" {
-		if discountValue != nil {
+		if discountValue != nil && *discountValue != 0 {
 			return 0, ErrReceiptItemUnitPriceInvalid
 		}
 		return 0, nil
