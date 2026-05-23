@@ -2,9 +2,8 @@ package subscription
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
+	"pos-backend/internal/idgen"
 	"time"
 
 	"gorm.io/gorm"
@@ -119,7 +118,7 @@ func (r PostgresRepository) ChangePlan(ctx context.Context, storeID, planCode st
 	}
 
 	sub := StoreSubscription{
-		ID:                 productNewID(),
+		ID:                 idgen.Generate(idgen.PrefixStoreSubscription),
 		StoreID:            storeID,
 		PlanID:             plan.ID,
 		PlanCode:           plan.Code,
@@ -192,10 +191,3 @@ func (row storeSubscriptionView) toSubscription() StoreSubscription {
 	}
 }
 
-func productNewID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-	return hex.EncodeToString(buf)
-}

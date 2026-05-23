@@ -106,7 +106,7 @@ func (r PostgresRepository) CreateWithOwner(ctx context.Context, storeModel Stor
 	}
 
 	if err := tx.Table("store_members").Create(&storeMember{
-		ID:      newHexID(),
+		ID:      newStoreMemberID(),
 		StoreID: storeModel.ID,
 		UserID:  ownerUserID,
 		Role:    "owner",
@@ -116,7 +116,7 @@ func (r PostgresRepository) CreateWithOwner(ctx context.Context, storeModel Stor
 
 	periodEnd := storeModel.CreatedAt.Add(time.Duration(plan.DurationDays) * 24 * time.Hour)
 	if err := tx.Table("store_subscriptions").Create(&storeSubscription{
-		ID:                 newHexID(),
+		ID:                 newStoreSubscriptionID(),
 		StoreID:            storeModel.ID,
 		PlanID:             plan.ID,
 		Status:             "active",

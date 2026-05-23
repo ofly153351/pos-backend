@@ -83,7 +83,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 			return ParkedBillResponse{}, ErrInvalidItem
 		}
 		items = append(items, ParkedBillItem{
-			ID:            newID(),
+			ID:            newItemID(),
 			ParkedBillID:  bill.ID,
 			ProductID:     product.ID,
 			ProductName:   product.Name,

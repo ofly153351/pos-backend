@@ -2,26 +2,18 @@ package product
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
+	"pos-backend/internal/idgen"
 	"strings"
 )
 
-func newID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-
-	return hex.EncodeToString(buf)
-}
+func newID() string { return idgen.Generate(idgen.PrefixProduct) }
 
 func newBarcode12Digits() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
 		return "000000000000"
 	}
-
 	var out strings.Builder
 	out.Grow(12)
 	for _, v := range b {

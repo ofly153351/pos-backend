@@ -1,2 +1,0 @@
-ALTER TABLE stores
-    DROP COLUMN IF EXISTS slug;

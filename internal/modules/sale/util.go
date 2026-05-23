@@ -1,10 +1,9 @@
 package sale
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"math"
+	"pos-backend/internal/idgen"
 	"strings"
 	"time"
 )
@@ -15,16 +14,15 @@ const (
 	DiscountTypePercent = "percent"
 )
 
-func newID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-	return hex.EncodeToString(buf)
-}
+func newID() string { return idgen.Generate(idgen.PrefixSale) }
+
+func newSaleItemID() string { return idgen.Generate(idgen.PrefixSaleItem) }
+
+func newStockMovementID() string { return idgen.Generate(idgen.PrefixStockMovement) }
 
 func newSaleNumber(now time.Time) string {
-	return fmt.Sprintf("SALE-%s-%s", now.UTC().Format("20060102150405"), newID()[:6])
+	id := idgen.Generate(idgen.PrefixSale)
+	return fmt.Sprintf("SALE-%s-%s", now.UTC().Format("20060102150405"), id[len(id)-6:])
 }
 
 func resolveEffectivePrice(product productSnapshot, now time.Time) float64 {

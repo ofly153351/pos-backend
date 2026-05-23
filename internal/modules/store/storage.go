@@ -69,7 +69,7 @@ func (s LocalLogoStorage) SaveStoreLogo(file *multipart.FileHeader) (string, err
 		ext = ".bin"
 	}
 
-	filename := fmt.Sprintf("%s%s", newHexID(), ext)
+	filename := fmt.Sprintf("%s%s", newFileToken(), ext)
 	dstPath := filepath.Join(logoDir, filename)
 
 	src, err := file.Open()
@@ -104,7 +104,7 @@ func (s *MinIOLogoStorage) SaveStoreLogo(file *multipart.FileHeader) (string, er
 		ext = ".bin"
 	}
 
-	filename := fmt.Sprintf("logos/%s%s", newHexID(), ext)
+	filename := fmt.Sprintf("logos/%s%s", newFileToken(), ext)
 
 	src, err := file.Open()
 	if err != nil {

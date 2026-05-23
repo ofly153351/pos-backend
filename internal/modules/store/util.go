@@ -1,15 +1,11 @@
 package store
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"fmt"
+	"pos-backend/internal/idgen"
 )
 
-func newHexID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-
-	return hex.EncodeToString(buf)
-}
+func newHexID() string              { return idgen.Generate(idgen.PrefixStore) }
+func newStoreMemberID() string       { return idgen.Generate(idgen.PrefixStoreMember) }
+func newStoreSubscriptionID() string { return idgen.Generate(idgen.PrefixStoreSubscription) }
+func newFileToken() string           { return fmt.Sprintf("%08d", idgen.NextInt()) }

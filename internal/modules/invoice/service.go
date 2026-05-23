@@ -138,7 +138,7 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, inv
 		return Invoice{}, err
 	}
 	payment := InvoicePayment{
-		ID:            newID(),
+		ID:            newInvoicePaymentID(),
 		InvoiceID:     invoiceID,
 		PaidAmount:    req.PaidAmount,
 		PaymentMethod: strings.TrimSpace(req.PaymentMethod),

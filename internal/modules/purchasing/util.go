@@ -1,12 +1,12 @@
 package purchasing
 
-import (
-	"crypto/rand"
-	"fmt"
-)
+import "pos-backend/internal/idgen"
 
-func newID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-}
+func newID() string           { return idgen.Generate(idgen.PrefixPurchaseOrder) }
+func newSupplierID() string   { return idgen.Generate(idgen.PrefixSupplier) }
+func newPOItemID() string     { return idgen.Generate(idgen.PrefixPurchaseOrderItem) }
+func newLocationID() string   { return idgen.Generate(idgen.PrefixLocation) }
+func newStockID() string      { return idgen.Generate(idgen.PrefixStock) }
+func newProductID() string    { return idgen.Generate(idgen.PrefixProduct) }
+func newProductUnitID() string { return idgen.Generate(idgen.PrefixProductUnit) }
+func newSupplierProductID() string { return idgen.Generate(idgen.PrefixSupplierProduct) }

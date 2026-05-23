@@ -395,7 +395,7 @@ func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, store
 				goto found
 			}
 			// Auto-create a default receiving location
-			locID = newID()
+			locID = newLocationID()
 			var whID string
 			if err := r.db.WithContext(ctx).
 				Table("warehouses").
@@ -433,7 +433,7 @@ found:
 			 ON CONFLICT (product_id, location_id)
 			 DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
 			 WHERE (stocks.quantity + ?) >= 0`,
-			newID(), storeID, productID, locID, addQty, addQty, addQty,
+			newStockID(), storeID, productID, locID, addQty, addQty, addQty,
 		).Error; err != nil {
 			return err
 		}
@@ -444,7 +444,7 @@ found:
 }
 
 func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error) {
-	id := newID()
+	id := newProductID()
 	now := gorm.Expr("NOW()")
 	payload := map[string]any{
 		"id":          id,
@@ -465,7 +465,7 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 	} else {
 		// product_unit_id is NOT NULL — find or create a default unit for this store
 		var defaultUnitID string
-		unitID := newID()
+		unitID := newProductUnitID()
 		err := r.db.WithContext(ctx).
 			Table("product_units").
 			Where("store_id = ?", storeID).

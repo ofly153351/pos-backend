@@ -127,7 +127,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, q L
 }
 
 func (r PostgresRepository) UpsertStock(ctx context.Context, storeID, productID, locationID string, delta int) error {
-	id := newID()
+	id := newStockID()
 	result := r.db.WithContext(ctx).
 		Exec(`
 			INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
@@ -162,7 +162,7 @@ func (r PostgresRepository) SetStockQuantity(ctx context.Context, storeID, produ
 		return r.db.WithContext(ctx).
 			Table("stocks").
 			Create(map[string]any{
-				"id":          newID(),
+				"id":          newStockID(),
 				"store_id":    storeID,
 				"product_id":  productID,
 				"location_id": locationID,

@@ -59,7 +59,7 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 			discountAmountPerUnit = unitPrice
 		}
 
-		invoice.Items[index].ID = newID()
+		invoice.Items[index].ID = newInvoiceItemID()
 		invoice.Items[index].InvoiceID = invoice.ID
 		invoice.Items[index].ProductName = product.Name
 		invoice.Items[index].SKU = product.SKU
@@ -103,7 +103,7 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 
 		// Create stock movement record
 		if err := tx.Table("stock_movements").Create(map[string]any{
-			"id":                newID(),
+			"id":                newStockMovementID(),
 			"store_id":          invoice.StoreID,
 			"product_id":        product.ID,
 			"location_id":       deductLocID,

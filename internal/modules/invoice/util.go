@@ -1,10 +1,9 @@
 package invoice
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"math"
+	"pos-backend/internal/idgen"
 	"strings"
 	"time"
 )
@@ -14,16 +13,19 @@ const (
 	discountTypePercent = "percent"
 )
 
-func newID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-	return hex.EncodeToString(buf)
-}
+func newID() string { return idgen.Generate(idgen.PrefixInvoice) }
+
+func newInvoiceItemID() string { return idgen.Generate(idgen.PrefixInvoiceItem) }
+
+func newInvoicePaymentID() string { return idgen.Generate(idgen.PrefixInvoicePayment) }
+
+func newStockMovementID() string { return idgen.Generate(idgen.PrefixStockMovement) }
+
+func newFileToken() string { return fmt.Sprintf("%08d", idgen.NextInt()) }
 
 func newInvoiceNumber(now time.Time) string {
-	return fmt.Sprintf("INV-%s-%s", now.UTC().Format("20060102150405"), newID()[:6])
+	id := idgen.Generate(idgen.PrefixInvoice)
+	return fmt.Sprintf("INV-%s-%s", now.UTC().Format("20060102150405"), id[len(id)-6:])
 }
 
 func normalizeDiscountType(value string) string {

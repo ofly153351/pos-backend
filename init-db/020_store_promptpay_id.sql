@@ -1,2 +1,0 @@
-ALTER TABLE stores
-ADD COLUMN IF NOT EXISTS promptpay_id TEXT;

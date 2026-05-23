@@ -39,7 +39,7 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 	}
 
 	item := Supplier{
-		ID:            newID(),
+		ID:            newSupplierID(),
 		StoreID:       storeID,
 		Name:          strings.TrimSpace(input.Name),
 		Phone:         strings.TrimSpace(input.Phone),
@@ -180,7 +180,7 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 		for _, item := range input.Items {
 			itemLineTotal := float64(item.Quantity) * item.UnitCost
 			poItem := PurchaseOrderItem{
-				ID:              newID(),
+				ID:              newPOItemID(),
 				PurchaseOrderID: created.ID,
 				ProductID:       item.ProductID,
 				Quantity:        item.Quantity,
@@ -402,7 +402,7 @@ func (s Service) AddSupplierProduct(ctx context.Context, actor auth.Claims, stor
 
 	now := time.Now().UTC()
 	sp := SupplierProduct{
-		ID:            newID(),
+		ID:            newSupplierProductID(),
 		SupplierID:    supplierID,
 		ProductID:     input.ProductID,
 		SupplierSKU:   strings.TrimSpace(input.SupplierSKU),
@@ -518,7 +518,7 @@ func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Cl
 	// Create supplier product link
 	now := time.Now().UTC()
 	sp := SupplierProduct{
-		ID:            newID(),
+		ID:            newSupplierProductID(),
 		SupplierID:    supplierID,
 		ProductID:     productID,
 		SupplierSKU:   strings.TrimSpace(input.SupplierSKU),

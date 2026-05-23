@@ -72,7 +72,7 @@ func (s *MinIOPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) 
 		ext = ".bin"
 	}
 
-	objectName := fmt.Sprintf("invoice-payments/%s%s", newID(), ext)
+	objectName := fmt.Sprintf("invoice-payments/%s%s", newFileToken(), ext)
 	src, err := file.Open()
 	if err != nil {
 		return "", "", "", err

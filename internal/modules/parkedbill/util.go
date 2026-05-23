@@ -1,14 +1,6 @@
 package parkedbill
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-)
+import "pos-backend/internal/idgen"
 
-func newID() string {
-	buf := make([]byte, 12)
-	if _, err := rand.Read(buf); err != nil {
-		return "generated-id"
-	}
-	return hex.EncodeToString(buf)
-}
+func newID() string     { return idgen.Generate(idgen.PrefixParkedBill) }
+func newItemID() string { return idgen.Generate(idgen.PrefixParkedBillItem) }

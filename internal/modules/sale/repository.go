@@ -56,7 +56,7 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale) (Sale, error)
 			discountAmountPerUnit = unitPrice
 		}
 
-		sale.Items[index].ID = newID()
+		sale.Items[index].ID = newSaleItemID()
 		sale.Items[index].SaleID = sale.ID
 		sale.Items[index].ProductName = product.Name
 		sale.Items[index].SKU = product.SKU
@@ -234,7 +234,7 @@ func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gor
 	}
 
 	remaining := qty
-	movementID := newID()
+	movementID := newStockMovementID()
 	now := gorm.Expr("NOW()")
 
 	for _, ls := range locationStocks {
@@ -259,7 +259,7 @@ func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gor
 
 		// Create stock movement record
 		if err := tx.Table("stock_movements").Create(map[string]any{
-			"id":              newID(),
+			"id":              newStockMovementID(),
 			"store_id":        storeID,
 			"product_id":      productID,
 			"location_id":     ls.LocationID,
