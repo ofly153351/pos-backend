@@ -32,6 +32,11 @@ type Repository interface {
 	SupplierExists(ctx context.Context, storeID, supplierID string) (bool, error)
 	GetPurchaseOrder(ctx context.Context, storeID, purchaseOrderID string) (purchaseOrderSnapshot, error)
 	GetPurchaseOrderItems(ctx context.Context, purchaseOrderID string) ([]purchaseOrderItemSnapshot, error)
+	CreatePendingAttachment(ctx context.Context, attachment WarehouseReceiptPendingAttachment) error
+	ListPendingAttachments(ctx context.Context, receiptID string) ([]WarehouseReceiptPendingAttachment, error)
+	DeletePendingAttachments(ctx context.Context, receiptID string, ids []string) error
+	CreateAttachments(ctx context.Context, attachments []WarehouseReceiptAttachment) error
+	ListAttachments(ctx context.Context, receiptID string) ([]WarehouseReceiptAttachment, error)
 	UpdateAttachment(ctx context.Context, receiptID, url, mimeType, name string, size int64, updatedBy string) error
 	AppendAudit(ctx context.Context, audit WarehouseReceiptAudit) error
 	ComputePreview(ctx context.Context, receiptID string) ([]StockImpactPreview, error)
@@ -211,6 +216,16 @@ func (r PostgresRepository) GetByID(ctx context.Context, receiptID string) (Ware
 		return WarehouseReceipt{}, err
 	}
 	receipt.Audits = audits
+	attachments, err := r.ListAttachments(ctx, receiptID)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	receipt.Attachments = attachments
+	pendingAttachments, err := r.ListPendingAttachments(ctx, receiptID)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	receipt.PendingAttachments = pendingAttachments
 	preview, err := r.ComputePreview(ctx, receiptID)
 	if err != nil {
 		return WarehouseReceipt{}, err
@@ -224,6 +239,12 @@ func (r PostgresRepository) GetByID(ctx context.Context, receiptID string) (Ware
 	}
 	if receipt.Audits == nil {
 		receipt.Audits = []WarehouseReceiptAudit{}
+	}
+	if receipt.Attachments == nil {
+		receipt.Attachments = []WarehouseReceiptAttachment{}
+	}
+	if receipt.PendingAttachments == nil {
+		receipt.PendingAttachments = []WarehouseReceiptPendingAttachment{}
 	}
 	return receipt, nil
 }
@@ -442,6 +463,79 @@ func (r PostgresRepository) GetPurchaseOrderItems(ctx context.Context, purchaseO
 	var items []purchaseOrderItemSnapshot
 	err := r.db.WithContext(ctx).Table("purchase_order_items").Select("id, purchase_order_id, product_id, quantity, received_quantity, unit_cost").Where("purchase_order_id = ?", purchaseOrderID).Find(&items).Error
 	return items, err
+}
+
+func (r PostgresRepository) CreatePendingAttachment(ctx context.Context, attachment WarehouseReceiptPendingAttachment) error {
+	return r.db.WithContext(ctx).Table("warehouse_receipt_pending_attachments").Create(map[string]any{
+		"id":         attachment.ID,
+		"receipt_id": attachment.ReceiptID,
+		"mime_type":  attachment.MimeType,
+		"name":       attachment.Name,
+		"size":       attachment.Size,
+		"data":       attachment.Data,
+		"created_by": attachment.CreatedBy,
+		"created_at": attachment.CreatedAt,
+	}).Error
+}
+
+func (r PostgresRepository) ListPendingAttachments(ctx context.Context, receiptID string) ([]WarehouseReceiptPendingAttachment, error) {
+	var items []WarehouseReceiptPendingAttachment
+	err := r.db.WithContext(ctx).Table("warehouse_receipt_pending_attachments").
+		Select("id, receipt_id, mime_type, name, size, data, created_by, created_at").
+		Where("receipt_id = ?", receiptID).
+		Order("created_at ASC, id ASC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []WarehouseReceiptPendingAttachment{}
+	}
+	return items, nil
+}
+
+func (r PostgresRepository) DeletePendingAttachments(ctx context.Context, receiptID string, ids []string) error {
+	query := r.db.WithContext(ctx).Table("warehouse_receipt_pending_attachments").Where("receipt_id = ?", receiptID)
+	if len(ids) > 0 {
+		query = query.Where("id IN ?", ids)
+	}
+	return query.Delete(nil).Error
+}
+
+func (r PostgresRepository) CreateAttachments(ctx context.Context, attachments []WarehouseReceiptAttachment) error {
+	if len(attachments) == 0 {
+		return nil
+	}
+	payload := make([]map[string]any, 0, len(attachments))
+	for _, item := range attachments {
+		payload = append(payload, map[string]any{
+			"id":          item.ID,
+			"receipt_id":  item.ReceiptID,
+			"url":         item.URL,
+			"mime_type":   item.MimeType,
+			"name":        item.Name,
+			"size":        item.Size,
+			"uploaded_by": item.UploadedBy,
+			"uploaded_at": item.UploadedAt,
+		})
+	}
+	return r.db.WithContext(ctx).Table("warehouse_receipt_attachments").Create(&payload).Error
+}
+
+func (r PostgresRepository) ListAttachments(ctx context.Context, receiptID string) ([]WarehouseReceiptAttachment, error) {
+	var items []WarehouseReceiptAttachment
+	err := r.db.WithContext(ctx).Table("warehouse_receipt_attachments").
+		Select("id, receipt_id, url, mime_type, name, size, uploaded_by, uploaded_at").
+		Where("receipt_id = ?", receiptID).
+		Order("uploaded_at ASC, id ASC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []WarehouseReceiptAttachment{}
+	}
+	return items, nil
 }
 
 func (r PostgresRepository) UpdateAttachment(ctx context.Context, receiptID, url, mimeType, name string, size int64, updatedBy string) error {

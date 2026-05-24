@@ -120,7 +120,11 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 		return ProductListResult{}, ErrInvalidPagination
 	}
 
-	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit)
+	if query.StockStatus != "" && query.StockStatus != "low_stock" && query.StockStatus != "out_of_stock" {
+		return ProductListResult{}, ErrInvalidStockStatus
+	}
+
+	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.StockStatus)
 	if err != nil {
 		return ProductListResult{}, err
 	}

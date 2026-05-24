@@ -138,7 +138,7 @@ func (h Handler) UploadAttachment(c *fiber.Ctx) error {
 	if err != nil {
 		return writeReceiptError(c, err)
 	}
-	return httpx.Success(c, fiber.StatusOK, "warehouse receipt attachment uploaded", result)
+	return httpx.Success(c, fiber.StatusOK, "warehouse receipt attachment staged", result)
 }
 
 func (h Handler) Print(c *fiber.Ctx) error {
@@ -184,6 +184,8 @@ func writeReceiptError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, ErrReceiptDuplicateDocumentNo):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrReceiptAttachmentUploadFailed):
+		return httpx.Error(c, fiber.StatusBadGateway, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}

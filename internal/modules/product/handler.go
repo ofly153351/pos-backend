@@ -39,8 +39,9 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 		return httpx.Error(c, fiber.StatusBadRequest, ErrInvalidPagination.Error(), err.Error())
 	}
 	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), ListProductsQuery{
-		Page:  page,
-		Limit: limit,
+		Page:        page,
+		Limit:       limit,
+		StockStatus: strings.ToLower(strings.TrimSpace(c.Query("stock_status"))),
 	})
 	if err != nil {
 		return writeProductError(c, err)
@@ -85,7 +86,7 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrInvalidStockStatus):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
@@ -111,15 +112,15 @@ func writeProductError(c *fiber.Ctx, err error) error {
 
 func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 	req := CreateProductRequest{
-		Name:          c.FormValue("name"),
-		BrandID:       c.FormValue("brand_id"),
-		SKU:           c.FormValue("sku"),
-		Barcode:       c.FormValue("barcode"),
-		ProductCode:   strings.TrimSpace(c.FormValue("product_code")),
-		Description:   strings.TrimSpace(c.FormValue("description")),
+		Name:            c.FormValue("name"),
+		BrandID:         c.FormValue("brand_id"),
+		SKU:             c.FormValue("sku"),
+		Barcode:         c.FormValue("barcode"),
+		ProductCode:     strings.TrimSpace(c.FormValue("product_code")),
+		Description:     strings.TrimSpace(c.FormValue("description")),
 		StorageLocation: strings.TrimSpace(c.FormValue("storage_location")),
-		ProductTypeID: c.FormValue("product_type_id"),
-		ProductUnitID: c.FormValue("unit_id"),
+		ProductTypeID:   c.FormValue("product_type_id"),
+		ProductUnitID:   c.FormValue("unit_id"),
 	}
 	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
 		parsed, err := strconv.Atoi(value)

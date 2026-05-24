@@ -39,5 +39,6 @@ var (
 	ErrReceiptAttachmentType         = errors.New("attachment file type must be pdf, jpg, or png")
 	ErrReceiptAttachmentSize         = errors.New("attachment file size must be less than or equal to 10MB")
 	ErrReceiptAttachmentStorage      = errors.New("attachment storage is not configured")
+	ErrReceiptAttachmentUploadFailed = errors.New("failed to upload receipt attachment")
 	ErrReceiptPOQuantityExceeded     = errors.New("receipt quantity exceeds outstanding purchase order quantity")
 )

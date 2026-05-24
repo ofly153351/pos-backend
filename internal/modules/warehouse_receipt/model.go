@@ -44,15 +44,17 @@ type WarehouseReceipt struct {
 	CreatedAt          time.Time     `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt          time.Time     `json:"updated_at" gorm:"column:updated_at"`
 
-	WarehouseName   string                  `json:"warehouse_name,omitempty" gorm:"-"`
-	SupplierName    string                  `json:"supplier_name,omitempty" gorm:"-"`
-	CreatedByName   string                  `json:"created_by_name,omitempty" gorm:"-"`
-	ConfirmedByName string                  `json:"confirmed_by_name,omitempty" gorm:"-"`
-	CancelledByName string                  `json:"cancelled_by_name,omitempty" gorm:"-"`
-	PurchaseOrderNo string                  `json:"purchase_order_no,omitempty" gorm:"-"`
-	Items           []WarehouseReceiptItem  `json:"items" gorm:"-"`
-	Preview         []StockImpactPreview    `json:"stock_preview" gorm:"-"`
-	Audits          []WarehouseReceiptAudit `json:"audits" gorm:"-"`
+	WarehouseName      string                              `json:"warehouse_name,omitempty" gorm:"-"`
+	SupplierName       string                              `json:"supplier_name,omitempty" gorm:"-"`
+	CreatedByName      string                              `json:"created_by_name,omitempty" gorm:"-"`
+	ConfirmedByName    string                              `json:"confirmed_by_name,omitempty" gorm:"-"`
+	CancelledByName    string                              `json:"cancelled_by_name,omitempty" gorm:"-"`
+	PurchaseOrderNo    string                              `json:"purchase_order_no,omitempty" gorm:"-"`
+	Items              []WarehouseReceiptItem              `json:"items" gorm:"-"`
+	Preview            []StockImpactPreview                `json:"stock_preview" gorm:"-"`
+	Audits             []WarehouseReceiptAudit             `json:"audits" gorm:"-"`
+	Attachments        []WarehouseReceiptAttachment        `json:"attachments" gorm:"-"`
+	PendingAttachments []WarehouseReceiptPendingAttachment `json:"pending_attachments" gorm:"-"`
 }
 
 func (WarehouseReceipt) TableName() string { return "warehouse_receipts" }
@@ -170,6 +172,28 @@ type GenerateDocumentNoResponse struct {
 
 type UploadAttachmentRequest struct {
 	File *multipart.FileHeader
+}
+
+type WarehouseReceiptAttachment struct {
+	ID         string    `json:"id" gorm:"column:id;primaryKey"`
+	ReceiptID  string    `json:"receipt_id" gorm:"column:receipt_id"`
+	URL        string    `json:"url" gorm:"column:url"`
+	MimeType   string    `json:"mime_type" gorm:"column:mime_type"`
+	Name       string    `json:"name" gorm:"column:name"`
+	Size       int64     `json:"size" gorm:"column:size"`
+	UploadedBy string    `json:"uploaded_by" gorm:"column:uploaded_by"`
+	UploadedAt time.Time `json:"uploaded_at" gorm:"column:uploaded_at"`
+}
+
+type WarehouseReceiptPendingAttachment struct {
+	ID        string    `json:"id" gorm:"column:id;primaryKey"`
+	ReceiptID string    `json:"receipt_id" gorm:"column:receipt_id"`
+	MimeType  string    `json:"mime_type" gorm:"column:mime_type"`
+	Name      string    `json:"name" gorm:"column:name"`
+	Size      int64     `json:"size" gorm:"column:size"`
+	CreatedBy string    `json:"created_by" gorm:"column:created_by"`
+	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
+	Data      []byte    `json:"-" gorm:"column:data"`
 }
 
 type StockImpactPreview struct {

@@ -13,6 +13,7 @@ var (
 	ErrInvalidProductUnitID    = errors.New("product unit does not belong to this store")
 	ErrInvalidBrandID          = errors.New("brand does not belong to this store")
 	ErrInvalidPagination       = errors.New("invalid pagination query")
+	ErrInvalidStockStatus      = errors.New("invalid stock_status filter")
 	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")
 	ErrProductNotFound         = errors.New("product not found")
 	ErrGenerateSKUFailed       = errors.New("unable to generate unique barcode")

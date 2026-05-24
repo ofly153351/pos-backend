@@ -3,6 +3,7 @@ package warehouse_receipt
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"time"
@@ -337,6 +338,13 @@ func (s Service) Confirm(ctx context.Context, actor auth.Claims, receiptID strin
 	if err := s.ensureManageAccess(ctx, actor, current.StoreID, true); err != nil {
 		return WarehouseReceipt{}, err
 	}
+	pendingAttachments, err := s.repo.ListPendingAttachments(ctx, receiptID)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	if err := s.flushPendingAttachments(ctx, receiptID, actor.UserID, pendingAttachments); err != nil {
+		return WarehouseReceipt{}, err
+	}
 	if err := s.repo.ConfirmDraft(ctx, receiptID, actor.UserID); err != nil {
 		return WarehouseReceipt{}, err
 	}
@@ -368,20 +376,91 @@ func (s Service) UploadAttachment(ctx context.Context, actor auth.Claims, receip
 	if current.Status != ReceiptStatusDraft {
 		return WarehouseReceipt{}, ErrReceiptImmutable
 	}
-	url, mimeType, originalName, size, err := s.storage.SaveAttachment(req.File)
+	meta, err := validateAttachmentFile(req.File)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	src, err := req.File.Open()
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	defer src.Close()
+	data, err := io.ReadAll(src)
 	if err != nil {
 		return WarehouseReceipt{}, err
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := s.repo.WithTx(tx)
-		if err := txRepo.UpdateAttachment(ctx, receiptID, url, mimeType, originalName, size, actor.UserID); err != nil {
+		if err := txRepo.CreatePendingAttachment(ctx, WarehouseReceiptPendingAttachment{
+			ID:        newAttachmentToken(),
+			ReceiptID: receiptID,
+			MimeType:  meta.MimeType,
+			Name:      meta.Name,
+			Size:      meta.Size,
+			Data:      data,
+			CreatedBy: actor.UserID,
+			CreatedAt: time.Now().UTC(),
+		}); err != nil {
 			return err
 		}
-		return txRepo.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "upload_attachment", Description: originalName, ActorID: actor.UserID, CreatedAt: time.Now().UTC()})
+		return txRepo.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "add_pending_attachment", Description: meta.Name, ActorID: actor.UserID, CreatedAt: time.Now().UTC()})
 	}); err != nil {
 		return WarehouseReceipt{}, err
 	}
 	return s.repo.GetByID(ctx, receiptID)
+}
+
+func (s Service) flushPendingAttachments(ctx context.Context, receiptID, actorID string, pending []WarehouseReceiptPendingAttachment) error {
+	if len(pending) == 0 {
+		return nil
+	}
+	uploadedURLs := make([]string, 0, len(pending))
+	toPersist := make([]WarehouseReceiptAttachment, 0, len(pending))
+	pendingIDs := make([]string, 0, len(pending))
+	now := time.Now().UTC()
+	for _, item := range pending {
+		url, err := s.storage.SaveAttachmentBytes(item.Name, item.MimeType, item.Data)
+		if err != nil {
+			s.cleanupUploaded(uploadedURLs)
+			return fmt.Errorf("%w: %v", ErrReceiptAttachmentUploadFailed, err)
+		}
+		uploadedURLs = append(uploadedURLs, url)
+		toPersist = append(toPersist, WarehouseReceiptAttachment{
+			ID:         newAttachmentToken(),
+			ReceiptID:  receiptID,
+			URL:        url,
+			MimeType:   item.MimeType,
+			Name:       item.Name,
+			Size:       item.Size,
+			UploadedBy: actorID,
+			UploadedAt: now,
+		})
+		pendingIDs = append(pendingIDs, item.ID)
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := s.repo.WithTx(tx)
+		if err := txRepo.CreateAttachments(ctx, toPersist); err != nil {
+			return err
+		}
+		last := toPersist[len(toPersist)-1]
+		if err := txRepo.UpdateAttachment(ctx, receiptID, last.URL, last.MimeType, last.Name, last.Size, actorID); err != nil {
+			return err
+		}
+		if err := txRepo.DeletePendingAttachments(ctx, receiptID, pendingIDs); err != nil {
+			return err
+		}
+		return txRepo.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "upload_attachment", Description: fmt.Sprintf("%d attachment(s) uploaded", len(toPersist)), ActorID: actorID, CreatedAt: now})
+	}); err != nil {
+		s.cleanupUploaded(uploadedURLs)
+		return err
+	}
+	return nil
+}
+
+func (s Service) cleanupUploaded(urls []string) {
+	for _, url := range urls {
+		_ = s.storage.DeleteByURL(url)
+	}
 }
 
 func (s Service) GenerateDocumentNo(ctx context.Context, actor auth.Claims, input GenerateDocumentNoRequest) (GenerateDocumentNoResponse, error) {

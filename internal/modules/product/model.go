@@ -8,6 +8,7 @@ import (
 type Product struct {
 	ID                  string     `json:"id" gorm:"column:id;primaryKey"`
 	StoreID             string     `json:"store_id" gorm:"column:store_id"`
+	StockStatus         string     `json:"stock_status,omitempty" gorm:"column:stock_status"`
 	ProductTypeID       string     `json:"product_type_id,omitempty" gorm:"column:product_type_id"`
 	ProductTypeName     string     `json:"product_type_name,omitempty" gorm:"-"`
 	Name                string     `json:"name" gorm:"column:name"`
@@ -88,8 +89,9 @@ type UpdateProductRequest struct {
 }
 
 type ListProductsQuery struct {
-	Page  int
-	Limit int
+	Page        int
+	Limit       int
+	StockStatus string
 }
 
 type ProductListResult struct {
