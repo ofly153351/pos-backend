@@ -2,10 +2,13 @@ package warehouse_receipt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	"gorm.io/gorm"
@@ -422,6 +425,9 @@ func (s Service) flushPendingAttachments(ctx context.Context, receiptID, actorID
 		url, err := s.storage.SaveAttachmentBytes(item.Name, item.MimeType, item.Data)
 		if err != nil {
 			s.cleanupUploaded(uploadedURLs)
+			if isStorageUnavailableError(err) {
+				return fmt.Errorf("%w: %v", ErrReceiptAttachmentStorageUnavailable, err)
+			}
 			return fmt.Errorf("%w: %v", ErrReceiptAttachmentUploadFailed, err)
 		}
 		uploadedURLs = append(uploadedURLs, url)
@@ -461,6 +467,21 @@ func (s Service) cleanupUploaded(urls []string) {
 	for _, url := range urls {
 		_ = s.storage.DeleteByURL(url)
 	}
+}
+
+func isStorageUnavailableError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "connection reset")
 }
 
 func (s Service) GenerateDocumentNo(ctx context.Context, actor auth.Claims, input GenerateDocumentNoRequest) (GenerateDocumentNoResponse, error) {

@@ -184,6 +184,8 @@ func writeReceiptError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, ErrReceiptDuplicateDocumentNo):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+	case errors.Is(err, ErrReceiptAttachmentStorageUnavailable):
+		return httpx.Error(c, fiber.StatusServiceUnavailable, err.Error(), nil)
 	case errors.Is(err, ErrReceiptAttachmentUploadFailed):
 		return httpx.Error(c, fiber.StatusBadGateway, err.Error(), nil)
 	default:

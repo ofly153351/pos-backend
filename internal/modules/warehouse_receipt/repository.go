@@ -564,14 +564,30 @@ func (r PostgresRepository) ComputePreview(ctx context.Context, receiptID string
 	if err != nil {
 		return nil, err
 	}
+
+	// Cache stock lookups so the same product+location is only queried once.
+	stockCache := make(map[string]int)
+	lookupStock := func(productID, locationID string) (int, error) {
+		key := productID + "|" + locationID
+		if qty, ok := stockCache[key]; ok {
+			return qty, nil
+		}
+		var qty int
+		err := r.db.WithContext(ctx).
+			Raw("SELECT COALESCE((SELECT quantity FROM stocks WHERE product_id = ? AND location_id = ? LIMIT 1), 0)", productID, locationID).
+			Scan(&qty).Error
+		if err != nil {
+			return 0, err
+		}
+		stockCache[key] = qty
+		return qty, nil
+	}
+
 	preview := make([]StockImpactPreview, 0, len(items))
 	for _, item := range items {
-		var qty int
-		if err := r.db.WithContext(ctx).Table("stocks").Select("COALESCE(quantity, 0)").Where("product_id = ? AND location_id = ?", item.ProductID, item.LocationID).Take(&qty).Error; err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, err
-			}
-			qty = 0
+		qty, err := lookupStock(item.ProductID, item.LocationID)
+		if err != nil {
+			return nil, err
 		}
 		beforeValue := roundMoney(float64(qty) * item.UnitPrice)
 		afterQty := qty
