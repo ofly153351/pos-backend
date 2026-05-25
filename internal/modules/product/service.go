@@ -2,6 +2,7 @@ package product
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -105,7 +106,22 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		product.Barcode = barcode
 	}
 
-	return s.repo.Create(ctx, product)
+	created, err := s.repo.Create(ctx, product)
+	if err != nil {
+		if imageURL != "" {
+			if deleteErr := s.storage.DeleteProductImage(imageURL); deleteErr != nil {
+				slog.WarnContext(ctx, "failed to delete newly saved product image after database create failure",
+					"store_id", storeID,
+					"product_id", product.ID,
+					"image_url", imageURL,
+					"delete_error", deleteErr.Error(),
+					"create_error", err.Error(),
+				)
+			}
+		}
+		return Product{}, err
+	}
+	return created, nil
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string, query ListProductsQuery) (ProductListResult, error) {
@@ -239,11 +255,14 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.SpecialPriceEndAt != nil {
 		current.SpecialPriceEndAt = input.SpecialPriceEndAt
 	}
+	oldImageURL := current.ImageURL
+	newImageURL := ""
 	if input.ImageFile != nil {
 		imageURL, err := s.storage.SaveProductImage(input.ImageFile)
 		if err != nil {
 			return Product{}, err
 		}
+		newImageURL = imageURL
 		current.ImageURL = imageURL
 	}
 
@@ -273,7 +292,33 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 
 	current.UpdatedAt = time.Now().UTC()
-	return s.repo.Update(ctx, current)
+	updated, err := s.repo.Update(ctx, current)
+	if err != nil {
+		if newImageURL != "" {
+			if deleteErr := s.storage.DeleteProductImage(newImageURL); deleteErr != nil {
+				slog.WarnContext(ctx, "failed to delete newly saved product image after database update failure",
+					"store_id", storeID,
+					"product_id", productID,
+					"new_image_url", newImageURL,
+					"delete_error", deleteErr.Error(),
+					"update_error", err.Error(),
+				)
+			}
+		}
+		return Product{}, err
+	}
+	if newImageURL != "" && oldImageURL != "" && oldImageURL != newImageURL {
+		if deleteErr := s.storage.DeleteProductImage(oldImageURL); deleteErr != nil {
+			slog.WarnContext(ctx, "failed to delete replaced product image",
+				"store_id", storeID,
+				"product_id", productID,
+				"old_image_url", oldImageURL,
+				"new_image_url", newImageURL,
+				"delete_error", deleteErr.Error(),
+			)
+		}
+	}
+	return updated, nil
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, productID string) error {

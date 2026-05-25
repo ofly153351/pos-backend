@@ -266,15 +266,20 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		updates["storage_location"] = product.StorageLocation
 	}
 
-	result := r.db.WithContext(ctx).
-		Model(&Product{}).
-		Where("store_id = ? AND id = ?", product.StoreID, product.ID).
-		Updates(updates)
-	if result.Error != nil {
-		return Product{}, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return Product{}, ErrProductNotFound
+	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.
+			Model(&Product{}).
+			Where("store_id = ? AND id = ?", product.StoreID, product.ID).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrProductNotFound
+		}
+		return nil
+	}); err != nil {
+		return Product{}, err
 	}
 
 	return r.GetByID(ctx, product.StoreID, product.ID)

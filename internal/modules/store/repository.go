@@ -317,17 +317,19 @@ func (r PostgresRepository) Update(ctx context.Context, storeID string, update S
 		payload["logo_url"] = update.LogoURL
 	}
 
-	result := r.db.WithContext(ctx).
-		Table("stores").
-		Where("id = ?", storeID).
-		Updates(payload)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrStoreNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.
+			Table("stores").
+			Where("id = ?", storeID).
+			Updates(payload)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrStoreNotFound
+		}
+		return nil
+	})
 }
 
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {

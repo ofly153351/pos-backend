@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -50,7 +51,21 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	return s.repo.CreateWithOwner(ctx, storeModel, actor.UserID, strings.TrimSpace(input.SubscriptionPlanCode))
+	created, err := s.repo.CreateWithOwner(ctx, storeModel, actor.UserID, strings.TrimSpace(input.SubscriptionPlanCode))
+	if err != nil {
+		if logoURL != "" {
+			if deleteErr := s.storage.DeleteStoreLogo(logoURL); deleteErr != nil {
+				slog.WarnContext(ctx, "failed to delete newly saved store logo after database create failure",
+					"store_id", storeModel.ID,
+					"logo_url", logoURL,
+					"delete_error", deleteErr.Error(),
+					"create_error", err.Error(),
+				)
+			}
+		}
+		return Store{}, err
+	}
+	return created, nil
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID string) (Store, error) {
@@ -107,19 +122,46 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 		return Store{}, ErrInvalidCurrencyCode
 	}
 
+	oldLogoURL := current.LogoURL
+	newLogoURL := ""
 	if input.LogoFile != nil {
 		logoURL, saveErr := s.storage.SaveStoreLogo(input.LogoFile)
 		if saveErr != nil {
 			return Store{}, saveErr
 		}
+		newLogoURL = logoURL
 		current.LogoURL = logoURL
 	}
 
 	if err := s.repo.Update(ctx, storeID, current); err != nil {
+		if newLogoURL != "" {
+			if deleteErr := s.storage.DeleteStoreLogo(newLogoURL); deleteErr != nil {
+				slog.WarnContext(ctx, "failed to delete newly saved store logo after database update failure",
+					"store_id", storeID,
+					"new_logo_url", newLogoURL,
+					"delete_error", deleteErr.Error(),
+					"update_error", err.Error(),
+				)
+			}
+		}
 		return Store{}, err
 	}
 
-	return s.repo.GetByID(ctx, storeID)
+	updated, err := s.repo.GetByID(ctx, storeID)
+	if err != nil {
+		return Store{}, err
+	}
+	if newLogoURL != "" && oldLogoURL != "" && oldLogoURL != newLogoURL {
+		if deleteErr := s.storage.DeleteStoreLogo(oldLogoURL); deleteErr != nil {
+			slog.WarnContext(ctx, "failed to delete replaced store logo",
+				"store_id", storeID,
+				"old_logo_url", oldLogoURL,
+				"new_logo_url", newLogoURL,
+				"delete_error", deleteErr.Error(),
+			)
+		}
+	}
+	return updated, nil
 }
 
 func (s Service) CanManageStore(ctx context.Context, actor auth.Claims, storeID string) (bool, error) {
