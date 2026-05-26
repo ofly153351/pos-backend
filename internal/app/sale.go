@@ -11,7 +11,8 @@ import (
 func newSaleHandler(db *gorm.DB) sale.Handler {
 	saleRepo := sale.NewPostgresRepository(db)
 	customerRepo := customer.NewPostgresRepository(db)
-	service := sale.NewService(saleRepo, customer.NewSaleBenefitResolver(customerRepo))
+	settingsRepo := sale.NewDBSettingsRepo(db)
+	service := sale.NewService(saleRepo, customer.NewSaleBenefitResolver(customerRepo), settingsRepo)
 	return sale.NewHandler(service)
 }
 

@@ -9,16 +9,17 @@ import (
 )
 
 type Service struct {
-	repo     Repository
-	resolver CustomerBenefitResolver
+	repo         Repository
+	resolver     CustomerBenefitResolver
+	settingsRepo SettingsRepository
 }
 
 type CustomerBenefitResolver interface {
 	Resolve(ctx context.Context, storeID, customerID string) (level int, discountPercent float64, err error)
 }
 
-func NewService(repo Repository, resolver CustomerBenefitResolver) Service {
-	return Service{repo: repo, resolver: resolver}
+func NewService(repo Repository, resolver CustomerBenefitResolver, settingsRepo SettingsRepository) Service {
+	return Service{repo: repo, resolver: resolver, settingsRepo: settingsRepo}
 }
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateSaleRequest) (Sale, error) {
