@@ -38,3 +38,43 @@ type UpdateLocationRequest struct {
 	IsSalePoint *bool   `json:"is_sale_point"`
 	IsActive    *bool   `json:"is_active"`
 }
+
+// ListFilter holds optional query filters for listing locations.
+type ListFilter struct {
+	WarehouseID string
+	ZoneName    string
+	FloorName   string
+	Search      string
+	Page        int
+	Limit       int
+}
+
+// ListResult is the paginated response for location lists.
+type ListResult struct {
+	Items      []Location `json:"items"`
+	Total      int64      `json:"total"`
+	Page       int        `json:"page"`
+	Limit      int        `json:"limit"`
+	TotalPages int        `json:"total_pages"`
+}
+
+// TreeFloor is a floor/shelf node in the warehouse tree.
+type TreeFloor struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+// TreeZone is a zone node containing floors in the warehouse tree.
+type TreeZone struct {
+	Name   string      `json:"name"`
+	Count  int64       `json:"count"`
+	Floors []TreeFloor `json:"floors"`
+}
+
+// LocationProduct is a product stored at a location.
+type LocationProduct struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	SKU         string `json:"sku,omitempty"`
+	Quantity    int    `json:"quantity"`
+}
