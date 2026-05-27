@@ -85,12 +85,9 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	}
 
 	// Resolve customer
-	var cust struct {
-		FullName string
-		TaxID    *string
-	}
+	var cust struct{ FullName string }
 	if err := s.db.Raw(
-		"SELECT full_name, tax_id FROM customers WHERE id = ? AND store_id = ?",
+		"SELECT full_name FROM customers WHERE id = ? AND store_id = ?",
 		req.CustomerID, storeID,
 	).Scan(&cust).Error; err != nil || cust.FullName == "" {
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
@@ -155,10 +152,9 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		Type:           req.Type,
 		Status:         StatusPending,
 		PaymentStatus:  PaymentUnpaid,
-		CustomerID:     req.CustomerID,
-		CustomerName:   cust.FullName,
-		CustomerTaxID:  cust.TaxID,
-		StaffID:        actor.UserID,
+		CustomerID:   req.CustomerID,
+		CustomerName: cust.FullName,
+		StaffID:      actor.UserID,
 		StaffName:      actor.Name,
 		DocumentDate:   docDate,
 		DueDate:        dueDate,
