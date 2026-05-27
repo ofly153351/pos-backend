@@ -67,39 +67,35 @@ func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 
 // ---- Suppliers ----
 
+func nilIfEmpty(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return strings.TrimSpace(s)
+}
+
 func (r PostgresRepository) CreateSupplier(ctx context.Context, supplier Supplier) (Supplier, error) {
 	payload := map[string]any{
-		"id":             supplier.ID,
-		"store_id":       supplier.StoreID,
-		"name":           supplier.Name,
-		"is_active":      supplier.IsActive,
-		"created_at":     supplier.CreatedAt,
-		"updated_at":     supplier.CreatedAt,
-	}
-	if strings.TrimSpace(supplier.Phone) == "" {
-		payload["phone"] = nil
-	} else {
-		payload["phone"] = strings.TrimSpace(supplier.Phone)
-	}
-	if strings.TrimSpace(supplier.Address) == "" {
-		payload["address"] = nil
-	} else {
-		payload["address"] = strings.TrimSpace(supplier.Address)
-	}
-	if strings.TrimSpace(supplier.TaxID) == "" {
-		payload["tax_id"] = nil
-	} else {
-		payload["tax_id"] = strings.TrimSpace(supplier.TaxID)
-	}
-	if strings.TrimSpace(supplier.ContactPerson) == "" {
-		payload["contact_person"] = nil
-	} else {
-		payload["contact_person"] = strings.TrimSpace(supplier.ContactPerson)
-	}
-	if strings.TrimSpace(supplier.Note) == "" {
-		payload["note"] = nil
-	} else {
-		payload["note"] = strings.TrimSpace(supplier.Note)
+		"id":                   supplier.ID,
+		"store_id":             supplier.StoreID,
+		"name":                 supplier.Name,
+		"is_active":            supplier.IsActive,
+		"credit_days":          supplier.CreditDays,
+		"created_at":           supplier.CreatedAt,
+		"updated_at":           supplier.CreatedAt,
+		"phone":                nilIfEmpty(supplier.Phone),
+		"address":              nilIfEmpty(supplier.Address),
+		"tax_id":               nilIfEmpty(supplier.TaxID),
+		"contact_person":       nilIfEmpty(supplier.ContactPerson),
+		"note":                 nilIfEmpty(supplier.Note),
+		"email":                nilIfEmpty(supplier.Email),
+		"line_id":              nilIfEmpty(supplier.LineID),
+		"payment_method":       nilIfEmpty(supplier.PaymentMethod),
+		"promptpay_number":     nilIfEmpty(supplier.PromptpayNumber),
+		"bank_name":            nilIfEmpty(supplier.BankName),
+		"bank_account_number":  nilIfEmpty(supplier.BankAccountNumber),
+		"bank_account_name":    nilIfEmpty(supplier.BankAccountName),
+		"logo_url":             nilIfEmpty(supplier.LogoURL),
 	}
 
 	if err := r.db.WithContext(ctx).Table("suppliers").Create(payload).Error; err != nil {
@@ -136,34 +132,23 @@ func (r PostgresRepository) GetSupplier(ctx context.Context, storeID, supplierID
 
 func (r PostgresRepository) UpdateSupplier(ctx context.Context, supplier Supplier) (Supplier, error) {
 	updates := map[string]any{
-		"name":       supplier.Name,
-		"is_active":  supplier.IsActive,
-		"updated_at": supplier.UpdatedAt,
-	}
-	if strings.TrimSpace(supplier.Phone) == "" {
-		updates["phone"] = nil
-	} else {
-		updates["phone"] = strings.TrimSpace(supplier.Phone)
-	}
-	if strings.TrimSpace(supplier.Address) == "" {
-		updates["address"] = nil
-	} else {
-		updates["address"] = strings.TrimSpace(supplier.Address)
-	}
-	if strings.TrimSpace(supplier.TaxID) == "" {
-		updates["tax_id"] = nil
-	} else {
-		updates["tax_id"] = strings.TrimSpace(supplier.TaxID)
-	}
-	if strings.TrimSpace(supplier.ContactPerson) == "" {
-		updates["contact_person"] = nil
-	} else {
-		updates["contact_person"] = strings.TrimSpace(supplier.ContactPerson)
-	}
-	if strings.TrimSpace(supplier.Note) == "" {
-		updates["note"] = nil
-	} else {
-		updates["note"] = strings.TrimSpace(supplier.Note)
+		"name":                 supplier.Name,
+		"is_active":            supplier.IsActive,
+		"credit_days":          supplier.CreditDays,
+		"updated_at":           supplier.UpdatedAt,
+		"phone":                nilIfEmpty(supplier.Phone),
+		"address":              nilIfEmpty(supplier.Address),
+		"tax_id":               nilIfEmpty(supplier.TaxID),
+		"contact_person":       nilIfEmpty(supplier.ContactPerson),
+		"note":                 nilIfEmpty(supplier.Note),
+		"email":                nilIfEmpty(supplier.Email),
+		"line_id":              nilIfEmpty(supplier.LineID),
+		"payment_method":       nilIfEmpty(supplier.PaymentMethod),
+		"promptpay_number":     nilIfEmpty(supplier.PromptpayNumber),
+		"bank_name":            nilIfEmpty(supplier.BankName),
+		"bank_account_number":  nilIfEmpty(supplier.BankAccountNumber),
+		"bank_account_name":    nilIfEmpty(supplier.BankAccountName),
+		"logo_url":             nilIfEmpty(supplier.LogoURL),
 	}
 
 	result := r.db.WithContext(ctx).

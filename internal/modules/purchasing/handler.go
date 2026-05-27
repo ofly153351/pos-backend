@@ -2,6 +2,8 @@ package purchasing
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -21,10 +23,7 @@ func NewHandler(service Service) Handler {
 
 func (h Handler) CreateSupplier(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
-	var req CreateSupplierRequest
-	if err := httpx.DecodeJSON(c, &req); err != nil {
-		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
-	}
+	req := parseCreateSupplierRequest(c)
 	result, err := h.service.CreateSupplier(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		return writePurchasingError(c, err)
@@ -54,10 +53,7 @@ func (h Handler) GetSupplier(c *fiber.Ctx) error {
 func (h Handler) UpdateSupplier(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	supplierID := c.Params("supplierID")
-	var req UpdateSupplierRequest
-	if err := httpx.DecodeJSON(c, &req); err != nil {
-		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
-	}
+	req := parseUpdateSupplierRequest(c)
 	result, err := h.service.UpdateSupplier(c.UserContext(), middleware.ClaimsFromContext(c), storeID, supplierID, req)
 	if err != nil {
 		return writePurchasingError(c, err)
@@ -239,4 +235,95 @@ func writePurchasingError(c *fiber.Ctx, err error) error {
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
+}
+
+// ── Form parsers ──────────────────────────────────────────────────────────────
+
+func parseCreateSupplierRequest(c *fiber.Ctx) CreateSupplierRequest {
+	creditDays, _ := strconv.Atoi(c.FormValue("credit_days"))
+	isActiveStr := c.FormValue("is_active")
+	var isActive *bool
+	if isActiveStr != "" {
+		v := isActiveStr == "true" || isActiveStr == "1"
+		isActive = &v
+	}
+	req := CreateSupplierRequest{
+		Name:              c.FormValue("name"),
+		Phone:             c.FormValue("phone"),
+		Address:           c.FormValue("address"),
+		TaxID:             c.FormValue("tax_id"),
+		ContactPerson:     c.FormValue("contact_person"),
+		Note:              c.FormValue("note"),
+		IsActive:          isActive,
+		Email:             c.FormValue("email"),
+		LineID:            c.FormValue("line_id"),
+		PaymentMethod:     c.FormValue("payment_method"),
+		PromptpayNumber:   c.FormValue("promptpay_number"),
+		BankName:          c.FormValue("bank_name"),
+		BankAccountNumber: c.FormValue("bank_account_number"),
+		BankAccountName:   c.FormValue("bank_account_name"),
+		CreditDays:        creditDays,
+	}
+	if logo, err := c.FormFile("logo"); err == nil {
+		req.LogoFile = logo
+	}
+	return req
+}
+
+func parseUpdateSupplierRequest(c *fiber.Ctx) UpdateSupplierRequest {
+	req := UpdateSupplierRequest{}
+	if v := c.FormValue("name"); v != "" {
+		req.Name = &v
+	}
+	if v := c.FormValue("phone"); v != "" {
+		req.Phone = &v
+	}
+	if v := c.FormValue("address"); v != "" {
+		req.Address = &v
+	}
+	if v := c.FormValue("tax_id"); v != "" {
+		req.TaxID = &v
+	}
+	if v := c.FormValue("contact_person"); v != "" {
+		req.ContactPerson = &v
+	}
+	if v := c.FormValue("note"); v != "" {
+		req.Note = &v
+	}
+	if v := c.FormValue("is_active"); v != "" {
+		b := v == "true" || v == "1"
+		req.IsActive = &b
+	}
+	if v := c.FormValue("email"); v != "" {
+		req.Email = &v
+	}
+	if v := c.FormValue("line_id"); v != "" {
+		req.LineID = &v
+	}
+	if v := c.FormValue("payment_method"); v != "" {
+		req.PaymentMethod = &v
+	}
+	if v := c.FormValue("promptpay_number"); v != "" {
+		req.PromptpayNumber = &v
+	}
+	if v := c.FormValue("bank_name"); v != "" {
+		req.BankName = &v
+	}
+	if v := c.FormValue("bank_account_number"); v != "" {
+		req.BankAccountNumber = &v
+	}
+	if v := c.FormValue("bank_account_name"); v != "" {
+		req.BankAccountName = &v
+	}
+	if v := c.FormValue("credit_days"); v != "" {
+		n, _ := strconv.Atoi(v)
+		req.CreditDays = &n
+	}
+	if strings.EqualFold(c.FormValue("remove_logo"), "true") {
+		req.RemoveLogo = true
+	}
+	if logo, err := c.FormFile("logo"); err == nil {
+		req.LogoFile = logo
+	}
+	return req
 }

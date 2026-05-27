@@ -4,12 +4,21 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 
+	"pos-backend/internal/config"
 	"pos-backend/internal/modules/purchasing"
 )
 
-func newPurchasingHandler(db *gorm.DB) purchasing.Handler {
+func newPurchasingHandler(cfg config.Config, db *gorm.DB) purchasing.Handler {
 	repo := purchasing.NewPostgresRepository(db)
-	service := purchasing.NewService(repo, db)
+	storage := purchasing.NewMinIOSupplierLogoStorage(
+		cfg.MinIOEndpoint,
+		cfg.MinIOAccessKey,
+		cfg.MinIOSecretKey,
+		cfg.MinIOBucketName,
+		cfg.MinIOUseSSL,
+		cfg.MinIOPublicURL,
+	)
+	service := purchasing.NewService(repo, db, storage)
 	return purchasing.NewHandler(service)
 }
 

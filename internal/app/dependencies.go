@@ -26,7 +26,7 @@ func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 		subscriptionHandler:       newSubscriptionHandler(db),
 		dashboardHandler:          newDashboardHandler(db),
 		warehouseHandler:          newWarehouseHandler(db),
-		purchasingHandler:         newPurchasingHandler(db),
+		purchasingHandler:         newPurchasingHandler(cfg, db),
 		stockMovementHandler:      newStockMovementHandler(db),
 		stockHandler:              newStockHandler(db),
 		locationHandler:           newLocationHandler(db),

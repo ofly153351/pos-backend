@@ -1,6 +1,9 @@
 package purchasing
 
-import "time"
+import (
+	"mime/multipart"
+	"time"
+)
 
 type Supplier struct {
 	ID            string    `json:"id" gorm:"column:id;primaryKey"`
@@ -12,8 +15,19 @@ type Supplier struct {
 	ContactPerson string    `json:"contact_person,omitempty" gorm:"column:contact_person"`
 	Note          string    `json:"note,omitempty" gorm:"column:note"`
 	IsActive      bool      `json:"is_active" gorm:"column:is_active"`
-	CreatedAt     time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt     time.Time `json:"updated_at" gorm:"column:updated_at"`
+	// Extended contact fields
+	Email  string `json:"email,omitempty" gorm:"column:email"`
+	LineID string `json:"line_id,omitempty" gorm:"column:line_id"`
+	// Payment fields
+	PaymentMethod     string `json:"payment_method,omitempty" gorm:"column:payment_method"`
+	PromptpayNumber   string `json:"promptpay_number,omitempty" gorm:"column:promptpay_number"`
+	BankName          string `json:"bank_name,omitempty" gorm:"column:bank_name"`
+	BankAccountNumber string `json:"bank_account_number,omitempty" gorm:"column:bank_account_number"`
+	BankAccountName   string `json:"bank_account_name,omitempty" gorm:"column:bank_account_name"`
+	CreditDays        int    `json:"credit_days" gorm:"column:credit_days"`
+	LogoURL           string `json:"logo_url,omitempty" gorm:"column:logo_url"`
+	CreatedAt         time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (Supplier) TableName() string {
@@ -76,6 +90,17 @@ type CreateSupplierRequest struct {
 	ContactPerson string `json:"contact_person"`
 	Note          string `json:"note"`
 	IsActive      *bool  `json:"is_active"`
+	// Extended contact
+	Email  string `json:"email"`
+	LineID string `json:"line_id"`
+	// Payment
+	PaymentMethod     string `json:"payment_method"`
+	PromptpayNumber   string `json:"promptpay_number"`
+	BankName          string `json:"bank_name"`
+	BankAccountNumber string `json:"bank_account_number"`
+	BankAccountName   string `json:"bank_account_name"`
+	CreditDays        int    `json:"credit_days"`
+	LogoFile          *multipart.FileHeader `json:"-"`
 }
 
 type UpdateSupplierRequest struct {
@@ -86,6 +111,18 @@ type UpdateSupplierRequest struct {
 	ContactPerson *string `json:"contact_person"`
 	Note          *string `json:"note"`
 	IsActive      *bool   `json:"is_active"`
+	// Extended contact
+	Email  *string `json:"email"`
+	LineID *string `json:"line_id"`
+	// Payment
+	PaymentMethod     *string `json:"payment_method"`
+	PromptpayNumber   *string `json:"promptpay_number"`
+	BankName          *string `json:"bank_name"`
+	BankAccountNumber *string `json:"bank_account_number"`
+	BankAccountName   *string `json:"bank_account_name"`
+	CreditDays        *int    `json:"credit_days"`
+	LogoFile          *multipart.FileHeader `json:"-"`
+	RemoveLogo        bool                  `json:"remove_logo"`
 }
 
 type CreatePOItemRequest struct {

@@ -12,12 +12,13 @@ import (
 )
 
 type Service struct {
-	repo Repository
-	db   *gorm.DB
+	repo    Repository
+	db      *gorm.DB
+	storage SupplierLogoStorage
 }
 
-func NewService(repo Repository, db *gorm.DB) Service {
-	return Service{repo: repo, db: db}
+func NewService(repo Repository, db *gorm.DB, storage SupplierLogoStorage) Service {
+	return Service{repo: repo, db: db, storage: storage}
 }
 
 // ---- Suppliers ----
@@ -38,19 +39,37 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 		isActive = *input.IsActive
 	}
 
-	item := Supplier{
-		ID:            newSupplierID(),
-		StoreID:       storeID,
-		Name:          strings.TrimSpace(input.Name),
-		Phone:         strings.TrimSpace(input.Phone),
-		Address:       strings.TrimSpace(input.Address),
-		TaxID:         strings.TrimSpace(input.TaxID),
-		ContactPerson: strings.TrimSpace(input.ContactPerson),
-		Note:          strings.TrimSpace(input.Note),
-		IsActive:      isActive,
-		CreatedAt:     time.Now().UTC(),
+	logoURL, err := s.storage.SaveSupplierLogo(input.LogoFile)
+	if err != nil {
+		return Supplier{}, fmt.Errorf("save supplier logo: %w", err)
 	}
-	return s.repo.CreateSupplier(ctx, item)
+
+	item := Supplier{
+		ID:                newSupplierID(),
+		StoreID:           storeID,
+		Name:              strings.TrimSpace(input.Name),
+		Phone:             strings.TrimSpace(input.Phone),
+		Address:           strings.TrimSpace(input.Address),
+		TaxID:             strings.TrimSpace(input.TaxID),
+		ContactPerson:     strings.TrimSpace(input.ContactPerson),
+		Note:              strings.TrimSpace(input.Note),
+		IsActive:          isActive,
+		Email:             strings.TrimSpace(input.Email),
+		LineID:            strings.TrimSpace(input.LineID),
+		PaymentMethod:     strings.TrimSpace(input.PaymentMethod),
+		PromptpayNumber:   strings.TrimSpace(input.PromptpayNumber),
+		BankName:          strings.TrimSpace(input.BankName),
+		BankAccountNumber: strings.TrimSpace(input.BankAccountNumber),
+		BankAccountName:   strings.TrimSpace(input.BankAccountName),
+		CreditDays:        input.CreditDays,
+		LogoURL:           logoURL,
+		CreatedAt:         time.Now().UTC(),
+	}
+	result, err := s.repo.CreateSupplier(ctx, item)
+	if err != nil && logoURL != "" {
+		_ = s.storage.DeleteSupplierLogo(logoURL)
+	}
+	return result, err
 }
 
 func (s Service) ListSuppliers(ctx context.Context, actor auth.Claims, storeID string) ([]Supplier, error) {
@@ -101,9 +120,54 @@ func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID,
 	if input.IsActive != nil {
 		existing.IsActive = *input.IsActive
 	}
+	if input.Email != nil {
+		existing.Email = strings.TrimSpace(*input.Email)
+	}
+	if input.LineID != nil {
+		existing.LineID = strings.TrimSpace(*input.LineID)
+	}
+	if input.PaymentMethod != nil {
+		existing.PaymentMethod = strings.TrimSpace(*input.PaymentMethod)
+	}
+	if input.PromptpayNumber != nil {
+		existing.PromptpayNumber = strings.TrimSpace(*input.PromptpayNumber)
+	}
+	if input.BankName != nil {
+		existing.BankName = strings.TrimSpace(*input.BankName)
+	}
+	if input.BankAccountNumber != nil {
+		existing.BankAccountNumber = strings.TrimSpace(*input.BankAccountNumber)
+	}
+	if input.BankAccountName != nil {
+		existing.BankAccountName = strings.TrimSpace(*input.BankAccountName)
+	}
+	if input.CreditDays != nil {
+		existing.CreditDays = *input.CreditDays
+	}
+
+	oldLogoURL := existing.LogoURL
+	if input.RemoveLogo {
+		existing.LogoURL = ""
+	} else if input.LogoFile != nil {
+		newLogoURL, err := s.storage.SaveSupplierLogo(input.LogoFile)
+		if err != nil {
+			return Supplier{}, fmt.Errorf("save supplier logo: %w", err)
+		}
+		existing.LogoURL = newLogoURL
+	}
 
 	existing.UpdatedAt = time.Now().UTC()
-	return s.repo.UpdateSupplier(ctx, existing)
+	result, err := s.repo.UpdateSupplier(ctx, existing)
+	if err != nil {
+		if input.LogoFile != nil && existing.LogoURL != oldLogoURL {
+			_ = s.storage.DeleteSupplierLogo(existing.LogoURL)
+		}
+		return Supplier{}, err
+	}
+	if oldLogoURL != "" && existing.LogoURL != oldLogoURL {
+		_ = s.storage.DeleteSupplierLogo(oldLogoURL)
+	}
+	return result, nil
 }
 
 func (s Service) DeleteSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string) error {
