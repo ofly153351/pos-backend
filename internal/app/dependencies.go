@@ -33,5 +33,6 @@ func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 		warehouseDashboardHandler: newWarehouseDashboardHandler(db),
 		warehouseReceiptHandler:   newWarehouseReceiptHandler(cfg, db),
 		receiptSettingsHandler:    newReceiptSettingsHandler(db),
+		documentHandler:           newDocumentHandler(db),
 	}
 }
