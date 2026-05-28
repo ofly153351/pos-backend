@@ -37,9 +37,11 @@ type Document struct {
 	Type           DocumentType   `gorm:"not null;type:varchar(20)" json:"type"`
 	Status         DocumentStatus `gorm:"not null;type:varchar(20);default:'PENDING'" json:"status"`
 	PaymentStatus  PaymentStatus  `gorm:"not null;type:varchar(20);default:'UNPAID'" json:"payment_status"`
-	CustomerID     string         `gorm:"not null" json:"customer_id"`
-	CustomerName   string         `gorm:"not null" json:"customer_name"`
-	CustomerTaxID  *string        `json:"customer_tax_id,omitempty"`
+	CustomerID      string  `gorm:"not null" json:"customer_id"`
+	CustomerName    string  `gorm:"not null" json:"customer_name"`
+	CustomerTaxID   *string `json:"customer_tax_id,omitempty"`
+	CustomerAddress string  `gorm:"not null;default:''" json:"customer_address"`
+	CustomerPhone   string  `gorm:"not null;default:''" json:"customer_phone"`
 	StaffID        string         `gorm:"not null" json:"staff_id"`
 	StaffName      string         `gorm:"not null" json:"staff_name"`
 	DocumentDate   time.Time      `gorm:"not null" json:"document_date"`
@@ -53,6 +55,13 @@ type Document struct {
 	CreatedBy      string         `gorm:"not null" json:"created_by"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
+
+	// Store info — populated on read, not persisted
+	StoreName    string `gorm:"-" json:"store_name,omitempty"`
+	StoreAddress string `gorm:"-" json:"store_address,omitempty"`
+	StorePhone   string `gorm:"-" json:"store_phone,omitempty"`
+	StoreTaxID   string `gorm:"-" json:"store_tax_id,omitempty"`
+	StoreLogoURL string `gorm:"-" json:"store_logo_url,omitempty"`
 }
 
 type DocumentItem struct {
@@ -60,6 +69,7 @@ type DocumentItem struct {
 	DocumentID    string  `gorm:"not null;index" json:"document_id"`
 	ProductID     *string `json:"product_id,omitempty"`
 	Description   string  `gorm:"not null" json:"description"`
+	Unit          string  `gorm:"type:varchar(30);not null;default:'ชิ้น'" json:"unit"`
 	Quantity      float64 `gorm:"not null;default:1" json:"quantity"`
 	UnitPrice     float64 `gorm:"not null;default:0" json:"unit_price"`
 	DiscountType  string  `gorm:"type:varchar(10);default:''" json:"discount_type"`

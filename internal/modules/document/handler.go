@@ -2,6 +2,7 @@ package document
 
 import (
 	"errors"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -78,6 +79,115 @@ func (h Handler) DeleteDocument(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "document deleted", nil)
+}
+
+func (h Handler) PrintDocument(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	c.Set("Cache-Control", "no-store")
+	return c.SendString(html)
+}
+
+// GetDocumentPDF generates and streams an Invoice PDF for the given document.
+// Query params (all optional):
+//
+//	customer_address, customer_tax_id, credit_term, reference_do,
+//	discount_percent, default_unit, bank_name, account_number, promptpay
+func (h Handler) GetDocumentPDF(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	opts := InvoicePDFOptions{
+		CustomerAddress: c.Query("customer_address"),
+		CustomerTaxID:   c.Query("customer_tax_id"),
+		CreditTerm:      c.QueryInt("credit_term", 0),
+		ReferenceDO:     c.Query("reference_do"),
+		DiscountPercent: float64(c.QueryInt("discount_percent", 0)),
+		DefaultUnit:     c.Query("default_unit", "ชิ้น"),
+		BankName:        c.Query("bank_name"),
+		AccountNumber:   c.Query("account_number"),
+		PromptPay:       c.Query("promptpay"),
+	}
+	data, _, err := h.service.GenerateDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, opts)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", "inline; filename=\"invoice.pdf\"")
+	c.Set("Cache-Control", "no-store")
+	return c.Send(data)
+}
+
+// GetStatementPDF generates and streams a Statement PDF for a customer + period.
+// Query params: customer_id (required), period_start, period_end (YYYY-MM-DD),
+//
+//	bank_name, account_number, note
+func (h Handler) GetStatementPDF(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	customerID := c.Query("customer_id")
+	if customerID == "" {
+		return httpx.Error(c, fiber.StatusBadRequest, "customer_id required", nil)
+	}
+
+	parseDateQ := func(key string, def time.Time) time.Time {
+		v := c.Query(key)
+		if v == "" {
+			return def
+		}
+		t, err := time.Parse("2006-01-02", v)
+		if err != nil {
+			return def
+		}
+		return t
+	}
+	now := time.Now()
+	periodStart := parseDateQ("period_start", time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()))
+	periodEnd := parseDateQ("period_end", now)
+
+	opts := StatementPDFOptions{
+		PeriodStart:   periodStart,
+		PeriodEnd:     periodEnd,
+		BankName:      c.Query("bank_name"),
+		AccountNumber: c.Query("account_number"),
+		Note:          c.Query("note"),
+	}
+	data, _, err := h.service.GenerateStatementPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, customerID, opts)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "application/pdf")
+	c.Set("Content-Disposition", "inline; filename=\"statement.pdf\"")
+	c.Set("Cache-Control", "no-store")
+	return c.Send(data)
+}
+
+// PrintWHTCert generates and returns the WHT certificate HTML (ภ.ง.ด.3/53).
+// Query params:
+//
+//	receiver_type: "individual" | "company" (default "company")
+//	income_type:   free-text description of income type (default "เงินได้ตามมาตรา 40(8) บริการทั่วไป")
+//	income_desc:   optional additional description
+//	wht_rate:      WHT rate % (default 3)
+func (h Handler) PrintWHTCert(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	opts := WHTCertOptions{
+		ReceiverType: c.Query("receiver_type", "company"),
+		IncomeType:   c.Query("income_type"),
+		IncomeDesc:   c.Query("income_desc"),
+		WHTRate:      float64(c.QueryInt("wht_rate", 3)),
+	}
+	html, err := h.service.RenderWHTCert(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, opts)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	c.Set("Cache-Control", "no-store")
+	return c.SendString(html)
 }
 
 func (h Handler) BulkAction(c *fiber.Ctx) error {

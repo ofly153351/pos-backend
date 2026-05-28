@@ -285,16 +285,25 @@ func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gor
 	return nil
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
-	promptPaySelect := "'' AS store_promptpay_id"
+func (r PostgresRepository) buildStoreExtraSelect(ctx context.Context) string {
+	promptPay := "'' AS store_promptpay_id"
 	if hasColumn, err := r.hasStorePromptPayIDColumn(ctx); err == nil && hasColumn {
-		promptPaySelect = "COALESCE(st.promptpay_id, '') AS store_promptpay_id"
+		promptPay = "COALESCE(st.promptpay_id, '') AS store_promptpay_id"
 	}
+	taxID := "'' AS store_tax_id"
+	if hasColumn, err := r.hasStoreTaxIDColumn(ctx); err == nil && hasColumn {
+		taxID = "COALESCE(st.tax_id, '') AS store_tax_id"
+	}
+	return promptPay + ", " + taxID
+}
+
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
+	storeExtra := r.buildStoreExtraSelect(ctx)
 
 	var sales []Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", promptPaySelect)).
+		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -305,15 +314,12 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string) (Sale, error) {
-	promptPaySelect := "'' AS store_promptpay_id"
-	if hasColumn, err := r.hasStorePromptPayIDColumn(ctx); err == nil && hasColumn {
-		promptPaySelect = "COALESCE(st.promptpay_id, '') AS store_promptpay_id"
-	}
+	storeExtra := r.buildStoreExtraSelect(ctx)
 
 	var sale Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", promptPaySelect)).
+		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -410,6 +416,14 @@ func calculateNetworkDiscount(percent, unitPrice, manualDiscount float64) float6
 }
 
 func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool, error) {
+	return r.hasStoreColumn(ctx, "promptpay_id")
+}
+
+func (r PostgresRepository) hasStoreTaxIDColumn(ctx context.Context) (bool, error) {
+	return r.hasStoreColumn(ctx, "tax_id")
+}
+
+func (r PostgresRepository) hasStoreColumn(ctx context.Context, column string) (bool, error) {
 	type columnLookup struct {
 		Exists bool `gorm:"column:exists"`
 	}
@@ -422,9 +436,9 @@ func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool
 				FROM information_schema.columns
 				WHERE table_schema = current_schema()
 					AND table_name = 'stores'
-					AND column_name = 'promptpay_id'
+					AND column_name = ?
 			) AS exists
-		`).
+		`, column).
 		Scan(&lookup).Error
 	if err != nil {
 		return false, err

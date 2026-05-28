@@ -114,6 +114,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 	if input.PromptPayID != nil {
 		current.PromptPayID = strings.TrimSpace(*input.PromptPayID)
 	}
+	if input.TaxID != nil {
+		current.TaxID = strings.TrimSpace(*input.TaxID)
+	}
 
 	if input.CurrencyCode != nil {
 		current.CurrencyCode = strings.ToUpper(strings.TrimSpace(*input.CurrencyCode))

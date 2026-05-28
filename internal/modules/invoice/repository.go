@@ -103,16 +103,17 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 
 		// Create stock movement record
 		if err := tx.Table("stock_movements").Create(map[string]any{
-			"id":                newStockMovementID(),
-			"store_id":          invoice.StoreID,
-			"product_id":        product.ID,
-			"location_id":       deductLocID,
-			"movement_type":     "SALE",
-			"quantity_change":   -item.Quantity,
-			"reference_type":    "invoice",
-			"reference_id":      invoice.ID,
-			"note":              "invoice deduction",
-			"created_at":        invoice.CreatedAt,
+			"id":              newStockMovementID(),
+			"store_id":        invoice.StoreID,
+			"product_id":      product.ID,
+			"location_id":     deductLocID,
+			"type":            "SALE",
+			"quantity_change": -item.Quantity,
+			"reference_id":    invoice.ID,
+			"note":            "invoice deduction",
+			"created_by":      invoice.CashierUserID,
+			"created_at":      invoice.CreatedAt,
+			"updated_at":      invoice.CreatedAt,
 		}).Error; err != nil {
 			return Invoice{}, err
 		}

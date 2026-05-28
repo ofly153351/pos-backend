@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"pos-backend/internal/idgen"
@@ -73,6 +74,24 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 	if doc.StoreID != storeID {
 		return nil, ErrForbidden
 	}
+
+	var store struct {
+		Name    string `gorm:"column:name"`
+		Address string `gorm:"column:address"`
+		Phone   string `gorm:"column:phone"`
+		TaxID   string `gorm:"column:tax_id"`
+		LogoURL string `gorm:"column:logo_url"`
+	}
+	_ = s.db.Raw(
+		"SELECT name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(tax_id,'') AS tax_id, COALESCE(logo_url,'') AS logo_url FROM stores WHERE id = ?",
+		storeID,
+	).Scan(&store)
+	doc.StoreName = store.Name
+	doc.StoreAddress = store.Address
+	doc.StorePhone = store.Phone
+	doc.StoreTaxID = store.TaxID
+	doc.StoreLogoURL = store.LogoURL
+
 	return doc, nil
 }
 
@@ -84,10 +103,14 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		return nil, ErrNoItems
 	}
 
-	// Resolve customer
-	var cust struct{ FullName string }
+	// Resolve customer (snapshot name + address + phone for §86/4 compliance)
+	var cust struct {
+		FullName string
+		Address  string
+		Phone    string
+	}
 	if err := s.db.Raw(
-		"SELECT full_name FROM customers WHERE id = ? AND store_id = ?",
+		"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
 		req.CustomerID, storeID,
 	).Scan(&cust).Error; err != nil || cust.FullName == "" {
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
@@ -115,7 +138,9 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	docNo := fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
 	docNoFull := fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
 
-	// Build items + totals
+	// Build items + totals (round to 2 dp to avoid float64 precision drift)
+	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
+
 	var subtotal float64
 	items := make([]DocumentItem, 0, len(req.Items))
 	for _, inp := range req.Items {
@@ -129,10 +154,16 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		if lineAmt < 0 {
 			lineAmt = 0
 		}
+		lineAmt = round2(lineAmt)
 		subtotal += lineAmt
+		unit := inp.Unit
+		if unit == "" {
+			unit = "ชิ้น"
+		}
 		items = append(items, DocumentItem{
 			ID:            idgen.Generate(PrefixDocumentItem),
 			Description:   inp.Description,
+			Unit:          unit,
 			ProductID:     inp.ProductID,
 			Quantity:      inp.Quantity,
 			UnitPrice:     inp.UnitPrice,
@@ -141,21 +172,24 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 			Amount:        lineAmt,
 		})
 	}
-	vatAmount := subtotal * req.VatRate / 100
-	totalAmount := subtotal + vatAmount
+	subtotal = round2(subtotal)
+	vatAmount := round2(subtotal * req.VatRate / 100)
+	totalAmount := round2(subtotal + vatAmount)
 
 	doc := &Document{
-		ID:             idgen.Generate(PrefixDocument),
-		StoreID:        storeID,
-		DocumentNo:     docNo,
-		DocumentNoFull: docNoFull,
-		Type:           req.Type,
-		Status:         StatusPending,
-		PaymentStatus:  PaymentUnpaid,
-		CustomerID:   req.CustomerID,
-		CustomerName: cust.FullName,
-		StaffID:      actor.UserID,
-		StaffName:      actor.Name,
+		ID:              idgen.Generate(PrefixDocument),
+		StoreID:         storeID,
+		DocumentNo:      docNo,
+		DocumentNoFull:  docNoFull,
+		Type:            req.Type,
+		Status:          StatusPending,
+		PaymentStatus:   PaymentUnpaid,
+		CustomerID:      req.CustomerID,
+		CustomerName:    cust.FullName,
+		CustomerAddress: cust.Address,
+		CustomerPhone:   cust.Phone,
+		StaffID:         actor.UserID,
+		StaffName:       actor.Name,
 		DocumentDate:   docDate,
 		DueDate:        dueDate,
 		Subtotal:       subtotal,
@@ -187,6 +221,21 @@ func (s Service) DeleteDocument(ctx context.Context, actor auth.Claims, storeID,
 	return s.repo.Delete(id)
 }
 
+func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string) (string, error) {
+	doc, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return "", err
+	}
+
+	return RenderDocumentHTML(doc, StoreInfo{
+		Name:    doc.StoreName,
+		Address: doc.StoreAddress,
+		Phone:   doc.StorePhone,
+		TaxID:   doc.StoreTaxID,
+		LogoURL: doc.StoreLogoURL,
+	})
+}
+
 func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) error {
 	if err := s.ensureAccess(actor, storeID); err != nil {
 		return err
@@ -202,6 +251,80 @@ func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID stri
 	default:
 		return ErrBadAction
 	}
+}
+
+// RenderWHTCert generates the WHT certificate HTML for a given document.
+// receiverType: "individual" → ภ.ง.ด.3, "company" → ภ.ง.ด.53
+func (s Service) RenderWHTCert(ctx context.Context, actor auth.Claims, storeID, id string, opts WHTCertOptions) (string, error) {
+	doc, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return "", err
+	}
+
+	var store struct {
+		Name    string
+		Address string
+		TaxID   string
+	}
+	_ = s.db.Raw(
+		"SELECT name, COALESCE(address,'') AS address, COALESCE(tax_id,'') AS tax_id FROM stores WHERE id = ?",
+		storeID,
+	).Scan(&store)
+
+	formNo := "ภ.ง.ด.53"
+	if opts.ReceiverType == "individual" {
+		formNo = "ภ.ง.ด.3"
+	}
+
+	incomeType := opts.IncomeType
+	if incomeType == "" {
+		incomeType = "เงินได้ตามมาตรา 40(8) บริการทั่วไป"
+	}
+	whtRate := opts.WHTRate
+	if whtRate <= 0 {
+		whtRate = 3
+	}
+
+	gross := doc.Subtotal // WHT base = pre-VAT subtotal (Revenue Code rule)
+	whtAmount := math.Round(gross*whtRate/100*100) / 100
+	net := math.Round((gross-whtAmount)*100) / 100
+
+	payeeTaxID := ""
+	if doc.CustomerTaxID != nil {
+		payeeTaxID = *doc.CustomerTaxID
+	}
+
+	d := WHTCertData{
+		PayerName:    store.Name,
+		PayerAddress: store.Address,
+		PayerTaxID:   store.TaxID,
+
+		PayeeName:    doc.CustomerName,
+		PayeeAddress: doc.CustomerAddress,
+		PayeeTaxID:   payeeTaxID,
+
+		ReceiverType: opts.ReceiverType,
+		FormNo:       formNo,
+
+		DocumentNo:  doc.DocumentNoFull,
+		PaymentDate: doc.DocumentDate,
+
+		IncomeType:  incomeType,
+		IncomeDesc:  opts.IncomeDesc,
+		GrossAmount: gross,
+		WHTRate:     whtRate,
+		WHTAmount:   whtAmount,
+		NetAmount:   net,
+	}
+	return RenderWHTCertHTML(d)
+}
+
+// WHTCertOptions holds query parameters for RenderWHTCert.
+type WHTCertOptions struct {
+	ReceiverType string  // "individual" | "company" (default "company")
+	IncomeType   string  // e.g. "เงินได้ตามมาตรา 40(8) บริการ"
+	IncomeDesc   string  // optional extra description
+	WHTRate      float64 // percentage, e.g. 3 (default 3)
 }
 
 func (s Service) ensureAccess(actor auth.Claims, storeID string) error {

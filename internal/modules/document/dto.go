@@ -17,6 +17,7 @@ type CreateDocumentRequest struct {
 type CreateDocumentItemInput struct {
 	ProductID     *string `json:"product_id,omitempty"`
 	Description   string  `json:"description"`
+	Unit          string  `json:"unit"`
 	Quantity      float64 `json:"quantity"`
 	UnitPrice     float64 `json:"unit_price"`
 	DiscountType  string  `json:"discount_type"`
