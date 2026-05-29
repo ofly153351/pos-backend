@@ -63,7 +63,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;background:#fff;font-s
         <div class="store-name">{{.Store.Name}}</div>
         {{if .Store.Address}}<div class="meta-line">{{.Store.Address}}</div>{{end}}
         {{if .Store.Phone}}<div class="meta-line">โทร: {{.Store.Phone}}</div>{{end}}{{if .Store.Fax}}<div class="meta-line">โทรสาร: {{.Store.Fax}}</div>{{end}}
-        {{if .Store.Email}}<div class="meta-line">อีเมล: {{.Store.Email}}</div>{{end}}{{if .Store.Website}}<div class="meta-line">{{.Store.Website}}</div>{{end}}
+        {{if or .Store.Email .Store.Website}}<div class="meta-line">{{if .Store.Email}}อีเมล: {{.Store.Email}}{{end}}{{if and .Store.Email .Store.Website}} · {{end}}{{if .Store.Website}}{{.Store.Website}}{{end}}</div>{{end}}
         <div class="meta-line">เลขประจำตัวผู้เสียภาษี: {{if .Store.TaxID}}<span class="mono">{{.Store.TaxID}}</span>{{else}}<span class="warn">ยังไม่ได้ตั้งค่า</span>{{end}}</div>
       </div>
     </div>
@@ -138,10 +138,12 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;background:#fff;font-s
   <div class="totals">
     <table class="sum-tbl">
       <tr><td class="slbl">ยอดรวมสินค้า</td><td class="sv">{{money .Doc.Subtotal}}</td></tr>
+      {{if gt .Doc.TotalDiscount 0.0}}
       <tr style="border-top:.5px solid #ccc">
         <td class="slbl">ส่วนลดรวม</td>
-        <td class="sv">{{if gt .Doc.TotalDiscount 0.0}}-{{money .Doc.TotalDiscount}}{{else}}0{{end}}</td>
+        <td class="sv">-{{money .Doc.TotalDiscount}}</td>
       </tr>
+      {{end}}
       {{if gt .Doc.VatRate 0.0}}
       <tr style="border-top:.5px solid #ccc"><td class="slbl">ภาษีมูลค่าเพิ่ม {{fmtQty .Doc.VatRate}}%</td><td class="sv">{{money .Doc.VatAmount}}</td></tr>
       {{end}}

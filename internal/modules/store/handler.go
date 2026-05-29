@@ -135,6 +135,9 @@ func parseUpdateStoreRequest(c *fiber.Ctx) (UpdateStoreRequest, error) {
 	if value := c.FormValue("address"); value != "" {
 		request.Address = &value
 	}
+	if value := c.FormValue("tax_id"); value != "" {
+		request.TaxID = &value
+	}
 	if value := c.FormValue("promptpay_id"); value != "" {
 		request.PromptPayID = &value
 	}
