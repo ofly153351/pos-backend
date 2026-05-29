@@ -3,6 +3,7 @@ package receipt_settings
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"math"
 	"time"
 
@@ -210,7 +211,7 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 		GrandTotal:     grandTotal,
 		GrandTotalText: "หกสิบสามบาทหกสิบห้าสตางค์",
 		PaymentMethod:  "เงินสด",
-		PromptPayQRURI: promptPayQR,
+		PromptPayQRURI: template.URL(promptPayQR),
 	}
 }
 

@@ -1,49 +1,9 @@
-package document
+package dochtml
 
 import (
-	"bytes"
 	"fmt"
 	"html/template"
-	"time"
 )
-
-// WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).
-type WHTCertData struct {
-	// Payer = store (ผู้จ่ายเงิน)
-	PayerName    string
-	PayerAddress string
-	PayerTaxID   string
-
-	// Payee = customer (ผู้รับเงิน)
-	PayeeName    string
-	PayeeAddress string
-	PayeeTaxID   string // optional — required for ภ.ง.ด.53
-
-	// Form type
-	ReceiverType string // "individual" → ภ.ง.ด.3, "company" → ภ.ง.ด.53
-	FormNo       string // computed: "ภ.ง.ด.3" or "ภ.ง.ด.53"
-
-	// Document ref
-	DocumentNo string
-	PaymentDate time.Time
-
-	// WHT details
-	IncomeType string  // e.g. "เงินได้ตามมาตรา 40(8) บริการ"
-	IncomeDesc string  // optional additional description
-	GrossAmount float64
-	WHTRate     float64 // percentage, e.g. 3
-	WHTAmount   float64
-	NetAmount   float64
-}
-
-// RenderWHTCertHTML renders the WHT certificate as an HTML string.
-func RenderWHTCertHTML(d WHTCertData) (string, error) {
-	var buf bytes.Buffer
-	if err := whtTmpl.Execute(&buf, d); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
 
 var whtTmpl = template.Must(template.New("wht").Funcs(template.FuncMap{
 	"money":    formatMoney,

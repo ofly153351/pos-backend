@@ -9,6 +9,7 @@ import (
 
 	"pos-backend/internal/idgen"
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/dochtml"
 
 	"gorm.io/gorm"
 )
@@ -79,16 +80,22 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 		Name    string `gorm:"column:name"`
 		Address string `gorm:"column:address"`
 		Phone   string `gorm:"column:phone"`
+		Fax     string `gorm:"column:fax"`
+		Email   string `gorm:"column:email"`
+		Website string `gorm:"column:website"`
 		TaxID   string `gorm:"column:tax_id"`
 		LogoURL string `gorm:"column:logo_url"`
 	}
 	_ = s.db.Raw(
-		"SELECT name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(tax_id,'') AS tax_id, COALESCE(logo_url,'') AS logo_url FROM stores WHERE id = ?",
+		"SELECT name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(fax,'') AS fax, COALESCE(email,'') AS email, COALESCE(website,'') AS website, COALESCE(tax_id,'') AS tax_id, COALESCE(logo_url,'') AS logo_url FROM stores WHERE id = ?",
 		storeID,
 	).Scan(&store)
 	doc.StoreName = store.Name
 	doc.StoreAddress = store.Address
 	doc.StorePhone = store.Phone
+	doc.StoreFax = store.Fax
+	doc.StoreEmail = store.Email
+	doc.StoreWebsite = store.Website
 	doc.StoreTaxID = store.TaxID
 	doc.StoreLogoURL = store.LogoURL
 
@@ -227,10 +234,13 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		return "", err
 	}
 
-	return RenderDocumentHTML(doc, StoreInfo{
+	return dochtml.RenderDocumentHTML(toDocData(doc), dochtml.StoreInfo{
 		Name:    doc.StoreName,
 		Address: doc.StoreAddress,
 		Phone:   doc.StorePhone,
+		Fax:     doc.StoreFax,
+		Email:   doc.StoreEmail,
+		Website: doc.StoreWebsite,
 		TaxID:   doc.StoreTaxID,
 		LogoURL: doc.StoreLogoURL,
 	})
@@ -270,6 +280,7 @@ func (s Service) RenderWHTCert(ctx context.Context, actor auth.Claims, storeID, 
 		"SELECT name, COALESCE(address,'') AS address, COALESCE(tax_id,'') AS tax_id FROM stores WHERE id = ?",
 		storeID,
 	).Scan(&store)
+	// Note: WHT cert uses payer name/address/TaxID only; phone/fax/email/website not shown
 
 	formNo := "ภ.ง.ด.53"
 	if opts.ReceiverType == "individual" {
@@ -294,7 +305,7 @@ func (s Service) RenderWHTCert(ctx context.Context, actor auth.Claims, storeID, 
 		payeeTaxID = *doc.CustomerTaxID
 	}
 
-	d := WHTCertData{
+	d := dochtml.WHTCertData{
 		PayerName:    store.Name,
 		PayerAddress: store.Address,
 		PayerTaxID:   store.TaxID,
@@ -316,7 +327,7 @@ func (s Service) RenderWHTCert(ctx context.Context, actor auth.Claims, storeID, 
 		WHTAmount:   whtAmount,
 		NetAmount:   net,
 	}
-	return RenderWHTCertHTML(d)
+	return dochtml.RenderWHTCertHTML(d)
 }
 
 // WHTCertOptions holds query parameters for RenderWHTCert.
@@ -332,4 +343,43 @@ func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
 		return ErrInvalidInput
 	}
 	return nil
+}
+
+// toDocData maps a *Document to dochtml.DocData for HTML rendering.
+func toDocData(doc *Document) dochtml.DocData {
+	items := make([]dochtml.DocItem, len(doc.Items))
+	for i, it := range doc.Items {
+		items[i] = dochtml.DocItem{
+			Description:   it.Description,
+			Unit:          it.Unit,
+			Quantity:      it.Quantity,
+			UnitPrice:     it.UnitPrice,
+			DiscountValue: it.DiscountValue,
+			Amount:        it.Amount,
+		}
+	}
+	var totalDiscount float64
+	for _, it := range doc.Items {
+		totalDiscount += it.DiscountValue
+	}
+
+	return dochtml.DocData{
+		Type:            string(doc.Type),
+		DocumentNo:      doc.DocumentNo,
+		DocumentNoFull:  doc.DocumentNoFull,
+		DocumentDate:    doc.DocumentDate,
+		DueDate:         doc.DueDate,
+		CustomerName:    doc.CustomerName,
+		CustomerAddress: doc.CustomerAddress,
+		CustomerPhone:   doc.CustomerPhone,
+		CustomerTaxID:   doc.CustomerTaxID,
+		StaffName:       doc.StaffName,
+		Items:           items,
+		Subtotal:        doc.Subtotal,
+		TotalDiscount:   totalDiscount,
+		VatRate:         doc.VatRate,
+		VatAmount:       doc.VatAmount,
+		TotalAmount:     doc.TotalAmount,
+		Notes:           doc.Notes,
+	}
 }

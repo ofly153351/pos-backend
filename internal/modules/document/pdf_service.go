@@ -3,12 +3,15 @@ package document
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/docpdf"
 )
 
 // GenerateDocumentPDF builds the correct PDF for a document based on its type.
@@ -50,11 +53,14 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 		defaultUnit = "ชิ้น"
 	}
 
-	in := InvoicePDFInput{
-		SellerName:    doc.StoreName,
-		SellerAddress: doc.StoreAddress,
-		SellerTaxID:   doc.StoreTaxID,
-		SellerPhone:   doc.StorePhone,
+	logoBytes, logoExt := fetchLogo(doc.StoreLogoURL)
+	in := docpdf.InvoicePDFInput{
+		SellerName:      doc.StoreName,
+		SellerAddress:   doc.StoreAddress,
+		SellerTaxID:     doc.StoreTaxID,
+		SellerPhone:     doc.StorePhone,
+		SellerLogoBytes: logoBytes,
+		SellerLogoExt:   logoExt,
 
 		CustomerName:    doc.CustomerName,
 		CustomerAddress: custAddr,
@@ -79,7 +85,7 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 		if unit == "" {
 			unit = defaultUnit
 		}
-		in.Items = append(in.Items, InvoicePDFItem{
+		in.Items = append(in.Items, docpdf.InvoicePDFItem{
 			Description: it.Description,
 			Quantity:    it.Quantity,
 			Unit:        unit,
@@ -87,7 +93,7 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 		})
 	}
 
-	pdfBytes, err := RenderInvoicePDF(in)
+	pdfBytes, err := docpdf.RenderInvoicePDF(in)
 	if err != nil {
 		return nil, "", err
 	}
@@ -111,11 +117,14 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 		custTaxID = opts.CustomerTaxID
 	}
 
-	in := BillPDFInput{
-		SellerName:    doc.StoreName,
-		SellerAddress: doc.StoreAddress,
-		SellerTaxID:   doc.StoreTaxID,
-		SellerPhone:   doc.StorePhone,
+	billLogoBytes, billLogoExt := fetchLogo(doc.StoreLogoURL)
+	in := docpdf.BillPDFInput{
+		SellerName:      doc.StoreName,
+		SellerAddress:   doc.StoreAddress,
+		SellerTaxID:     doc.StoreTaxID,
+		SellerPhone:     doc.StorePhone,
+		SellerLogoBytes: billLogoBytes,
+		SellerLogoExt:   billLogoExt,
 
 		CustomerName:    doc.CustomerName,
 		CustomerAddress: custAddr,
@@ -140,7 +149,7 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 		if unit == "" {
 			unit = defaultUnit
 		}
-		in.Items = append(in.Items, InvoicePDFItem{
+		in.Items = append(in.Items, docpdf.InvoicePDFItem{
 			Description: it.Description,
 			Quantity:    it.Quantity,
 			Unit:        unit,
@@ -148,7 +157,7 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 		})
 	}
 
-	pdfBytes, err := RenderBillPDF(in)
+	pdfBytes, err := docpdf.RenderBillPDF(in)
 	if err != nil {
 		return nil, "", err
 	}
@@ -206,7 +215,7 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 	stmtNo := fmt.Sprintf("STMT/%d/%02d/%04d", buddhistYear, int(now.Month()), seq)
 
 	today := now.Truncate(24 * time.Hour)
-	var rows []StatementInvoiceRow
+	var rows []docpdf.StatementInvoiceRow
 	for _, d := range docs {
 		balance := d.TotalAmount // simplified: no partial payment tracking in doc module
 		due := d.DocumentDate
@@ -217,7 +226,7 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 		if due.Before(today) && balance > 0 {
 			status = "overdue"
 		}
-		rows = append(rows, StatementInvoiceRow{
+		rows = append(rows, docpdf.StatementInvoiceRow{
 			InvoiceNo: d.DocumentNoFull,
 			IssueDate: d.DocumentDate,
 			DueDate:   due,
@@ -228,7 +237,7 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 		})
 	}
 
-	in := StatementPDFInput{
+	in := docpdf.StatementPDFInput{
 		SellerName:    store.Name,
 		SellerAddress: store.Address,
 		SellerTaxID:   store.TaxID,
@@ -248,7 +257,7 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 		Note:          opts.Note,
 	}
 
-	pdfBytes, err := RenderStatementPDF(in)
+	pdfBytes, err := docpdf.RenderStatementPDF(in)
 	if err != nil {
 		return nil, "", err
 	}
@@ -304,4 +313,36 @@ func noteStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// fetchLogo downloads logo bytes from a URL. Returns nil bytes on any error.
+func fetchLogo(rawURL string) (data []byte, ext string) {
+	if rawURL == "" {
+		return nil, ""
+	}
+	resp, err := http.Get(rawURL) //nolint:noctx
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return nil, ""
+	}
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, ""
+	}
+	ct := resp.Header.Get("Content-Type")
+	switch {
+	case strings.Contains(ct, "png"):
+		ext = "png"
+	case strings.Contains(ct, "jpeg"), strings.Contains(ct, "jpg"):
+		ext = "jpeg"
+	default:
+		// infer from URL
+		lower := strings.ToLower(rawURL)
+		if strings.HasSuffix(lower, ".png") {
+			ext = "png"
+		} else {
+			ext = "jpeg"
+		}
+	}
+	return data, ext
 }

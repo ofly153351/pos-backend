@@ -143,33 +143,32 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID string) (Store,
 	}
 
 	var storeModel Store
-	query := r.db.WithContext(ctx).
-		Table("stores").
-		Select(`
-			id,
-			owner_user_id,
-			name,
+	selectCols := `
+		id, owner_user_id, name,
+		COALESCE(logo_url, '') AS logo_url,
+		COALESCE(phone, '') AS phone,
+		COALESCE(fax, '') AS fax,
+		COALESCE(email, '') AS email,
+		COALESCE(website, '') AS website,
+		COALESCE(address, '') AS address,
+		COALESCE(tax_id, '') AS tax_id,
+		currency_code, created_at
+	`
+	if hasPromptPayColumn {
+		selectCols = `
+			id, owner_user_id, name,
 			COALESCE(logo_url, '') AS logo_url,
 			COALESCE(phone, '') AS phone,
+			COALESCE(fax, '') AS fax,
+			COALESCE(email, '') AS email,
+			COALESCE(website, '') AS website,
 			COALESCE(address, '') AS address,
-			currency_code,
-			created_at
-		`)
-	if hasPromptPayColumn {
-		query = r.db.WithContext(ctx).
-			Table("stores").
-			Select(`
-				id,
-				owner_user_id,
-				name,
-				COALESCE(logo_url, '') AS logo_url,
-				COALESCE(phone, '') AS phone,
-				COALESCE(address, '') AS address,
-				COALESCE(promptpay_id, '') AS promptpay_id,
-				currency_code,
-				created_at
-			`)
+			COALESCE(promptpay_id, '') AS promptpay_id,
+			COALESCE(tax_id, '') AS tax_id,
+			currency_code, created_at
+		`
 	}
+	query := r.db.WithContext(ctx).Table("stores").Select(selectCols)
 
 	err = query.
 		Where("id = ?", storeID).
@@ -218,8 +217,12 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 		Name                  string     `gorm:"column:name"`
 		LogoURL               string     `gorm:"column:logo_url"`
 		Phone                 string     `gorm:"column:phone"`
+		Fax                   string     `gorm:"column:fax"`
+		Email                 string     `gorm:"column:email"`
+		Website               string     `gorm:"column:website"`
 		Address               string     `gorm:"column:address"`
 		PromptPayID           string     `gorm:"column:promptpay_id"`
+		TaxID                 string     `gorm:"column:tax_id"`
 		CurrencyCode          string     `gorm:"column:currency_code"`
 		SubscriptionPlanCode  string     `gorm:"column:subscription_plan_code"`
 		SubscriptionStatus    string     `gorm:"column:subscription_status"`
@@ -240,8 +243,12 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 			s.name,
 			COALESCE(s.logo_url, '') AS logo_url,
 			COALESCE(s.phone, '') AS phone,
+			COALESCE(s.fax, '') AS fax,
+			COALESCE(s.email, '') AS email,
+			COALESCE(s.website, '') AS website,
 			COALESCE(s.address, '') AS address,
 			%s,
+			COALESCE(s.tax_id, '') AS tax_id,
 			s.currency_code,
 			COALESCE(sub.plan_code, '') AS subscription_plan_code,
 			COALESCE(sub.status, '') AS subscription_status,
@@ -280,8 +287,12 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 			Name:                 row.Name,
 			LogoURL:              row.LogoURL,
 			Phone:                row.Phone,
+			Fax:                  row.Fax,
+			Email:                row.Email,
+			Website:              row.Website,
 			Address:              row.Address,
 			PromptPayID:          row.PromptPayID,
+			TaxID:                row.TaxID,
 			CurrencyCode:         row.CurrencyCode,
 			SubscriptionPlanCode: row.SubscriptionPlanCode,
 			SubscriptionStatus:   row.SubscriptionStatus,
@@ -304,7 +315,11 @@ func (r PostgresRepository) Update(ctx context.Context, storeID string, update S
 	payload := map[string]any{
 		"name":          update.Name,
 		"phone":         nilIfEmpty(update.Phone),
+		"fax":           update.Fax,
+		"email":         update.Email,
+		"website":       update.Website,
 		"address":       nilIfEmpty(update.Address),
+		"tax_id":        update.TaxID,
 		"currency_code": update.CurrencyCode,
 		"updated_at":    time.Now().UTC(),
 	}

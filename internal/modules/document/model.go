@@ -60,6 +60,9 @@ type Document struct {
 	StoreName    string `gorm:"-" json:"store_name,omitempty"`
 	StoreAddress string `gorm:"-" json:"store_address,omitempty"`
 	StorePhone   string `gorm:"-" json:"store_phone,omitempty"`
+	StoreFax     string `gorm:"-" json:"store_fax,omitempty"`
+	StoreEmail   string `gorm:"-" json:"store_email,omitempty"`
+	StoreWebsite string `gorm:"-" json:"store_website,omitempty"`
 	StoreTaxID   string `gorm:"-" json:"store_tax_id,omitempty"`
 	StoreLogoURL string `gorm:"-" json:"store_logo_url,omitempty"`
 }

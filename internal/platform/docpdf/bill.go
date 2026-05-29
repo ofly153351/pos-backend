@@ -1,4 +1,4 @@
-package document
+package docpdf
 
 import (
 	"bytes"
@@ -10,10 +10,12 @@ import (
 
 // BillPDFInput holds the data for a Bill PDF (ใบวางบิล).
 type BillPDFInput struct {
-	SellerName    string
-	SellerAddress string
-	SellerTaxID   string
-	SellerPhone   string
+	SellerName      string
+	SellerAddress   string
+	SellerTaxID     string
+	SellerPhone     string
+	SellerLogoBytes []byte
+	SellerLogoExt   string
 
 	CustomerName    string
 	CustomerAddress string
@@ -46,12 +48,41 @@ func RenderBillPDF(in BillPDFInput) ([]byte, error) {
 	pdf.SetTextColor(255, 255, 255)
 	pdf.SetFont(font, "", 8)
 	pdf.SetXY(margin, 3.5)
-	pdf.CellFormat(body/2, 5, in.SellerName, "", 0, "L", false, 0, "")
-	pdf.CellFormat(body/2, 5, "ใบวางบิล  /  Billing Notice", "", 1, "R", false, 0, "")
+	pdf.CellFormat(body, 5, "ใบวางบิล  /  Billing Notice", "", 1, "R", false, 0, "")
 
-	// ── 2. Title block ────────────────────────────────────────────────────────
+	// ── 1b. Logo + seller name ────────────────────────────────────────────────
+	const logoW, logoH = 50.0, 12.5
+	nameX := margin
+	if len(in.SellerLogoBytes) > 0 {
+		ext := in.SellerLogoExt
+		if ext == "" {
+			ext = "png"
+		}
+		r := bytes.NewReader(in.SellerLogoBytes)
+		pdf.RegisterImageOptionsReader("bill_logo", gofpdf.ImageOptions{ImageType: ext}, r)
+		pdf.ImageOptions("bill_logo", margin, 14, logoW, logoH, false, gofpdf.ImageOptions{}, 0, "")
+		nameX = margin + logoW + 3
+	}
+
+	nameW := body/2 - (nameX - margin)
 	pdf.SetTextColor(30, 27, 75)
-	pdf.SetXY(margin, 16)
+	pdf.SetFont(font, "", 11)
+	pdf.SetXY(nameX, 14)
+	pdf.CellFormat(nameW, 6, in.SellerName, "", 1, "L", false, 0, "")
+	pdf.SetFont(font, "", 8)
+	pdf.SetTextColor(100, 116, 139)
+	if in.SellerAddress != "" {
+		pdf.SetX(nameX)
+		pdf.CellFormat(nameW, 4.5, in.SellerAddress, "", 1, "L", false, 0, "")
+	}
+	if in.SellerTaxID != "" {
+		pdf.SetX(nameX)
+		pdf.CellFormat(nameW, 4.5, "TIN: "+in.SellerTaxID, "", 1, "L", false, 0, "")
+	}
+
+	// ── 2. BILL title ─────────────────────────────────────────────────────────
+	pdf.SetTextColor(30, 27, 75)
+	pdf.SetXY(margin, 30)
 	pdf.SetFont(font, "", 22)
 	pdf.CellFormat(body/2, 12, "BILL", "", 0, "L", false, 0, "")
 

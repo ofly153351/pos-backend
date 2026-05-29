@@ -3,6 +3,7 @@ package sale
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"math"
 	"os"
 	"regexp"
@@ -124,8 +125,12 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 
 	promptPayID := strings.TrimSpace(s.StorePromptPayID)
 	promptPayQR := ""
+	// Only generate QR when: setting enabled + ID present + generated URI is non-empty
 	if sv.ShowQr && promptPayID != "" {
-		promptPayQR = buildPromptPayQRDataURI(promptPayID, grandTotal)
+		uri := buildPromptPayQRDataURI(promptPayID, grandTotal)
+		if uri != "" {
+			promptPayQR = uri
+		}
 	}
 
 	sale := receipthtml.SaleData{
@@ -141,7 +146,7 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		GrandTotal:     grandTotal,
 		GrandTotalText: formatThaiBahtText(grandTotal),
 		PaymentMethod:  fallback(s.PaymentMethod, "-"),
-		PromptPayQRURI: promptPayQR,
+		PromptPayQRURI: template.URL(promptPayQR),
 	}
 
 	store := receipthtml.StoreInfo{

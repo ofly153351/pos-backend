@@ -1,4 +1,4 @@
-package document
+package docpdf
 
 import (
 	"bytes"
@@ -39,17 +39,51 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 	font := registerFont(pdf)
 
 	// ── 1. Header band ────────────────────────────────────────────────────────
-	pdf.SetFillColor(109, 40, 217) // violet-700
+	pdf.SetFillColor(109, 40, 217)
 	pdf.Rect(0, 0, pageW, 12, "F")
 	pdf.SetTextColor(255, 255, 255)
 	pdf.SetFont(font, "", 8)
 	pdf.SetXY(margin, 3.5)
-	pdf.CellFormat(body/2, 5, in.SellerName, "", 0, "L", false, 0, "")
-	pdf.CellFormat(body/2, 5, "ใบแจ้งหนี้  /  Invoice", "", 1, "R", false, 0, "")
+	pdf.CellFormat(body, 5, "ใบแจ้งหนี้  /  Invoice", "", 1, "R", false, 0, "")
 
-	// ── 2. Title block ────────────────────────────────────────────────────────
-	pdf.SetTextColor(30, 27, 75) // indigo-950
-	pdf.SetXY(margin, 16)
+	// ── 1b. Logo + seller name row ────────────────────────────────────────────
+	const logoW, logoH = 50.0, 12.5 // 480px×120px ratio at PDF scale
+	nameX := margin
+	if len(in.SellerLogoBytes) > 0 {
+		ext := in.SellerLogoExt
+		if ext == "" {
+			ext = "png"
+		}
+		r := bytes.NewReader(in.SellerLogoBytes)
+		pdf.RegisterImageOptionsReader("seller_logo", gofpdf.ImageOptions{ImageType: ext}, r)
+		pdf.ImageOptions("seller_logo", margin, 14, logoW, logoH, false, gofpdf.ImageOptions{}, 0, "")
+		nameX = margin + logoW + 3
+	}
+
+	// ── 2. Seller name (to the right of logo) ─────────────────────────────────
+	pdf.SetTextColor(30, 27, 75)
+	pdf.SetFont(font, "", 11)
+	pdf.SetXY(nameX, 14)
+	nameW := body/2 - (nameX - margin)
+	pdf.CellFormat(nameW, 6, in.SellerName, "", 1, "L", false, 0, "")
+	pdf.SetFont(font, "", 8)
+	pdf.SetTextColor(100, 116, 139)
+	if in.SellerAddress != "" {
+		pdf.SetX(nameX)
+		pdf.CellFormat(nameW, 4.5, in.SellerAddress, "", 1, "L", false, 0, "")
+	}
+	if in.SellerPhone != "" {
+		pdf.SetX(nameX)
+		pdf.CellFormat(nameW, 4.5, "โทร: "+in.SellerPhone, "", 1, "L", false, 0, "")
+	}
+	if in.SellerTaxID != "" {
+		pdf.SetX(nameX)
+		pdf.CellFormat(nameW, 4.5, "TIN: "+in.SellerTaxID, "", 1, "L", false, 0, "")
+	}
+
+	// ── 2b. INVOICE title ─────────────────────────────────────────────────────
+	pdf.SetTextColor(30, 27, 75)
+	pdf.SetXY(margin, 30)
 	pdf.SetFont(font, "", 22)
 	pdf.CellFormat(body/2, 12, "INVOICE", "", 0, "L", false, 0, "")
 
@@ -79,54 +113,28 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 	hRule(pdf)
 	pdf.Ln(3)
 
-	// ── 3. Seller / Customer columns ─────────────────────────────────────────
-	colW := body / 2
+	// ── 3. Customer info ─────────────────────────────────────────────────────
 	yBefore := pdf.GetY()
 
-	// Seller (left)
-	sectionHeader(pdf, font, "ผู้ออกเอกสาร / From", margin, yBefore, colW-5)
+	sectionHeader(pdf, font, "ผู้รับเอกสาร / To", margin, yBefore, body)
 	y := pdf.GetY() + 1
 	pdf.SetFont(font, "", 9)
-	infoRow(pdf, font, margin, y, colW-5, in.SellerName)
-	y = pdf.GetY()
-	if in.SellerAddress != "" {
-		infoRow(pdf, font, margin, y, colW-5, in.SellerAddress)
-		y = pdf.GetY()
-	}
-	if in.SellerPhone != "" {
-		infoRow(pdf, font, margin, y, colW-5, "โทร: "+in.SellerPhone)
-		y = pdf.GetY()
-	}
-	if in.SellerTaxID != "" {
-		infoRow(pdf, font, margin, y, colW-5, "เลขผู้เสียภาษี: "+in.SellerTaxID)
-	}
-
-	yAfterSeller := pdf.GetY()
-
-	// Customer (right)
-	xRight := margin + colW
-	sectionHeader(pdf, font, "ผู้รับเอกสาร / To", xRight, yBefore, colW)
-	y = pdf.GetY() + 1
-	pdf.SetFont(font, "", 9)
-	infoRow(pdf, font, xRight, y, colW, in.CustomerName)
+	infoRow(pdf, font, margin, y, body/2, in.CustomerName)
 	y = pdf.GetY()
 	if in.CustomerAddress != "" {
-		infoRow(pdf, font, xRight, y, colW, in.CustomerAddress)
+		infoRow(pdf, font, margin, y, body/2, in.CustomerAddress)
 		y = pdf.GetY()
 	}
 	if in.CustomerTaxID != "" {
-		infoRow(pdf, font, xRight, y, colW, "เลขผู้เสียภาษี: "+in.CustomerTaxID)
+		infoRow(pdf, font, margin, y, body/2, "เลขผู้เสียภาษี: "+in.CustomerTaxID)
 		y = pdf.GetY()
 	}
 	if in.CreditTerm > 0 {
-		infoRow(pdf, font, xRight, y, colW, fmt.Sprintf("เครดิต: %d วัน", in.CreditTerm))
+		infoRow(pdf, font, margin, y, body/2, fmt.Sprintf("เครดิต: %d วัน", in.CreditTerm))
 	}
 
-	yAfterCustomer := pdf.GetY()
-	if yAfterCustomer > yAfterSeller {
-		pdf.SetY(yAfterCustomer)
-	} else {
-		pdf.SetY(yAfterSeller)
+	if pdf.GetY() > yBefore {
+		pdf.SetY(pdf.GetY())
 	}
 	pdf.Ln(5)
 	hRule(pdf)

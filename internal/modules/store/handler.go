@@ -123,6 +123,15 @@ func parseUpdateStoreRequest(c *fiber.Ctx) (UpdateStoreRequest, error) {
 	if value := c.FormValue("phone"); value != "" {
 		request.Phone = &value
 	}
+	if value := c.FormValue("fax"); value != "" {
+		request.Fax = &value
+	}
+	if value := c.FormValue("email"); value != "" {
+		request.Email = &value
+	}
+	if value := c.FormValue("website"); value != "" {
+		request.Website = &value
+	}
 	if value := c.FormValue("address"); value != "" {
 		request.Address = &value
 	}

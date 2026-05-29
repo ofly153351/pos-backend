@@ -108,6 +108,15 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 	if input.Phone != nil {
 		current.Phone = strings.TrimSpace(*input.Phone)
 	}
+	if input.Fax != nil {
+		current.Fax = strings.TrimSpace(*input.Fax)
+	}
+	if input.Email != nil {
+		current.Email = strings.TrimSpace(*input.Email)
+	}
+	if input.Website != nil {
+		current.Website = strings.TrimSpace(*input.Website)
+	}
 	if input.Address != nil {
 		current.Address = strings.TrimSpace(*input.Address)
 	}

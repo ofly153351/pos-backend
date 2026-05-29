@@ -1,14 +1,16 @@
-package document
+package docpdf
 
 import "time"
 
 // ── Invoice PDF ───────────────────────────────────────────────────────────────
 
 type InvoicePDFInput struct {
-	SellerName    string
-	SellerAddress string
-	SellerTaxID   string
-	SellerPhone   string
+	SellerName      string
+	SellerAddress   string
+	SellerTaxID     string
+	SellerPhone     string
+	SellerLogoBytes []byte // optional — fetched from URL by caller
+	SellerLogoExt   string // "png" | "jpeg"
 
 	CustomerName    string
 	CustomerAddress string

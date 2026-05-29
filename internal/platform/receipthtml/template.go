@@ -59,7 +59,7 @@ type SaleData struct {
 	GrandTotal       float64
 	GrandTotalText   string
 	PaymentMethod    string
-	PromptPayQRURI   string // data:image/png;base64,... or ""
+	PromptPayQRURI   template.URL // data:image/png;base64,... or "" — must be template.URL to avoid #ZgotmplZ sanitization
 }
 
 func qrWidth(size string) int {
@@ -163,9 +163,9 @@ const receiptTpl = `<!DOCTYPE html>
   </header>
 
   <section class="meta">
-    <div class="meta-pair">
-      <div class="meta-row"><span>เลขที่ (Doc No.):</span><span></span></div>
-      <div class="meta-row"><span></span><span class="right">{{.Sale.OrderNo}}</span></div>
+    <div class="meta-row" style="grid-template-columns:auto 1fr;gap:6px">
+      <span style="white-space:nowrap">เลขที่ (Doc No.):</span>
+      <span class="right" style="word-break:break-all;font-size:9.5px;line-height:1.4">{{.Sale.OrderNo}}</span>
     </div>
     <div class="meta-pair">
       <div class="meta-row"><span>วันที่ (Date):</span><span></span></div>
