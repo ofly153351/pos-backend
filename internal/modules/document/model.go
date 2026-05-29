@@ -46,6 +46,7 @@ type Document struct {
 	StaffName      string         `gorm:"not null" json:"staff_name"`
 	DocumentDate   time.Time      `gorm:"not null" json:"document_date"`
 	DueDate        *time.Time     `json:"due_date,omitempty"`
+	ValidUntil     *time.Time     `json:"valid_until,omitempty"`
 	Subtotal       float64        `gorm:"not null;default:0" json:"subtotal"`
 	VatRate        float64        `gorm:"not null;default:0" json:"vat_rate"`
 	VatAmount      float64        `gorm:"not null;default:0" json:"vat_amount"`

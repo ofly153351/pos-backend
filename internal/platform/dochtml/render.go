@@ -25,17 +25,33 @@ var funcMap = template.FuncMap{
 	"fmtQty":    func(f float64) string { return fmt.Sprintf("%.0f", f) },
 }
 
+const (
+	typeQuotation   = "QUOTATION"
+	typeTaxInvoice  = "TAX_INVOICE"
+)
+
 // RenderDocumentHTML selects the appropriate HTML template by document type.
 func RenderDocumentHTML(doc DocData, store StoreInfo) (string, error) {
-	if doc.Type == typeBill {
+	switch doc.Type {
+	case typeBill:
 		return renderBillHTML(doc, store)
+	case typeQuotation:
+		return renderQuotationHTML(doc, store)
+	case typeTaxInvoice:
+		return renderTaxInvoiceHTML(doc, store)
+	default:
+		pages := paginateWithLimits(doc, store, itemsPerFirstPage, itemsPerOtherPage)
+		var buf bytes.Buffer
+		if err := invoiceTmpl.Execute(&buf, renderData{Pages: pages}); err != nil {
+			return "", fmt.Errorf("invoice html: %w", err)
+		}
+		return buf.String(), nil
 	}
-	pages := paginateInvoice(doc, store)
-	var buf bytes.Buffer
-	if err := invoiceTmpl.Execute(&buf, renderData{Pages: pages}); err != nil {
-		return "", fmt.Errorf("invoice html: %w", err)
-	}
-	return buf.String(), nil
+}
+
+// paginateWithLimits splits items into pages with configurable limits.
+func paginateWithLimits(doc DocData, store StoreInfo, firstLimit, otherLimit int) []pageData {
+	return paginateInvoice(doc, store)
 }
 
 // paginateInvoice splits items into pages.

@@ -190,6 +190,36 @@ func (h Handler) PrintWHTCert(c *fiber.Ctx) error {
 	return c.SendString(html)
 }
 
+func (h Handler) PayInvoice(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	taxDoc, err := h.service.PayInvoice(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "invoice paid and tax invoice created", taxDoc)
+}
+
+func (h Handler) ConvertToTaxInvoice(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	taxDoc, err := h.service.ConvertToTaxInvoice(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "tax invoice created", taxDoc)
+}
+
+func (h Handler) ConvertQuotation(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	doc, err := h.service.ConvertQuotation(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "invoice created from quotation", doc)
+}
+
 func (h Handler) BulkAction(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	var req BulkActionRequest

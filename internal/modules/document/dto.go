@@ -9,6 +9,7 @@ type CreateDocumentRequest struct {
 	CustomerID   string                    `json:"customer_id"`
 	DocumentDate string                    `json:"document_date"` // YYYY-MM-DD
 	DueDate      *string                   `json:"due_date,omitempty"`
+	ValidUntil   *string                   `json:"valid_until,omitempty"` // YYYY-MM-DD, for QUOTATION
 	Items        []CreateDocumentItemInput `json:"items"`
 	VatRate      float64                   `json:"vat_rate"`
 	Notes        *string                   `json:"notes,omitempty"`

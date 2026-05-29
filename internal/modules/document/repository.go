@@ -13,6 +13,7 @@ type Repository interface {
 	FindByID(id string) (*Document, error)
 	Create(doc *Document) error
 	UpdateStatus(id string, status DocumentStatus) error
+	MarkPaid(id string) error
 	Delete(id string) error
 	BulkDelete(ids []string) error
 	BulkSetStatus(ids []string, status DocumentStatus) error
@@ -110,6 +111,16 @@ func (r *repository) UpdateStatus(id string, status DocumentStatus) error {
 		Updates(map[string]any{
 			"status":     status,
 			"updated_at": time.Now(),
+		}).Error
+}
+
+func (r *repository) MarkPaid(id string) error {
+	return r.db.Model(&Document{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":         StatusCompleted,
+			"payment_status": PaymentPaid,
+			"updated_at":     time.Now(),
 		}).Error
 }
 

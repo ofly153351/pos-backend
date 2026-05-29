@@ -32,6 +32,7 @@ type DocData struct {
 	DocumentNoFull string
 	DocumentDate   time.Time
 	DueDate        *time.Time
+	ValidUntil     *time.Time
 	CustomerName   string
 	CustomerAddress string
 	CustomerPhone  string

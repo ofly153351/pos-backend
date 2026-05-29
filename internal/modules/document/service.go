@@ -137,6 +137,15 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		dueDate = &t
 	}
 
+	var validUntil *time.Time
+	if req.ValidUntil != nil && *req.ValidUntil != "" {
+		t, err := time.Parse("2006-01-02", *req.ValidUntil)
+		if err != nil {
+			return nil, fmt.Errorf("invalid valid_until: %w", ErrInvalidInput)
+		}
+		validUntil = &t
+	}
+
 	// Generate document number
 	seq, _ := s.repo.NextSeq(storeID, req.Type)
 	prefix := typePrefix(req.Type)
@@ -199,6 +208,7 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		StaffName:       actor.Name,
 		DocumentDate:   docDate,
 		DueDate:        dueDate,
+		ValidUntil:     validUntil,
 		Subtotal:       subtotal,
 		VatRate:        req.VatRate,
 		VatAmount:      vatAmount,
@@ -345,6 +355,93 @@ func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
 	return nil
 }
 
+// PayInvoice marks an INVOICE as paid and automatically creates a TAX_INVOICE.
+func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+	src, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if src.Type != TypeInvoice {
+		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
+	}
+	if err := s.repo.MarkPaid(id); err != nil {
+		return nil, err
+	}
+	return s.createTaxInvoiceFrom(ctx, actor, storeID, src)
+}
+
+// ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
+func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+	src, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if src.Type != TypeInvoice {
+		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
+	}
+	return s.createTaxInvoiceFrom(ctx, actor, storeID, src)
+}
+
+func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
+	items := make([]CreateDocumentItemInput, len(src.Items))
+	for i, it := range src.Items {
+		items[i] = CreateDocumentItemInput{
+			ProductID:     it.ProductID,
+			Description:   it.Description,
+			Unit:          it.Unit,
+			Quantity:      it.Quantity,
+			UnitPrice:     it.UnitPrice,
+			DiscountType:  it.DiscountType,
+			DiscountValue: it.DiscountValue,
+		}
+	}
+	today := time.Now().Format("2006-01-02")
+	req := CreateDocumentRequest{
+		Type:         TypeTaxInvoice,
+		CustomerID:   src.CustomerID,
+		DocumentDate: today,
+		VatRate:      src.VatRate,
+		Notes:        src.Notes,
+		Items:        items,
+	}
+	return s.CreateDocument(ctx, actor, storeID, req)
+}
+
+// ConvertQuotation creates an INVOICE document from an existing QUOTATION.
+func (s Service) ConvertQuotation(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+	src, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if src.Type != TypeQuotation {
+		return nil, fmt.Errorf("document is not a quotation: %w", ErrInvalidInput)
+	}
+
+	items := make([]CreateDocumentItemInput, len(src.Items))
+	for i, it := range src.Items {
+		items[i] = CreateDocumentItemInput{
+			ProductID:     it.ProductID,
+			Description:   it.Description,
+			Unit:          it.Unit,
+			Quantity:      it.Quantity,
+			UnitPrice:     it.UnitPrice,
+			DiscountType:  it.DiscountType,
+			DiscountValue: it.DiscountValue,
+		}
+	}
+
+	today := time.Now().Format("2006-01-02")
+	req := CreateDocumentRequest{
+		Type:         TypeInvoice,
+		CustomerID:   src.CustomerID,
+		DocumentDate: today,
+		VatRate:      src.VatRate,
+		Notes:        src.Notes,
+		Items:        items,
+	}
+	return s.CreateDocument(ctx, actor, storeID, req)
+}
+
 // toDocData maps a *Document to dochtml.DocData for HTML rendering.
 func toDocData(doc *Document) dochtml.DocData {
 	items := make([]dochtml.DocItem, len(doc.Items))
@@ -369,6 +466,7 @@ func toDocData(doc *Document) dochtml.DocData {
 		DocumentNoFull:  doc.DocumentNoFull,
 		DocumentDate:    doc.DocumentDate,
 		DueDate:         doc.DueDate,
+		ValidUntil:      doc.ValidUntil,
 		CustomerName:    doc.CustomerName,
 		CustomerAddress: doc.CustomerAddress,
 		CustomerPhone:   doc.CustomerPhone,
