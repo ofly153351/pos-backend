@@ -12,11 +12,14 @@ type StoreInfo struct {
 	Website string
 	TaxID   string
 	LogoURL string
+	Branch  string // สาขา (optional)
 }
 
 // DocItem is a single line item for HTML rendering.
 type DocItem struct {
 	Description   string
+	DescriptionEn string // optional English description (tax invoice)
+	SKU           string // optional product SKU
 	Unit          string
 	Quantity      float64
 	UnitPrice     float64
@@ -35,8 +38,9 @@ type DocData struct {
 	ValidUntil     *time.Time
 	CustomerName   string
 	CustomerAddress string
-	CustomerPhone  string
-	CustomerTaxID  *string
+	CustomerPhone   string
+	CustomerTaxID   *string
+	CustomerBranch  *string // สาขาผู้ซื้อ (optional)
 	StaffName      string
 	Items          []DocItem
 	Subtotal       float64

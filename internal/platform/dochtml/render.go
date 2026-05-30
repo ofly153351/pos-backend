@@ -51,7 +51,54 @@ func RenderDocumentHTML(doc DocData, store StoreInfo) (string, error) {
 
 // paginateWithLimits splits items into pages with configurable limits.
 func paginateWithLimits(doc DocData, store StoreInfo, firstLimit, otherLimit int) []pageData {
-	return paginateInvoice(doc, store)
+	items := doc.Items
+	var groups [][]DocItem
+	if len(items) <= firstLimit {
+		groups = append(groups, items)
+	} else {
+		groups = append(groups, items[:firstLimit])
+		rest := items[firstLimit:]
+		for len(rest) > 0 {
+			end := otherLimit
+			if end > len(rest) {
+				end = len(rest)
+			}
+			groups = append(groups, rest[:end])
+			rest = rest[end:]
+		}
+	}
+	total := len(groups)
+	pages := make([]pageData, total)
+	for i, group := range groups {
+		isLast := i == total-1
+		fillerCount := 0
+		if isLast {
+			limit := firstLimit
+			if i > 0 {
+				limit = otherLimit
+			}
+			fc := limit - len(group)
+			if fc > 0 && fc <= 5 {
+				fillerCount = fc
+			}
+		}
+		offset := 0
+		if i > 0 {
+			offset = firstLimit + (i-1)*otherLimit
+		}
+		pages[i] = pageData{
+			Doc:        doc,
+			Store:      store,
+			Items:      group,
+			FillerRows: make([]struct{}, fillerCount),
+			ItemOffset: offset,
+			PageNo:     i + 1,
+			TotalPages: total,
+			IsFirst:    i == 0,
+			IsLast:     isLast,
+		}
+	}
+	return pages
 }
 
 // paginateInvoice splits items into pages.
