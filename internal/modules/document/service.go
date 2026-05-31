@@ -386,7 +386,17 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	if err := s.repo.MarkPaid(id); err != nil {
 		return nil, err
 	}
-	return s.createTaxInvoiceFrom(ctx, actor, storeID, src)
+	taxDoc, err := s.createTaxInvoiceFrom(ctx, actor, storeID, src)
+	if err != nil {
+		return nil, err
+	}
+	// Tax invoice ที่สร้างจากการชำระแล้ว → status = COMPLETED, payment_status = PAID
+	if err := s.repo.MarkPaid(taxDoc.ID); err != nil {
+		return nil, err
+	}
+	taxDoc.Status = StatusCompleted
+	taxDoc.PaymentStatus = PaymentPaid
+	return taxDoc, nil
 }
 
 // ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
@@ -422,6 +432,44 @@ func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, st
 		VatRate:      src.VatRate,
 		Notes:        src.Notes,
 		Items:        items,
+	}
+	return s.CreateDocument(ctx, actor, storeID, req)
+}
+
+// ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
+func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+	src, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if src.Type != TypeInvoice {
+		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
+	}
+
+	items := make([]CreateDocumentItemInput, len(src.Items))
+	for i, it := range src.Items {
+		items[i] = CreateDocumentItemInput{
+			ProductID:     it.ProductID,
+			Description:   it.Description,
+			Unit:          it.Unit,
+			Quantity:      it.Quantity,
+			UnitPrice:     it.UnitPrice,
+			DiscountType:  it.DiscountType,
+			DiscountValue: it.DiscountValue,
+		}
+	}
+	today := time.Now().Format("2006-01-02")
+	req := CreateDocumentRequest{
+		Type:            TypeDeliveryOrder,
+		CustomerID:      src.CustomerID,
+		DocumentDate:    today,
+		VatRate:         src.VatRate,
+		Notes:           src.Notes,
+		InvoiceRefNo:    src.DocumentNoFull,
+		DeliveryAddress: src.CustomerAddress,
+		DeliveryContact: src.CustomerName,
+		DeliveryPhone:   src.CustomerPhone,
+		Items:           items,
 	}
 	return s.CreateDocument(ctx, actor, storeID, req)
 }

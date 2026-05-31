@@ -28,5 +28,6 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/documents/bulk", h.BulkAction)
 	protected.Post("/stores/:storeID/documents/:docID/pay", h.PayInvoice)
 	protected.Post("/stores/:storeID/documents/:docID/convert-tax", h.ConvertToTaxInvoice)
+	protected.Post("/stores/:storeID/documents/:docID/convert-do", h.ConvertToDeliveryOrder)
 	protected.Post("/stores/:storeID/documents/:docID/convert", h.ConvertQuotation)
 }

@@ -210,6 +210,16 @@ func (h Handler) ConvertToTaxInvoice(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "tax invoice created", taxDoc)
 }
 
+func (h Handler) ConvertToDeliveryOrder(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "delivery order created", doc)
+}
+
 func (h Handler) ConvertQuotation(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
