@@ -146,6 +146,15 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		validUntil = &t
 	}
 
+	var deliveryDate *time.Time
+	if req.DeliveryDate != nil && *req.DeliveryDate != "" {
+		t, err := time.Parse("2006-01-02", *req.DeliveryDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid delivery_date: %w", ErrInvalidInput)
+		}
+		deliveryDate = &t
+	}
+
 	// Generate document number
 	seq, _ := s.repo.NextSeq(storeID, req.Type)
 	prefix := typePrefix(req.Type)
@@ -206,9 +215,19 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CustomerPhone:   cust.Phone,
 		StaffID:         actor.UserID,
 		StaffName:       actor.Name,
-		DocumentDate:   docDate,
-		DueDate:        dueDate,
-		ValidUntil:     validUntil,
+		DocumentDate:    docDate,
+		DueDate:         dueDate,
+		ValidUntil:      validUntil,
+		DeliveryDate:    deliveryDate,
+		DeliveryAddress: req.DeliveryAddress,
+		DeliveryContact: req.DeliveryContact,
+		DeliveryPhone:   req.DeliveryPhone,
+		SalesZone:       req.SalesZone,
+		SalespersonName: req.SalespersonName,
+		InvoiceRefNo:    req.InvoiceRefNo,
+		PORefNo:         req.PORefNo,
+		ShippingFee:     round2(req.ShippingFee),
+		CreditTermDays:  req.CreditTermDays,
 		Subtotal:       subtotal,
 		VatRate:        req.VatRate,
 		VatAmount:      vatAmount,
@@ -460,6 +479,8 @@ func toDocData(doc *Document) dochtml.DocData {
 		totalDiscount += it.DiscountValue
 	}
 
+	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
+
 	return dochtml.DocData{
 		Type:            string(doc.Type),
 		DocumentNo:      doc.DocumentNo,
@@ -478,6 +499,18 @@ func toDocData(doc *Document) dochtml.DocData {
 		VatRate:         doc.VatRate,
 		VatAmount:       doc.VatAmount,
 		TotalAmount:     doc.TotalAmount,
+		PreVatAmount:    preVat,
 		Notes:           doc.Notes,
+		// Delivery order fields
+		DeliveryDate:    doc.DeliveryDate,
+		DeliveryAddress: doc.DeliveryAddress,
+		DeliveryContact: doc.DeliveryContact,
+		DeliveryPhone:   doc.DeliveryPhone,
+		SalesZone:       doc.SalesZone,
+		SalespersonName: doc.SalespersonName,
+		InvoiceRefNo:    doc.InvoiceRefNo,
+		PORefNo:         doc.PORefNo,
+		ShippingFee:     doc.ShippingFee,
+		CreditTermDays:  doc.CreditTermDays,
 	}
 }

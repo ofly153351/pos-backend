@@ -7,12 +7,13 @@ type DocumentStatus string
 type PaymentStatus  string
 
 const (
-	TypeInvoice    DocumentType = "INVOICE"
-	TypeReceipt    DocumentType = "RECEIPT"
-	TypeTaxInvoice DocumentType = "TAX_INVOICE"
-	TypeQuotation  DocumentType = "QUOTATION"
-	TypeBill       DocumentType = "BILL"
-	TypeCreditNote DocumentType = "CREDIT_NOTE"
+	TypeInvoice       DocumentType = "INVOICE"
+	TypeReceipt       DocumentType = "RECEIPT"
+	TypeTaxInvoice    DocumentType = "TAX_INVOICE"
+	TypeQuotation     DocumentType = "QUOTATION"
+	TypeBill          DocumentType = "BILL"
+	TypeCreditNote    DocumentType = "CREDIT_NOTE"
+	TypeDeliveryOrder DocumentType = "DELIVERY_ORDER"
 )
 
 const (
@@ -51,7 +52,17 @@ type Document struct {
 	VatRate        float64        `gorm:"not null;default:0" json:"vat_rate"`
 	VatAmount      float64        `gorm:"not null;default:0" json:"vat_amount"`
 	TotalAmount    float64        `gorm:"not null;default:0" json:"total_amount"`
-	Notes          *string        `json:"notes,omitempty"`
+	Notes            *string        `json:"notes,omitempty"`
+	DeliveryDate     *time.Time     `json:"delivery_date,omitempty"`
+	DeliveryAddress  string         `gorm:"not null;default:''" json:"delivery_address"`
+	DeliveryContact  string         `gorm:"not null;default:''" json:"delivery_contact"`
+	DeliveryPhone    string         `gorm:"not null;default:''" json:"delivery_phone"`
+	SalesZone        string         `gorm:"not null;default:''" json:"sales_zone"`
+	SalespersonName  string         `gorm:"not null;default:''" json:"salesperson_name"`
+	InvoiceRefNo     string         `gorm:"not null;default:''" json:"invoice_ref_no"`
+	PORefNo          string         `gorm:"not null;default:''" json:"po_ref_no"`
+	ShippingFee      float64        `gorm:"not null;default:0" json:"shipping_fee"`
+	CreditTermDays   int            `gorm:"not null;default:0" json:"credit_term_days"`
 	Items          []DocumentItem `gorm:"foreignKey:DocumentID;constraint:OnDelete:CASCADE" json:"items,omitempty"`
 	CreatedBy      string         `gorm:"not null" json:"created_by"`
 	CreatedAt      time.Time      `json:"created_at"`

@@ -166,6 +166,8 @@ func typePrefix(t DocumentType) string {
 		return "BILL"
 	case TypeCreditNote:
 		return "CN"
+	case TypeDeliveryOrder:
+		return "DO"
 	default:
 		return "DOC"
 	}

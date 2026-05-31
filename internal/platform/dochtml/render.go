@@ -26,8 +26,9 @@ var funcMap = template.FuncMap{
 }
 
 const (
-	typeQuotation   = "QUOTATION"
-	typeTaxInvoice  = "TAX_INVOICE"
+	typeQuotation     = "QUOTATION"
+	typeTaxInvoice    = "TAX_INVOICE"
+	typeDeliveryOrder = "DELIVERY_ORDER"
 )
 
 // RenderDocumentHTML selects the appropriate HTML template by document type.
@@ -39,6 +40,8 @@ func RenderDocumentHTML(doc DocData, store StoreInfo) (string, error) {
 		return renderQuotationHTML(doc, store)
 	case typeTaxInvoice:
 		return renderTaxInvoiceHTML(doc, store)
+	case typeDeliveryOrder:
+		return renderDeliveryNoteHTML(doc, store)
 	default:
 		pages := paginateWithLimits(doc, store, itemsPerFirstPage, itemsPerOtherPage)
 		var buf bytes.Buffer

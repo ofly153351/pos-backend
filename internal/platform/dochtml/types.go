@@ -12,7 +12,10 @@ type StoreInfo struct {
 	Website string
 	TaxID   string
 	LogoURL string
-	Branch  string // สาขา (optional)
+	Branch         string // สาขา (optional)
+	BankName       string
+	BankAccountNo  string
+	BankAccountName string
 }
 
 // DocItem is a single line item for HTML rendering.
@@ -49,6 +52,19 @@ type DocData struct {
 	VatAmount      float64
 	TotalAmount    float64
 	Notes          *string
+	// Delivery order fields
+	DeliveryDate    *time.Time
+	DeliveryAddress string
+	DeliveryContact string
+	DeliveryPhone   string
+	SalesZone       string
+	SalespersonName string
+	InvoiceRefNo    string
+	PORefNo         string
+	ShippingFee     float64
+	CreditTermDays  int
+	PreVatAmount    float64
+	QRPaymentURL    string
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).

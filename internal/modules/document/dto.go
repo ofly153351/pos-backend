@@ -9,8 +9,18 @@ type CreateDocumentRequest struct {
 	CustomerID   string                    `json:"customer_id"`
 	DocumentDate string                    `json:"document_date"` // YYYY-MM-DD
 	DueDate      *string                   `json:"due_date,omitempty"`
-	ValidUntil   *string                   `json:"valid_until,omitempty"` // YYYY-MM-DD, for QUOTATION
-	Items        []CreateDocumentItemInput `json:"items"`
+	ValidUntil      *string                   `json:"valid_until,omitempty"`
+	DeliveryDate    *string                   `json:"delivery_date,omitempty"`    // YYYY-MM-DD
+	DeliveryAddress string                    `json:"delivery_address"`
+	DeliveryContact string                    `json:"delivery_contact"`
+	DeliveryPhone   string                    `json:"delivery_phone"`
+	SalesZone       string                    `json:"sales_zone"`
+	SalespersonName string                    `json:"salesperson_name"`
+	InvoiceRefNo    string                    `json:"invoice_ref_no"`
+	PORefNo         string                    `json:"po_ref_no"`
+	ShippingFee     float64                   `json:"shipping_fee"`
+	CreditTermDays  int                       `json:"credit_term_days"`
+	Items           []CreateDocumentItemInput `json:"items"`
 	VatRate      float64                   `json:"vat_rate"`
 	Notes        *string                   `json:"notes,omitempty"`
 }
