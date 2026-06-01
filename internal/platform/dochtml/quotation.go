@@ -37,14 +37,14 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .warn{font-style:italic}
 /* ── Doc side ── */
 .doc-side{text-align:right;flex-shrink:0}
-.doc-badge{display:inline-block;border:1.5px solid #000;padding:1mm 5mm;font-size:8.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}
+.doc-badge{display:inline-block;border:1.5px solid #ccc;border-radius:4px;padding:1mm 5mm;font-size:8.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:2mm}
 .doc-title{font-size:22pt;font-weight:800;margin-bottom:2.5mm}
 .doc-info{font-size:8.5pt;border-collapse:collapse;margin-left:auto}
 .doc-info td{padding:.8mm 2mm}
 .doc-info .lbl{color:#444}
 .doc-info .val{font-weight:600;font-family:monospace}
 .doc-info .valid{color:#000;font-weight:700}
-.rule{border:none;border-top:1.5px solid #000;margin-bottom:5mm}
+.rule{border:none;border-top:1.5px solid #ccc;margin-bottom:5mm}
 .mono{font-family:monospace}
 /* ── Customer ── */
 .cust-section{margin-bottom:5mm;padding:3mm 4mm;border:1px solid #ccc;border-radius:3px}
@@ -52,11 +52,12 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .cust-name{font-size:11pt;font-weight:700}
 .cust-sub{font-size:8.5pt;margin-top:.5mm;line-height:1.5}
 /* ── Items ── */
-.items{width:100%;border-collapse:collapse;margin-bottom:5mm;font-size:8.5pt}
-.items th{padding:1.5mm 2.5mm;font-weight:700;border-top:1.5px solid #000;border-bottom:1px solid #000;text-align:left}
-.items td{padding:1.5mm 2.5mm;border-bottom:.5px solid #ccc}
+.items{width:100%;border-collapse:collapse;margin-bottom:5mm;font-size:8.5pt;border-radius:6px;overflow:hidden}
+.items th{padding:2mm 2.5mm;font-weight:700;background:#000;color:#fff;border:1px solid #ccc;text-align:center;line-height:1.3;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.items th.l{text-align:left}
+.items td{padding:2mm 2.5mm;border:.5px solid #ccc}
 .r{text-align:right}.c{text-align:center}
-.items tbody tr:last-child td{border-bottom:1px solid #000}
+.items tbody tr:last-child td{border-bottom:1px solid #ccc}
 /* ── Summary ── */
 .tarea{display:flex;gap:8mm;align-items:flex-start;margin-bottom:8mm}
 .notes{flex:1}
@@ -66,13 +67,13 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .sumtbl td{padding:1mm 2.5mm}
 .slbl{color:#333}
 .sv{text-align:right;font-family:monospace}
-.total-row td{border-top:1.5px solid #000;font-size:11pt;font-weight:700;padding:1.5mm 2.5mm}
+.total-row td{border-top:1.5px solid #ccc;font-size:11pt;font-weight:700;padding:1.5mm 2.5mm}
 /* ── Validity notice ── */
 .validity-box{border:1px dashed #888;padding:2mm 4mm;margin-bottom:5mm;font-size:8.5pt;color:#333}
 /* ── Signature ── */
 .sig-area{display:flex;gap:10mm;margin-top:8mm}
 .sig-box{flex:1;text-align:center}
-.sig-line{border-top:1px solid #000;padding-top:1.5mm;margin-top:14mm;font-size:8pt}
+.sig-line{border-top:1px solid #ccc;padding-top:1.5mm;margin-top:14mm;font-size:8pt}
 .sig-name{font-size:7.5pt;color:#333;margin-top:.5mm}
 .stamp-box{flex:1;text-align:center;border:1px dashed #bbb;height:30mm;display:flex;align-items:center;justify-content:center;font-size:8pt;color:#999}
 /* ── Footer ── */
@@ -120,7 +121,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
     <thead>
       <tr>
         <th class="c" style="width:8mm">#</th>
-        <th>รายการสินค้า / บริการ</th>
+        <th class="l">รายการสินค้า / รายละเอียด<br>(PRODUCT DESCRIPTION)</th>
         <th class="c" style="width:14mm">หน่วย</th>
         <th class="c" style="width:14mm">จำนวน</th>
         <th class="r" style="width:26mm">ราคา/หน่วย</th>
