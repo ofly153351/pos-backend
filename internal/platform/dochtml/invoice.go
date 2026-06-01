@@ -22,24 +22,25 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .meta-line{font-size:8.5pt;line-height:1.6}
 .warn{font-style:italic}
 .doc-side{text-align:right;flex-shrink:0}
-.doc-sub{font-size:7.5pt;font-weight:600;letter-spacing:.5px;margin-bottom:1mm;border:1px solid #000;display:inline-block;padding:0.5mm 3mm;margin-bottom:2mm}
+.doc-sub{font-size:7.5pt;font-weight:600;letter-spacing:.5px;margin-bottom:1mm;border:1px solid #ccc;border-radius:4px;display:inline-block;padding:0.5mm 3mm;margin-bottom:2mm}
 .doc-title{font-size:20pt;font-weight:800;margin-bottom:2.5mm}
 .doc-info{font-size:8.5pt;border-collapse:collapse;margin-left:auto}
 .doc-info td{padding:.8mm 2mm}
 .doc-info .lbl{color:#444}
 .doc-info .val{font-weight:600;font-family:monospace}
-.rule{border:none;border-top:1.5px solid #000;margin-bottom:5mm}
+.rule{border:none;border-top:1.5px solid #ccc;margin-bottom:5mm}
 .two-col{display:flex;gap:8mm;margin-bottom:6mm}
 .col{flex:1}
 .sec-lbl{font-size:7pt;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1mm;color:#444;font-weight:600}
 .cust-name{font-size:10.5pt;font-weight:700}
 .cust-sub{font-size:8.5pt;margin-top:.5mm;line-height:1.5}
 .mono{font-family:monospace}
-.items{width:100%;border-collapse:collapse;margin-bottom:5mm;font-size:8.5pt}
-.items th{padding:1.5mm 2.5mm;font-weight:700;border-top:1.5px solid #000;border-bottom:1px solid #000;text-align:left}
-.items td{padding:1.5mm 2.5mm;border-bottom:.5px solid #ccc}
+.items{width:100%;border-collapse:collapse;margin-bottom:5mm;font-size:8.5pt;border-radius:6px;overflow:hidden}
+.items th{padding:2mm 2.5mm;font-weight:700;background:#000;color:#fff;border:1px solid #ccc;text-align:center;line-height:1.3;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.items th.l{text-align:left}
+.items td{padding:2mm 2.5mm;border:.5px solid #ccc}
 .r{text-align:right}.c{text-align:center}
-.items tbody tr:last-child td{border-bottom:1px solid #000}
+.items tbody tr:last-child td{border-bottom:1px solid #ccc}
 .tarea{display:flex;gap:8mm;margin-bottom:8mm;align-items:flex-start}
 .notes{flex:1;min-width:0}
 .notes-box{border:1px solid #ddd;border-radius:4px;padding:2.5mm 3mm;min-height:14mm}
@@ -49,16 +50,16 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .sumtbl td{padding:1mm 2.5mm}
 .sumtbl .slbl{color:#333}
 .sumtbl .sv{text-align:right;font-family:monospace}
-.total-row td{border-top:1.5px solid #000;font-size:11pt;font-weight:700;padding:1.5mm 2.5mm}
+.total-row td{border-top:1.5px solid #ccc;font-size:11pt;font-weight:700;padding:1.5mm 2.5mm}
 .sig-area{display:flex;gap:10mm;margin-top:10mm}
 .sig-box{flex:1;text-align:center}
-.sig-line{border-top:1px solid #000;padding-top:1.5mm;margin-top:14mm;font-size:8pt}
+.sig-line{border-top:1px solid #ccc;padding-top:1.5mm;margin-top:14mm;font-size:8pt}
 .sig-name{font-size:7.5pt;color:#333;margin-top:.5mm}
 .footer{margin-top:5mm;border-top:.5px solid #888;padding-top:2mm;display:flex;justify-content:space-between;font-size:7pt;color:#444}
 .page-break{break-after:page}
 @media screen{.page-break{margin-bottom:12mm}}
 .page-num{font-size:7.5pt;color:#555;text-align:right;margin-bottom:2mm}
-.cont-hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #000;padding-bottom:2mm;margin-bottom:4mm}
+.cont-hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #ccc;padding-bottom:2mm;margin-bottom:4mm}
 .cont-hdr-name{font-weight:700;font-size:11pt}
 .cont-hdr-ref{font-size:8.5pt;color:#444;text-align:right}
 </style>
@@ -123,7 +124,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
     <thead>
       <tr>
         <th class="c" style="width:8mm">#</th>
-        <th>รายการสินค้า / บริการ</th>
+        <th class="l">รายการสินค้า / รายละเอียด<br>(PRODUCT DESCRIPTION)</th>
         <th class="c" style="width:14mm">หน่วย</th>
         <th class="c" style="width:14mm">จำนวน</th>
         <th class="r" style="width:26mm">ราคา/หน่วย</th>

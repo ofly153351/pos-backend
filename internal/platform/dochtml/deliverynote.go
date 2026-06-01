@@ -48,7 +48,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 /* ── Page num ── */
 .pg-badge{font-size:7.5pt;color:#555;text-align:right;margin-bottom:2mm}
 /* ── Cont header ── */
-.cont-hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:1.5px solid #000;padding-bottom:2mm;margin-bottom:4mm}
+.cont-hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:1.5px solid #ccc;padding-bottom:2mm;margin-bottom:4mm}
 .cont-hdr-name{font-size:11pt;font-weight:700}
 .cont-hdr-ref{font-size:8.5pt;color:#444}
 /* ── Header ── */
@@ -60,7 +60,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .hdr-right{flex-shrink:0;text-align:right}
 .doc-title{font-size:18pt;font-weight:800;line-height:1.1}
 .doc-title-en{font-size:9pt;font-weight:600;letter-spacing:.3px;color:#333;margin-bottom:2mm}
-.original-badge{display:inline-block;border:1.5px solid #000;border-radius:4px;padding:.8mm 4mm;font-size:7.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:3mm}
+.original-badge{display:inline-block;border:1.5px solid #ccc;border-radius:4px;padding:.8mm 4mm;font-size:7.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:3mm}
 /* ── Top info table ── */
 .top-info{font-size:8.5pt;border-collapse:collapse;width:auto;margin-left:auto;margin-bottom:3mm}
 .top-info td{padding:1mm 2.5mm}
@@ -68,52 +68,52 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .top-info .val{font-weight:700;text-align:right;font-family:monospace;padding-left:4mm}
 /* ── Two-box row ── */
 .info-row{display:flex;gap:4mm;margin-bottom:4mm}
-.info-box{flex:1;border:1px solid #000;border-radius:6px;padding:3mm 4mm;font-size:8.5pt;line-height:1.8}
+.info-box{flex:1;border:1px solid #ccc;border-radius:6px;padding:3mm 4mm;font-size:8.5pt;line-height:1.8}
 .info-box-title{font-weight:700;font-size:9pt;margin-bottom:1.5mm;border-bottom:1px solid #ccc;padding-bottom:1mm}
 .info-label{display:inline-block;min-width:42mm;color:#333}
 .info-val{font-weight:600}
 .info-val-mono{font-weight:600;font-family:monospace}
 /* ── Delivery location ── */
-.delivery-box{border:1px solid #000;border-radius:6px;padding:3mm 4mm;margin-bottom:4mm;font-size:8.5pt;line-height:1.7}
+.delivery-box{border:1px solid #ccc;border-radius:6px;padding:3mm 4mm;margin-bottom:4mm;font-size:8.5pt;line-height:1.7}
 .delivery-title{font-weight:700;font-size:9pt;margin-bottom:1.5mm;border-bottom:1px solid #ccc;padding-bottom:1mm}
 .contact-line{margin-top:1mm}
 /* ── Items ── */
 .items{width:100%;border-collapse:collapse;margin-bottom:4mm;font-size:8.5pt;border-radius:6px;overflow:hidden}
-.items th{padding:2mm 2.5mm;font-weight:700;background:#e8e8e8;border:1px solid #999;text-align:center;line-height:1.3;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.items th{padding:2mm 2.5mm;font-weight:700;background:#000;color:#fff;border:1px solid #ccc;text-align:center;line-height:1.3;print-color-adjust:exact;-webkit-print-color-adjust:exact}
 .items th.l{text-align:left}
-.items td{padding:2mm 2.5mm;border:.5px solid #bbb}
+.items td{padding:2mm 2.5mm;border:.5px solid #ccc}
 .r{text-align:right}.c{text-align:center}
-.items tbody tr:last-child td{border-bottom:1px solid #999}
+.items tbody tr:last-child td{border-bottom:1px solid #ccc}
 /* ── Bottom area ── */
 .bottom-area{display:flex;gap:4mm;margin-bottom:4mm;align-items:stretch}
 .bottom-left{flex:1;min-width:0}
 .bottom-right{width:78mm;flex-shrink:0}
 /* ── Payment method ── */
-.payment-box{border:1px solid #000;border-radius:6px;padding:3mm 4mm;font-size:8pt;line-height:2;margin-bottom:3mm;display:flex;gap:3mm;align-items:flex-start}
+.payment-box{border:1px solid #ccc;border-radius:6px;padding:3mm 4mm;font-size:8pt;line-height:2;margin-bottom:3mm;display:flex;gap:3mm;align-items:flex-start}
 .payment-methods{flex:1;min-width:0}
 .payment-qr{flex-shrink:0;text-align:center;align-self:center}
 .payment-qr img{display:block}
 .payment-qr-label{font-size:6.5pt;color:#555;margin-top:1mm;white-space:nowrap}
 .payment-title{font-weight:700;font-size:8.5pt;margin-bottom:1.5mm}
 .pay-row{display:flex;align-items:center;gap:2mm}
-.pay-check{display:inline-block;width:3.5mm;height:3.5mm;border:1px solid #000;flex-shrink:0}
+.pay-check{display:inline-block;width:3.5mm;height:3.5mm;border:1px solid #999;flex-shrink:0}
 .pay-fill{display:inline-block;border-bottom:1px dotted #000;min-width:20mm;flex:1;margin-left:1mm}
 .pay-sub{font-size:7.5pt;color:#333;padding-left:5.5mm;line-height:1.6}
 .bank-entry{padding-left:0;font-size:7.5pt;color:#111;border-left:2px solid #bbb;padding-left:2mm;margin:0.5mm 0}
 .qr-placeholder{text-align:center;padding:2mm;font-size:7pt;color:#888;border:1px dashed #ccc;margin-top:2mm;min-height:18mm;display:flex;align-items:center;justify-content:center}
 /* ── Summary ── */
-.sumtbl{width:100%;font-size:8.5pt;border-collapse:collapse;border:1px solid #000;border-radius:6px;overflow:hidden}
+.sumtbl{width:100%;font-size:8.5pt;border-collapse:collapse;border:1px solid #ccc;border-radius:6px;overflow:hidden}
 .sumtbl td{padding:1.5mm 3mm}
 .slbl{color:#222}
 .sv{text-align:right;font-family:monospace;font-weight:600}
 .total-row td{border-top:1.5px solid #000;font-size:12pt;font-weight:800;padding:2mm 3mm;background:#f5f5f5;print-color-adjust:exact;-webkit-print-color-adjust:exact}
 /* ── Remarks ── */
-.remarks-box{border:1px solid #000;border-radius:6px;padding:2.5mm 3.5mm;font-size:8pt;min-height:16mm;margin-top:3mm}
+.remarks-box{border:1px solid #ccc;border-radius:6px;padding:2.5mm 3.5mm;font-size:8pt;min-height:16mm;margin-top:3mm}
 .remarks-title{font-weight:700;font-size:8.5pt;margin-bottom:1.5mm}
 .remarks-dots{color:#999;line-height:2.2}
 /* ── Signature ── */
 .sig-area{display:flex;gap:4mm;margin-top:6mm;border-top:1px solid #000;padding-top:3mm}
-.sig-box{flex:1;text-align:center;font-size:8pt;border:1px solid #ccc;border-radius:6px;padding:3mm 2mm}
+.sig-box{flex:1;text-align:center;font-size:8pt;border:1px solid #ddd;border-radius:6px;padding:3mm 2mm}
 .sig-role{font-weight:700;font-size:8.5pt;margin-bottom:8mm}
 .sig-row{margin-bottom:3mm}
 .sig-fill{display:inline-block;border-bottom:1px dotted #000;min-width:42mm}
