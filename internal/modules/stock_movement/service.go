@@ -296,8 +296,23 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		return StockMovement{}, ErrProductNotFound
 	}
 
-	// Get current quantity
-	currentQty, err := s.repo.GetCurrentStockQty(ctx, storeID, req.ProductID, req.LocationID)
+	// Resolve location — use provided one or fall back to store's default sale-point location
+	resolvedLocID := req.LocationID
+	if resolvedLocID == "" {
+		defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
+		if err != nil {
+			return StockMovement{}, err
+		}
+		resolvedLocID = defaultLoc
+	}
+
+	var locPtr *string
+	if resolvedLocID != "" {
+		locPtr = &resolvedLocID
+	}
+
+	// Get current quantity at resolved location
+	currentQty, err := s.repo.GetCurrentStockQty(ctx, storeID, req.ProductID, resolvedLocID)
 	if err != nil {
 		return StockMovement{}, err
 	}
@@ -309,7 +324,7 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		ID:             newID(),
 		StoreID:        storeID,
 		ProductID:      req.ProductID,
-		LocationID:     &req.LocationID,
+		LocationID:     locPtr,
 		QuantityChange: diff,
 		Type:           MovementTypeAdjust,
 		Note:           fmt.Sprintf("adjusted from %d to %d. %s", currentQty, req.PhysicalQty, strings.TrimSpace(req.Note)),
@@ -322,7 +337,7 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		return StockMovement{}, err
 	}
 
-	if err := s.repo.SetStockQuantity(ctx, storeID, req.ProductID, req.LocationID, req.PhysicalQty); err != nil {
+	if err := s.repo.SetStockQuantity(ctx, storeID, req.ProductID, resolvedLocID, req.PhysicalQty); err != nil {
 		return StockMovement{}, err
 	}
 

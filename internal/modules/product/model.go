@@ -92,6 +92,7 @@ type ListProductsQuery struct {
 	Page        int
 	Limit       int
 	StockStatus string
+	SortBy      string // "created_at" | "updated_at" — default: created_at
 }
 
 type ProductListResult struct {

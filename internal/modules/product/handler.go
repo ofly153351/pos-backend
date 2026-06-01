@@ -42,6 +42,7 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 		Page:        page,
 		Limit:       limit,
 		StockStatus: strings.ToLower(strings.TrimSpace(c.Query("stock_status"))),
+		SortBy:      strings.ToLower(strings.TrimSpace(c.Query("sort_by"))),
 	})
 	if err != nil {
 		return writeProductError(c, err)

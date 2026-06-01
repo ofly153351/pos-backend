@@ -140,7 +140,7 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 		return ProductListResult{}, ErrInvalidStockStatus
 	}
 
-	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.StockStatus)
+	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.StockStatus, query.SortBy)
 	if err != nil {
 		return ProductListResult{}, err
 	}

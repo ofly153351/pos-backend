@@ -11,7 +11,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, product Product) (Product, error)
-	ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus string) ([]Product, int64, error)
+	ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus, sortBy string) ([]Product, int64, error)
 	GetByID(ctx context.Context, storeID, productID string) (Product, error)
 	Update(ctx context.Context, product Product) (Product, error)
 	UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error
@@ -131,7 +131,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	return r.GetByID(ctx, product.StoreID, product.ID)
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus string) ([]Product, int64, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus, sortBy string) ([]Product, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -165,7 +165,10 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 			END AS stock_status,
 			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location
 		`).
-		Order("pv.created_at DESC").
+		Order(func() string {
+			if sortBy == "updated_at" { return "pv.updated_at DESC" }
+			return "pv.created_at DESC"
+		}()).
 		Limit(limit).
 		Offset((page - 1) * limit).
 		Find(&rows).Error
