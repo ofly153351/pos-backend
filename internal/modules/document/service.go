@@ -403,7 +403,9 @@ func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
 	return nil
 }
 
-// PayInvoice marks an INVOICE as paid and automatically creates a TAX_INVOICE.
+// PayInvoice marks an INVOICE as paid.
+// If a DELIVERY_ORDER linked to this invoice already exists, skip TAX_INVOICE creation
+// because the DO serves as the combined delivery note + tax invoice.
 func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
 	src, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
@@ -415,11 +417,22 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	if err := s.repo.MarkPaid(id); err != nil {
 		return nil, err
 	}
+
+	// ถ้ามี DO ที่สร้างจาก invoice นี้อยู่แล้ว → ไม่สร้าง TAX_INVOICE ซ้ำ
+	var doCount int64
+	s.db.Model(&Document{}).
+		Where("source_document_id = ? AND type = ?", id, TypeDeliveryOrder).
+		Count(&doCount)
+	if doCount > 0 {
+		src.Status = StatusCompleted
+		src.PaymentStatus = PaymentPaid
+		return src, nil
+	}
+
 	taxDoc, err := s.createTaxInvoiceFrom(ctx, actor, storeID, src)
 	if err != nil {
 		return nil, err
 	}
-	// Tax invoice ที่สร้างจากการชำระแล้ว → status = COMPLETED, payment_status = PAID
 	if err := s.repo.MarkPaid(taxDoc.ID); err != nil {
 		return nil, err
 	}
@@ -488,10 +501,16 @@ func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, 
 		}
 	}
 	today := time.Now().Format("2006-01-02")
+	var dueDateStr *string
+	if src.DueDate != nil {
+		s := src.DueDate.Format("2006-01-02")
+		dueDateStr = &s
+	}
 	req := CreateDocumentRequest{
 		Type:             TypeDeliveryOrder,
 		CustomerID:       src.CustomerID,
 		DocumentDate:     today,
+		DueDate:          dueDateStr,
 		VatRate:          src.VatRate,
 		Notes:            src.Notes,
 		InvoiceRefNo:     src.DocumentNoFull,
