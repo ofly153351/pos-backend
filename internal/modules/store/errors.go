@@ -9,4 +9,5 @@ var (
 	ErrStoreNotFound            = errors.New("store not found")
 	ErrSubscriptionPlanNotFound = errors.New("subscription plan not found")
 	ErrStoreForbidden           = errors.New("user cannot manage this store")
+	ErrUnauthorized             = errors.New("unauthorized")
 )

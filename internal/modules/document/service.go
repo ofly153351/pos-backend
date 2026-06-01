@@ -77,17 +77,18 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 	}
 
 	var store struct {
-		Name    string `gorm:"column:name"`
-		Address string `gorm:"column:address"`
-		Phone   string `gorm:"column:phone"`
-		Fax     string `gorm:"column:fax"`
-		Email   string `gorm:"column:email"`
-		Website string `gorm:"column:website"`
-		TaxID   string `gorm:"column:tax_id"`
-		LogoURL string `gorm:"column:logo_url"`
+		Name        string `gorm:"column:name"`
+		Address     string `gorm:"column:address"`
+		Phone       string `gorm:"column:phone"`
+		Fax         string `gorm:"column:fax"`
+		Email       string `gorm:"column:email"`
+		Website     string `gorm:"column:website"`
+		TaxID       string `gorm:"column:tax_id"`
+		LogoURL     string `gorm:"column:logo_url"`
+		PromptPayID string `gorm:"column:promptpay_id"`
 	}
 	_ = s.db.Raw(
-		"SELECT name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(fax,'') AS fax, COALESCE(email,'') AS email, COALESCE(website,'') AS website, COALESCE(tax_id,'') AS tax_id, COALESCE(logo_url,'') AS logo_url FROM stores WHERE id = ?",
+		"SELECT name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(fax,'') AS fax, COALESCE(email,'') AS email, COALESCE(website,'') AS website, COALESCE(tax_id,'') AS tax_id, COALESCE(logo_url,'') AS logo_url, COALESCE(promptpay_id,'') AS promptpay_id FROM stores WHERE id = ?",
 		storeID,
 	).Scan(&store)
 	doc.StoreName = store.Name
@@ -98,6 +99,7 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 	doc.StoreWebsite = store.Website
 	doc.StoreTaxID = store.TaxID
 	doc.StoreLogoURL = store.LogoURL
+	doc.StorePromptPayID = store.PromptPayID
 
 	return doc, nil
 }
@@ -224,8 +226,9 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		DeliveryPhone:   req.DeliveryPhone,
 		SalesZone:       req.SalesZone,
 		SalespersonName: req.SalespersonName,
-		InvoiceRefNo:    req.InvoiceRefNo,
-		PORefNo:         req.PORefNo,
+		InvoiceRefNo:     req.InvoiceRefNo,
+		PORefNo:          req.PORefNo,
+		SourceDocumentID: req.SourceDocumentID,
 		ShippingFee:     round2(req.ShippingFee),
 		CreditTermDays:  req.CreditTermDays,
 		Subtotal:       subtotal,
@@ -263,15 +266,41 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		return "", err
 	}
 
-	return dochtml.RenderDocumentHTML(toDocData(doc), dochtml.StoreInfo{
-		Name:    doc.StoreName,
-		Address: doc.StoreAddress,
-		Phone:   doc.StorePhone,
-		Fax:     doc.StoreFax,
-		Email:   doc.StoreEmail,
-		Website: doc.StoreWebsite,
-		TaxID:   doc.StoreTaxID,
-		LogoURL: doc.StoreLogoURL,
+	docData := toDocData(doc)
+	if doc.StorePromptPayID != "" {
+		docData.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(doc.StorePromptPayID, doc.TotalAmount)
+	}
+
+	// Fetch bank accounts for this store
+	var bankRows []struct {
+		BankName    string `gorm:"column:bank_name"`
+		AccountNo   string `gorm:"column:account_no"`
+		AccountName string `gorm:"column:account_name"`
+	}
+	_ = s.db.Raw(
+		"SELECT bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? ORDER BY created_at ASC",
+		storeID,
+	).Scan(&bankRows)
+	bankAccounts := make([]dochtml.BankAccountInfo, len(bankRows))
+	for i, r := range bankRows {
+		bankAccounts[i] = dochtml.BankAccountInfo{
+			BankName:    r.BankName,
+			AccountNo:   r.AccountNo,
+			AccountName: r.AccountName,
+		}
+	}
+
+	return dochtml.RenderDocumentHTML(docData, dochtml.StoreInfo{
+		Name:         doc.StoreName,
+		Address:      doc.StoreAddress,
+		Phone:        doc.StorePhone,
+		Fax:          doc.StoreFax,
+		Email:        doc.StoreEmail,
+		Website:      doc.StoreWebsite,
+		TaxID:        doc.StoreTaxID,
+		LogoURL:      doc.StoreLogoURL,
+		PromptPayID:  doc.StorePromptPayID,
+		BankAccounts: bankAccounts,
 	})
 }
 
@@ -460,16 +489,17 @@ func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, 
 	}
 	today := time.Now().Format("2006-01-02")
 	req := CreateDocumentRequest{
-		Type:            TypeDeliveryOrder,
-		CustomerID:      src.CustomerID,
-		DocumentDate:    today,
-		VatRate:         src.VatRate,
-		Notes:           src.Notes,
-		InvoiceRefNo:    src.DocumentNoFull,
-		DeliveryAddress: src.CustomerAddress,
-		DeliveryContact: src.CustomerName,
-		DeliveryPhone:   src.CustomerPhone,
-		Items:           items,
+		Type:             TypeDeliveryOrder,
+		CustomerID:       src.CustomerID,
+		DocumentDate:     today,
+		VatRate:          src.VatRate,
+		Notes:            src.Notes,
+		InvoiceRefNo:     src.DocumentNoFull,
+		SourceDocumentID: &src.ID,
+		DeliveryAddress:  src.CustomerAddress,
+		DeliveryContact:  src.CustomerName,
+		DeliveryPhone:    src.CustomerPhone,
+		Items:            items,
 	}
 	return s.CreateDocument(ctx, actor, storeID, req)
 }

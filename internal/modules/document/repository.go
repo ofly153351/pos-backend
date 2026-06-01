@@ -84,7 +84,7 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 
 	var rows []DocumentListItem
 	err := base.
-		Select("id, document_no, document_no_full, type, status, payment_status, customer_name, staff_name, document_date, due_date, total_amount").
+		Select("id, document_no, document_no_full, type, status, payment_status, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
 		Order("document_date DESC, created_at DESC").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error

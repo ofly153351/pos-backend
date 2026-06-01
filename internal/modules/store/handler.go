@@ -83,11 +83,42 @@ func (h Handler) Update(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "store updated", result)
 }
 
+func (h Handler) ListBankAccounts(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	accounts, err := h.service.ListBankAccounts(c.UserContext(), middleware.ClaimsFromContext(c), storeID)
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "bank accounts fetched", accounts)
+}
+
+func (h Handler) CreateBankAccount(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	var req CreateBankAccountRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	acc, err := h.service.CreateBankAccount(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "bank account created", acc)
+}
+
+func (h Handler) DeleteBankAccount(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("accountID")
+	if err := h.service.DeleteBankAccount(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id); err != nil {
+		return writeStoreError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "bank account deleted", nil)
+}
+
 func writeStoreError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidStoreName), errors.Is(err, ErrInvalidCurrencyCode), errors.Is(err, ErrInvalidSubscriptionPlan):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-	case errors.Is(err, ErrStoreForbidden):
+	case errors.Is(err, ErrStoreForbidden), errors.Is(err, ErrUnauthorized):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrStoreNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)

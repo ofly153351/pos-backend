@@ -28,6 +28,25 @@ func (Store) TableName() string {
 	return "stores"
 }
 
+type StoreBankAccount struct {
+	ID          string    `json:"id" gorm:"primaryKey;type:varchar(30)"`
+	StoreID     string    `json:"store_id" gorm:"not null;index"`
+	BankCode    string    `json:"bank_code" gorm:"not null;default:''"`
+	BankName    string    `json:"bank_name" gorm:"not null;default:''"`
+	AccountNo   string    `json:"account_no" gorm:"not null;default:''"`
+	AccountName string    `json:"account_name" gorm:"not null;default:''"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (StoreBankAccount) TableName() string { return "store_bank_accounts" }
+
+type CreateBankAccountRequest struct {
+	BankCode    string `json:"bank_code"`
+	BankName    string `json:"bank_name"`
+	AccountNo   string `json:"account_no"`
+	AccountName string `json:"account_name"`
+}
+
 type CreateStoreRequest struct {
 	Name                 string
 	Phone                string

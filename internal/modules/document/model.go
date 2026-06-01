@@ -60,6 +60,7 @@ type Document struct {
 	SalesZone        string         `gorm:"not null;default:''" json:"sales_zone"`
 	SalespersonName  string         `gorm:"not null;default:''" json:"salesperson_name"`
 	InvoiceRefNo     string         `gorm:"not null;default:''" json:"invoice_ref_no"`
+	SourceDocumentID *string        `gorm:"type:varchar(30)" json:"source_document_id,omitempty"`
 	PORefNo          string         `gorm:"not null;default:''" json:"po_ref_no"`
 	ShippingFee      float64        `gorm:"not null;default:0" json:"shipping_fee"`
 	CreditTermDays   int            `gorm:"not null;default:0" json:"credit_term_days"`
@@ -76,7 +77,8 @@ type Document struct {
 	StoreEmail   string `gorm:"-" json:"store_email,omitempty"`
 	StoreWebsite string `gorm:"-" json:"store_website,omitempty"`
 	StoreTaxID   string `gorm:"-" json:"store_tax_id,omitempty"`
-	StoreLogoURL string `gorm:"-" json:"store_logo_url,omitempty"`
+	StoreLogoURL     string `gorm:"-" json:"store_logo_url,omitempty"`
+	StorePromptPayID string `gorm:"-" json:"-"`
 }
 
 type DocumentItem struct {

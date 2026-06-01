@@ -16,7 +16,8 @@ type CreateDocumentRequest struct {
 	DeliveryPhone   string                    `json:"delivery_phone"`
 	SalesZone       string                    `json:"sales_zone"`
 	SalespersonName string                    `json:"salesperson_name"`
-	InvoiceRefNo    string                    `json:"invoice_ref_no"`
+	InvoiceRefNo     string                    `json:"invoice_ref_no"`
+	SourceDocumentID *string                   `json:"source_document_id,omitempty"`
 	PORefNo         string                    `json:"po_ref_no"`
 	ShippingFee     float64                   `json:"shipping_fee"`
 	CreditTermDays  int                       `json:"credit_term_days"`
@@ -69,17 +70,18 @@ type DocumentStats struct {
 }
 
 type DocumentListItem struct {
-	ID             string         `json:"id"`
-	DocumentNo     string         `json:"document_no"`
-	DocumentNoFull string         `json:"document_no_full"`
-	Type           DocumentType   `json:"type"`
-	Status         DocumentStatus `json:"status"`
-	PaymentStatus  PaymentStatus  `json:"payment_status"`
-	CustomerName   string         `json:"customer_name"`
-	StaffName      string         `json:"staff_name"`
-	DocumentDate   time.Time      `json:"document_date"`
-	DueDate        *time.Time     `json:"due_date,omitempty"`
-	TotalAmount    float64        `json:"total_amount"`
+	ID               string         `json:"id"`
+	DocumentNo       string         `json:"document_no"`
+	DocumentNoFull   string         `json:"document_no_full"`
+	Type             DocumentType   `json:"type"`
+	Status           DocumentStatus `json:"status"`
+	PaymentStatus    PaymentStatus  `json:"payment_status"`
+	CustomerName     string         `json:"customer_name"`
+	StaffName        string         `json:"staff_name"`
+	DocumentDate     time.Time      `json:"document_date"`
+	DueDate          *time.Time     `json:"due_date,omitempty"`
+	TotalAmount      float64        `json:"total_amount"`
+	SourceDocumentID *string        `json:"source_document_id,omitempty"`
 }
 
 type DocumentListResponse struct {

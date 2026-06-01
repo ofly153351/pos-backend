@@ -16,6 +16,9 @@ type Repository interface {
 	ListByUser(ctx context.Context, userID, role string) ([]Store, error)
 	Update(ctx context.Context, storeID string, update Store) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	ListBankAccounts(ctx context.Context, storeID string) ([]StoreBankAccount, error)
+	CreateBankAccount(ctx context.Context, acc StoreBankAccount) (StoreBankAccount, error)
+	DeleteBankAccount(ctx context.Context, storeID, id string) error
 }
 
 type PostgresRepository struct {
@@ -384,6 +387,24 @@ func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool
 		return false, err
 	}
 	return lookup.Exists, nil
+}
+
+func (r PostgresRepository) ListBankAccounts(ctx context.Context, storeID string) ([]StoreBankAccount, error) {
+	var accounts []StoreBankAccount
+	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").Find(&accounts).Error
+	return accounts, err
+}
+
+func (r PostgresRepository) CreateBankAccount(ctx context.Context, acc StoreBankAccount) (StoreBankAccount, error) {
+	acc.CreatedAt = time.Now()
+	if err := r.db.WithContext(ctx).Create(&acc).Error; err != nil {
+		return StoreBankAccount{}, err
+	}
+	return acc, nil
+}
+
+func (r PostgresRepository) DeleteBankAccount(ctx context.Context, storeID, id string) error {
+	return r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).Delete(&StoreBankAccount{}).Error
 }
 
 func nilIfEmpty(value string) any {

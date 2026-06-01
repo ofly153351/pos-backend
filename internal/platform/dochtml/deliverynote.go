@@ -60,7 +60,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .hdr-right{flex-shrink:0;text-align:right}
 .doc-title{font-size:18pt;font-weight:800;line-height:1.1}
 .doc-title-en{font-size:9pt;font-weight:600;letter-spacing:.3px;color:#333;margin-bottom:2mm}
-.original-badge{display:inline-block;border:1.5px solid #000;padding:.8mm 4mm;font-size:7.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:3mm}
+.original-badge{display:inline-block;border:1.5px solid #000;border-radius:4px;padding:.8mm 4mm;font-size:7.5pt;font-weight:700;letter-spacing:.5px;margin-bottom:3mm}
 /* ── Top info table ── */
 .top-info{font-size:8.5pt;border-collapse:collapse;width:auto;margin-left:auto;margin-bottom:3mm}
 .top-info td{padding:1mm 2.5mm}
@@ -68,17 +68,17 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .top-info .val{font-weight:700;text-align:right;font-family:monospace;padding-left:4mm}
 /* ── Two-box row ── */
 .info-row{display:flex;gap:4mm;margin-bottom:4mm}
-.info-box{flex:1;border:1px solid #000;padding:3mm 4mm;font-size:8.5pt;line-height:1.8}
+.info-box{flex:1;border:1px solid #000;border-radius:6px;padding:3mm 4mm;font-size:8.5pt;line-height:1.8}
 .info-box-title{font-weight:700;font-size:9pt;margin-bottom:1.5mm;border-bottom:1px solid #ccc;padding-bottom:1mm}
 .info-label{display:inline-block;min-width:42mm;color:#333}
 .info-val{font-weight:600}
 .info-val-mono{font-weight:600;font-family:monospace}
 /* ── Delivery location ── */
-.delivery-box{border:1px solid #000;padding:3mm 4mm;margin-bottom:4mm;font-size:8.5pt;line-height:1.7}
+.delivery-box{border:1px solid #000;border-radius:6px;padding:3mm 4mm;margin-bottom:4mm;font-size:8.5pt;line-height:1.7}
 .delivery-title{font-weight:700;font-size:9pt;margin-bottom:1.5mm;border-bottom:1px solid #ccc;padding-bottom:1mm}
 .contact-line{margin-top:1mm}
 /* ── Items ── */
-.items{width:100%;border-collapse:collapse;margin-bottom:4mm;font-size:8.5pt}
+.items{width:100%;border-collapse:collapse;margin-bottom:4mm;font-size:8.5pt;border-radius:6px;overflow:hidden}
 .items th{padding:2mm 2.5mm;font-weight:700;background:#e8e8e8;border:1px solid #999;text-align:center;line-height:1.3;print-color-adjust:exact;-webkit-print-color-adjust:exact}
 .items th.l{text-align:left}
 .items td{padding:2mm 2.5mm;border:.5px solid #bbb}
@@ -89,26 +89,31 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
 .bottom-left{flex:1;min-width:0}
 .bottom-right{width:78mm;flex-shrink:0}
 /* ── Payment method ── */
-.payment-box{border:1px solid #000;padding:3mm 4mm;font-size:8pt;line-height:2;margin-bottom:3mm}
+.payment-box{border:1px solid #000;border-radius:6px;padding:3mm 4mm;font-size:8pt;line-height:2;margin-bottom:3mm;display:flex;gap:3mm;align-items:flex-start}
+.payment-methods{flex:1;min-width:0}
+.payment-qr{flex-shrink:0;text-align:center;align-self:center}
+.payment-qr img{display:block}
+.payment-qr-label{font-size:6.5pt;color:#555;margin-top:1mm;white-space:nowrap}
 .payment-title{font-weight:700;font-size:8.5pt;margin-bottom:1.5mm}
 .pay-row{display:flex;align-items:center;gap:2mm}
 .pay-check{display:inline-block;width:3.5mm;height:3.5mm;border:1px solid #000;flex-shrink:0}
 .pay-fill{display:inline-block;border-bottom:1px dotted #000;min-width:20mm;flex:1;margin-left:1mm}
 .pay-sub{font-size:7.5pt;color:#333;padding-left:5.5mm;line-height:1.6}
+.bank-entry{padding-left:0;font-size:7.5pt;color:#111;border-left:2px solid #bbb;padding-left:2mm;margin:0.5mm 0}
 .qr-placeholder{text-align:center;padding:2mm;font-size:7pt;color:#888;border:1px dashed #ccc;margin-top:2mm;min-height:18mm;display:flex;align-items:center;justify-content:center}
 /* ── Summary ── */
-.sumtbl{width:100%;font-size:8.5pt;border-collapse:collapse;border:1px solid #000}
+.sumtbl{width:100%;font-size:8.5pt;border-collapse:collapse;border:1px solid #000;border-radius:6px;overflow:hidden}
 .sumtbl td{padding:1.5mm 3mm}
 .slbl{color:#222}
 .sv{text-align:right;font-family:monospace;font-weight:600}
 .total-row td{border-top:1.5px solid #000;font-size:12pt;font-weight:800;padding:2mm 3mm;background:#f5f5f5;print-color-adjust:exact;-webkit-print-color-adjust:exact}
 /* ── Remarks ── */
-.remarks-box{border:1px solid #000;padding:2.5mm 3.5mm;font-size:8pt;min-height:16mm;margin-top:3mm}
+.remarks-box{border:1px solid #000;border-radius:6px;padding:2.5mm 3.5mm;font-size:8pt;min-height:16mm;margin-top:3mm}
 .remarks-title{font-weight:700;font-size:8.5pt;margin-bottom:1.5mm}
 .remarks-dots{color:#999;line-height:2.2}
 /* ── Signature ── */
 .sig-area{display:flex;gap:4mm;margin-top:6mm;border-top:1px solid #000;padding-top:3mm}
-.sig-box{flex:1;text-align:center;font-size:8pt;border:1px solid #ccc;padding:3mm 2mm}
+.sig-box{flex:1;text-align:center;font-size:8pt;border:1px solid #ccc;border-radius:6px;padding:3mm 2mm}
 .sig-role{font-weight:700;font-size:8.5pt;margin-bottom:8mm}
 .sig-row{margin-bottom:3mm}
 .sig-fill{display:inline-block;border-bottom:1px dotted #000;min-width:42mm}
@@ -125,7 +130,6 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
   {{if .IsFirst}}
   <div class="hdr">
     <div class="hdr-left">
-      {{if .Store.LogoURL}}<div style="margin-bottom:2mm"><img src="{{.Store.LogoURL}}" alt="logo" style="max-height:80px;width:auto;display:block"></div>{{end}}
       <div class="store-name">{{.Store.Name}}</div>
       {{if .Store.Branch}}<div class="store-branch">{{.Store.Branch}}</div>{{end}}
       {{if .Store.Address}}<div class="meta-line">{{.Store.Address}}</div>{{end}}
@@ -189,7 +193,8 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
   <table class="items">
     <thead>
       <tr>
-        <th style="width:22mm">รหัสสินค้า<br>(SKU)</th>
+        <th style="width:10mm">ลำดับ<br>(No.)</th>
+        <th style="width:20mm">รหัสสินค้า<br>(SKU)</th>
         <th class="l">รายการสินค้า / รายละเอียด<br>(PRODUCT DESCRIPTION)</th>
         <th style="width:16mm">จำนวน<br>(QTY)</th>
         <th style="width:14mm">หน่วย<br>(UNIT)</th>
@@ -202,6 +207,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
       {{$offset := .ItemOffset}}
       {{range $i, $item := .Items}}
       <tr>
+        <td class="c">{{add $offset (inc $i)}}</td>
         <td class="c mono">{{if $item.SKU}}{{$item.SKU}}{{else}}-{{end}}</td>
         <td>{{$item.Description}}</td>
         <td class="c">{{fmtQty $item.Quantity}}</td>
@@ -211,7 +217,7 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
         <td class="r mono" style="font-weight:600">{{money $item.Amount}}</td>
       </tr>
       {{end}}
-      {{range .FillerRows}}<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>{{end}}
+      {{range .FillerRows}}<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>{{end}}
     </tbody>
   </table>
 
@@ -219,23 +225,25 @@ body{font-family:'Sarabun','Tahoma',sans-serif;color:#000;font-size:10pt}
   <div class="bottom-area">
     <div class="bottom-left">
       <div class="payment-box">
-        <div class="payment-title">การชำระเงิน / PAYMENT METHOD</div>
-        <div class="pay-row"><span class="pay-check"></span> เงินสด (Cash) <span class="pay-fill"></span> บาท</div>
-        <div class="pay-row"><span class="pay-check"></span> โอนเงินเข้าบัญชี (Bank Transfer) <span class="pay-fill"></span> บาท</div>
-        {{if .Store.BankName}}<div class="pay-sub">ธนาคาร : {{.Store.BankName}}</div>{{end}}
-        {{if .Store.BankAccountNo}}<div class="pay-sub">เลขที่บัญชี : {{.Store.BankAccountNo}}</div>{{end}}
-        {{if .Store.BankAccountName}}<div class="pay-sub">ชื่อบัญชี : {{.Store.BankAccountName}}</div>{{end}}
-        <div class="pay-row"><span class="pay-check"></span> เครดิต (Credit) <span class="pay-fill"></span> บาท</div>
-        <div class="pay-row"><span class="pay-check"></span> เช็ค (Cheque) <span class="pay-fill"></span> บาท</div>
-        <div class="pay-sub">ผู้รับเงิน / Payee ___________________________</div>
-        <div class="pay-sub">วันที่ / Date ____________ ธนาคาร / Bank ____________</div>
-        <div class="pay-sub">เลขที่เช็ค / Cheque No. ___________________________</div>
-        <div class="pay-sub">ลงวันที่ / Cheque Date ___________________________</div>
+        <div class="payment-methods">
+          <div class="payment-title">การชำระเงิน / PAYMENT METHOD</div>
+          <div class="pay-row"><span class="pay-check"></span> เงินสด (Cash) <span class="pay-fill"></span> บาท</div>
+          <div class="pay-row"><span class="pay-check"></span> โอนเงินเข้าบัญชี (Bank Transfer) <span class="pay-fill"></span> บาท</div>
+          {{range .Store.BankAccounts}}
+          <div class="pay-sub bank-entry">{{.BankName}}&nbsp;&nbsp;<span class="mono">{{.AccountNo}}</span>{{if .AccountName}}&nbsp;({{.AccountName}}){{end}}</div>
+          {{end}}
+          <div class="pay-row"><span class="pay-check"></span> เครดิต (Credit) <span class="pay-fill"></span> บาท</div>
+          <div class="pay-row"><span class="pay-check"></span> เช็ค (Cheque) <span class="pay-fill"></span> บาท</div>
+          <div class="pay-sub">ผู้รับเงิน / Payee ___________________________</div>
+          <div class="pay-sub">วันที่ / Date ____________ ธนาคาร / Bank ____________</div>
+          <div class="pay-sub">เลขที่เช็ค / Cheque No. ___________________________</div>
+          <div class="pay-sub">ลงวันที่ / Cheque Date ___________________________</div>
+        </div>
         {{if .Doc.QRPaymentURL}}
-        <div style="text-align:center;margin-top:2mm"><img src="{{.Doc.QRPaymentURL}}" alt="QR" style="width:24mm;height:24mm"></div>
-        <div style="text-align:center;font-size:7pt;color:#555">สแกนเพื่อชำระเงิน</div>
-        {{else}}
-        <div class="qr-placeholder">สแกนเพื่อชำระเงิน</div>
+        <div class="payment-qr">
+          <img src="{{.Doc.QRPaymentURL}}" alt="QR PromptPay" style="width:26mm;height:26mm">
+          <div class="payment-qr-label">สแกน PromptPay<br>เพื่อชำระเงิน</div>
+        </div>
         {{end}}
       </div>
     </div>
