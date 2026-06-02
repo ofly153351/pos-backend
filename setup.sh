@@ -469,24 +469,49 @@ start_docker_services() {
 # install backend dependencies & build
 # ─────────────────────────────────────────────────────────────────────────────
 build_backend() {
-  step "Backend (Go modules + build check)"
+  step "Backend (Go build → bin/api)"
   cd "$BACKEND_DIR"
   info "Downloading Go modules..."
   go mod download >> "$LOG_FILE" 2>&1
-  info "Verifying build..."
-  go build ./... >> "$LOG_FILE" 2>&1
-  ok "Backend builds clean"
+  info "Building binary..."
+  mkdir -p bin
+  go build -o bin/api cmd/api.go >> "$LOG_FILE" 2>&1
+  ok "Backend binary: $BACKEND_DIR/bin/api"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# install frontend dependencies
+# install PM2 + frontend dependencies + production build
 # ─────────────────────────────────────────────────────────────────────────────
+install_pm2() {
+  step "PM2 (process manager)"
+  if command -v pm2 &>/dev/null; then
+    ok "PM2 $(pm2 --version) already installed"
+    return
+  fi
+  info "Installing PM2 globally..."
+  npm install -g pm2 >> "$LOG_FILE" 2>&1
+  ok "PM2 $(pm2 --version) installed"
+
+  # configure PM2 to auto-start on system boot (Linux only)
+  if [[ "$(uname)" != "Darwin" ]]; then
+    info "Configuring PM2 startup on boot..."
+    local startup_cmd
+    startup_cmd=$(pm2 startup 2>&1 | grep "sudo env PATH" || true)
+    if [[ -n "$startup_cmd" ]]; then
+      eval "$startup_cmd" >> "$LOG_FILE" 2>&1
+      ok "PM2 startup configured"
+    fi
+  fi
+}
+
 install_frontend_deps() {
-  step "Frontend (npm install)"
+  step "Frontend (npm install + production build)"
   cd "$FRONTEND_DIR"
   info "Installing npm packages..."
   npm install >> "$LOG_FILE" 2>&1
-  ok "npm packages installed"
+  info "Building Next.js for production..."
+  npm run build >> "$LOG_FILE" 2>&1
+  ok "Frontend built"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -572,106 +597,10 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# write start.sh helper
-# ─────────────────────────────────────────────────────────────────────────────
+# (start.sh / stop.sh are committed files — no need to generate them)
 write_start_script() {
-  step "Writing start.sh"
-  local fe_port be_port
-  fe_port=$(grep "^PORT=" "$FRONTEND_DIR/.env.local" 2>/dev/null | cut -d= -f2 || echo "3000")
-  be_port=$(grep "^APP_PORT=" "$BACKEND_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "8080")
-
-  local tunnel_section=""
-  if [[ "$WITH_TUNNEL" == true && -f "$SCRIPT_DIR/.tunnel_config" ]]; then
-    local tunnel_cfg
-    tunnel_cfg=$(head -1 "$SCRIPT_DIR/.tunnel_config")
-    local fe_url be_url
-    fe_url=$(sed -n '2p' "$SCRIPT_DIR/.tunnel_config")
-    be_url=$(sed -n '3p' "$SCRIPT_DIR/.tunnel_config")
-    tunnel_section="
-# ── Cloudflare Tunnel ───────────────────────────────────────────────
-echo '→  Starting Cloudflare Tunnel...'
-cloudflared tunnel --config ${tunnel_cfg} run &
-CF_PID=\$!
-echo \"✔  Tunnel started (PID \$CF_PID)\"
-echo \"    Frontend : https://${fe_url}\"
-echo \"    Backend  : https://${be_url}\"
-"
-  fi
-
-  cat > "$SCRIPT_DIR/start.sh" <<STARTEOF
-#!/usr/bin/env bash
-# POS System — start all services
-set -euo pipefail
-SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_DIR="\$SCRIPT_DIR/pos-backend"
-FRONTEND_DIR="\$SCRIPT_DIR/pos-frontend"
-
-# load nvm if available
-export NVM_DIR="\${NVM_DIR:-\$HOME/.nvm}"
-[[ -s "\$NVM_DIR/nvm.sh" ]] && source "\$NVM_DIR/nvm.sh"
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  POS System — starting up"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# ── Docker services ──────────────────────────────────────────────────
-echo '→  Starting Docker services (PostgreSQL + MinIO)...'
-cd "\$BACKEND_DIR"
-set -a; source .env; set +a
-docker compose up -d postgres minio minio-client
-until docker compose exec -T postgres pg_isready -U "\$POSTGRES_USER" -d "\$POSTGRES_DB" &>/dev/null; do sleep 1; done
-echo '✔  PostgreSQL ready'
-
-# ── Backend ──────────────────────────────────────────────────────────
-echo '→  Starting Go backend...'
-cd "\$BACKEND_DIR"
-go run cmd/api.go > /tmp/pos-backend.log 2>&1 &
-BE_PID=\$!
-sleep 3
-if ! kill -0 "\$BE_PID" 2>/dev/null; then
-  echo '✖  Backend failed to start. See /tmp/pos-backend.log'
-  exit 1
-fi
-echo "✔  Backend running (PID \$BE_PID) — http://localhost:${be_port}"
-
-# ── Frontend ─────────────────────────────────────────────────────────
-echo '→  Starting Next.js frontend...'
-cd "\$FRONTEND_DIR"
-npm run dev > /tmp/pos-frontend.log 2>&1 &
-FE_PID=\$!
-sleep 5
-echo "✔  Frontend running (PID \$FE_PID) — http://localhost:${fe_port}"
-${tunnel_section}
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  All services started!"
-echo "  Backend  : http://localhost:${be_port}"
-echo "  Frontend : http://localhost:${fe_port}"
-echo ""
-echo "  Logs:"
-echo "    Backend  → /tmp/pos-backend.log"
-echo "    Frontend → /tmp/pos-frontend.log"
-echo ""
-echo "  To stop all: ./stop.sh"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# keep script alive so Ctrl+C stops everything
-wait
-STARTEOF
-
-  cat > "$SCRIPT_DIR/stop.sh" <<'STOPEOF'
-#!/usr/bin/env bash
-echo "Stopping POS services..."
-pkill -f "go run cmd/api.go" 2>/dev/null && echo "✔  Backend stopped" || true
-pkill -f "next dev"           2>/dev/null && echo "✔  Frontend stopped" || true
-pkill -f "cloudflared tunnel" 2>/dev/null && echo "✔  Tunnel stopped" || true
-cd "$(dirname "$0")/pos-backend" && docker compose down 2>/dev/null && echo "✔  Docker services stopped" || true
-STOPEOF
-
-  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh"
-  ok "start.sh and stop.sh created"
+  chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/stop.sh" 2>/dev/null || true
+  ok "start.sh and stop.sh ready (PM2-based)"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -747,6 +676,7 @@ main() {
   install_docker
   install_go
   install_node
+  install_pm2
   [[ "$WITH_TUNNEL" == true ]]    && install_cloudflared
   [[ "$WITH_TAILSCALE" == true ]] && install_tailscale
   setup_backend_env
