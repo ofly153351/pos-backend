@@ -52,6 +52,7 @@ const (
 	PrefixParkedBillItem        = "pkbi"
 	PrefixStockMovement         = "sm"
 	PrefixStoreBankAccount      = "sba"
+	PrefixActivityLog           = "al"
 )
 
 // Generate returns {prefix}-{8-digit number}, e.g. "pd-30144739".

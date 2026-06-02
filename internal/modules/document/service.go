@@ -118,10 +118,19 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		Address  string
 		Phone    string
 	}
-	if err := s.db.Raw(
-		"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
-		req.CustomerID, storeID,
-	).Scan(&cust).Error; err != nil || cust.FullName == "" {
+	if req.CustomerID != "" {
+		if err := s.db.Raw(
+			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
+			req.CustomerID, storeID,
+		).Scan(&cust).Error; err != nil || cust.FullName == "" {
+			return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
+		}
+	} else if req.CustomerNameOverride != "" {
+		// Walk-in / receipt scenario: use name/address/phone provided directly
+		cust.FullName = req.CustomerNameOverride
+		cust.Address = req.CustomerAddressOverride
+		cust.Phone = req.CustomerPhoneOverride
+	} else {
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
 	}
 

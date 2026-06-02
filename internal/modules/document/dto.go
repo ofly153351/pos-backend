@@ -6,7 +6,10 @@ import "time"
 
 type CreateDocumentRequest struct {
 	Type         DocumentType              `json:"type"`
-	CustomerID   string                    `json:"customer_id"`
+	CustomerID       string `json:"customer_id"`
+	CustomerNameOverride    string `json:"customer_name,omitempty"`
+	CustomerAddressOverride string `json:"customer_address,omitempty"`
+	CustomerPhoneOverride   string `json:"customer_phone,omitempty"`
 	DocumentDate string                    `json:"document_date"` // YYYY-MM-DD
 	DueDate      *string                   `json:"due_date,omitempty"`
 	ValidUntil      *string                   `json:"valid_until,omitempty"`

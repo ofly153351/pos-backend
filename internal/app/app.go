@@ -5,6 +5,7 @@ import (
 
 	"pos-backend/internal/config"
 	"pos-backend/internal/middleware"
+	"pos-backend/internal/modules/activity_log"
 	"pos-backend/internal/modules/auth"
 )
 
@@ -33,6 +34,7 @@ type appDependencies struct {
 	warehouseReceiptHandler   any
 	receiptSettingsHandler    any
 	documentHandler           any
+	activityLogHandler        activity_log.Handler
 }
 
 func registerBaseRoutes(app *fiber.App, cfg config.Config) {
@@ -52,6 +54,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerAuthRoutes(api, deps)
 
 	protected := api.Group("", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo))
+	protected.Use(middleware.ActivityLog(deps.activityLogHandler.Service()))
 	registerProtectedAuthRoutes(protected, deps)
 	registerStoreRoutes(protected, deps)
 	registerProductTypeRoutes(protected, deps)
@@ -74,6 +77,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerWarehouseReceiptRoutes(protected, deps)
 	registerReceiptSettingsRoutes(protected, deps)
 	registerDocumentRoutes(protected, deps)
+	registerActivityLogRoutes(protected, deps)
 
 	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo), middleware.RequireRoles(auth.RolePlatformAdmin))
 	registerAdminSubscriptionRoutes(admin, deps)
