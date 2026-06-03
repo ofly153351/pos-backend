@@ -20,7 +20,7 @@ func (r *fakeProductRepo) Create(ctx context.Context, product productmodule.Prod
 	r.product = product
 	return product, nil
 }
-func (r *fakeProductRepo) ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus string) ([]productmodule.Product, int64, error) {
+func (r *fakeProductRepo) ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus, sortBy string) ([]productmodule.Product, int64, error) {
 	return []productmodule.Product{r.product}, 1, nil
 }
 func (r *fakeProductRepo) GetByID(ctx context.Context, storeID, productID string) (productmodule.Product, error) {

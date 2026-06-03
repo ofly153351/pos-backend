@@ -2,6 +2,7 @@ package vat
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -32,11 +33,13 @@ func (h Handler) Calculate(c *fiber.Ctx) error {
 }
 
 func writeVATError(c *fiber.Ctx, err error) error {
-	if errors.Is(err, ErrNoItemsProvided) {
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	switch {
+	case errors.Is(err, ErrNoItemsProvided):
+		return httpx.Err422(c, "items", err.Error())
+	case errors.Is(err, ErrForbiddenStoreAccess):
+		return httpx.ErrForbidden(c, err.Error())
+	default:
+		log.Printf("[vat] internal error: %v", err)
+		return httpx.ErrInternal(c)
 	}
-	if errors.Is(err, ErrForbiddenStoreAccess) {
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	}
-	return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 }

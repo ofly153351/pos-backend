@@ -2,6 +2,7 @@ package purchasing
 
 import (
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 
@@ -209,31 +210,31 @@ func (h Handler) CreateSupplierProductWithNewProduct(c *fiber.Ctx) error {
 
 func writePurchasingError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrSupplierNameRequired),
-		errors.Is(err, ErrSupplierStoreIDReq),
-		errors.Is(err, ErrPOStoreIDRequired),
-		errors.Is(err, ErrPOInvalidStatus),
-		errors.Is(err, ErrPOItemsRequired),
-		errors.Is(err, ErrPOInvalidQuantity),
-		errors.Is(err, ErrPOInvalidUnitCost),
-		errors.Is(err, ErrPOReceiveInvalidQty),
-		errors.Is(err, ErrSupplierProductRequired),
-		errors.Is(err, ErrSupplierProductNameReq):
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-	case errors.Is(err, ErrSupplierForbidden),
-		errors.Is(err, ErrPOForbidden):
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	case errors.Is(err, ErrSupplierNotFound),
-		errors.Is(err, ErrPONotFound),
-		errors.Is(err, ErrPOProductNotFound),
-		errors.Is(err, ErrSupplierProductNotFound):
-		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-	case errors.Is(err, ErrPOAlreadyCompleted),
-		errors.Is(err, ErrPOAlreadyCancelled),
+	case errors.Is(err, ErrSupplierNameRequired):
+		return httpx.Err422(c, "name", err.Error())
+	case errors.Is(err, ErrSupplierProductNameReq):
+		return httpx.Err422(c, "product_name", err.Error())
+	case errors.Is(err, ErrSupplierProductRequired):
+		return httpx.Err422(c, "product_id", err.Error())
+	case errors.Is(err, ErrPOItemsRequired):
+		return httpx.Err422(c, "items", err.Error())
+	case errors.Is(err, ErrPOInvalidQuantity), errors.Is(err, ErrPOReceiveInvalidQty):
+		return httpx.Err422(c, "quantity", err.Error())
+	case errors.Is(err, ErrPOInvalidUnitCost):
+		return httpx.Err422(c, "unit_cost", err.Error())
+	case errors.Is(err, ErrPOInvalidStatus), errors.Is(err, ErrSupplierStoreIDReq), errors.Is(err, ErrPOStoreIDRequired):
+		return httpx.ErrBadRequest(c, err.Error())
+	case errors.Is(err, ErrSupplierForbidden), errors.Is(err, ErrPOForbidden):
+		return httpx.ErrForbidden(c, err.Error())
+	case errors.Is(err, ErrSupplierNotFound), errors.Is(err, ErrPONotFound),
+		errors.Is(err, ErrPOProductNotFound), errors.Is(err, ErrSupplierProductNotFound):
+		return httpx.ErrNotFound(c, err.Error())
+	case errors.Is(err, ErrPOAlreadyCompleted), errors.Is(err, ErrPOAlreadyCancelled),
 		errors.Is(err, ErrSupplierProductExists):
-		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+		return httpx.ErrConflict(c, err.Error())
 	default:
-		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+		log.Printf("[purchasing] internal error: %v", err)
+		return httpx.ErrInternal(c)
 	}
 }
 

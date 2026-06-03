@@ -87,27 +87,37 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 
 func writeProductError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidProductName), errors.Is(err, ErrInvalidMinStock), errors.Is(err, ErrInvalidMaxStock), errors.Is(err, ErrInvalidBasePrice), errors.Is(err, ErrInvalidSpecialPrice), errors.Is(err, ErrInvalidSpecialPriceDate), errors.Is(err, ErrInvalidProductTypeID), errors.Is(err, ErrInvalidProductUnitID), errors.Is(err, ErrInvalidBrandID), errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrInvalidStockStatus):
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrInvalidProductName):
+		return httpx.Err422(c, "name", err.Error())
+	case errors.Is(err, ErrInvalidBasePrice):
+		return httpx.Err422(c, "base_price", err.Error())
+	case errors.Is(err, ErrInvalidMinStock):
+		return httpx.Err422(c, "min_stock", err.Error())
+	case errors.Is(err, ErrInvalidMaxStock):
+		return httpx.Err422(c, "max_stock", err.Error())
+	case errors.Is(err, ErrInvalidSpecialPrice):
+		return httpx.Err422(c, "special_price", err.Error())
+	case errors.Is(err, ErrInvalidSpecialPriceDate):
+		return httpx.Err422(c, "special_price_end", err.Error())
+	case errors.Is(err, ErrInvalidProductTypeID):
+		return httpx.Err422(c, "product_type_id", err.Error())
+	case errors.Is(err, ErrInvalidProductUnitID):
+		return httpx.Err422(c, "product_unit_id", err.Error())
+	case errors.Is(err, ErrInvalidBrandID):
+		return httpx.Err422(c, "brand_id", err.Error())
+	case errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrInvalidStockStatus):
+		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+		return httpx.ErrForbidden(c, err.Error())
 	case errors.Is(err, ErrProductNotFound):
-		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		return httpx.ErrNotFound(c, err.Error())
 	case errors.Is(err, ErrProductInUse):
-		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+		return httpx.ErrConflict(c, err.Error())
 	default:
 		claims := middleware.ClaimsFromContext(c)
-		log.Printf(
-			"[product] internal error: method=%s path=%s store_id=%s product_id=%s user_id=%s role=%s err=%v",
-			c.Method(),
-			c.Path(),
-			c.Params("storeID"),
-			c.Params("productID"),
-			claims.UserID,
-			claims.Role,
-			err,
-		)
-		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+		log.Printf("[product] internal error: method=%s path=%s store=%s product=%s user=%s err=%v",
+			c.Method(), c.Path(), c.Params("storeID"), c.Params("productID"), claims.UserID, err)
+		return httpx.ErrInternal(c)
 	}
 }
 

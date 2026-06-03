@@ -2,6 +2,7 @@ package sale
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -69,13 +70,32 @@ func (h Handler) ReceiptPreview(c *fiber.Ctx) error {
 
 func writeSaleError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidBillDiscount), errors.Is(err, ErrBillDiscountExceedsAmount), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrInvalidVATPercent), errors.Is(err, ErrAmountDiscountExceedsPrice), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem):
+		return httpx.Err422(c, "items", err.Error())
+	case errors.Is(err, ErrInvalidPaymentMethod):
+		return httpx.Err422(c, "payment_method", err.Error())
+	case errors.Is(err, ErrInvalidPaidAmount):
+		return httpx.Err422(c, "paid_amount", err.Error())
+	case errors.Is(err, ErrInvalidBillDiscount), errors.Is(err, ErrBillDiscountExceedsAmount):
+		return httpx.Err422(c, "bill_discount_value", err.Error())
+	case errors.Is(err, ErrInvalidDiscountType):
+		return httpx.Err422(c, "discount_type", err.Error())
+	case errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue),
+		errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceedsPrice):
+		return httpx.Err422(c, "discount_value", err.Error())
+	case errors.Is(err, ErrInvalidVATPercent):
+		return httpx.Err422(c, "vat_percent", err.Error())
+	case errors.Is(err, ErrProductInactive):
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrInsufficientStock):
+		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	case errors.Is(err, ErrSaleNotFound), errors.Is(err, ErrCustomerNotFound), errors.Is(err, customer.ErrCustomerNotFound):
-		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		return httpx.ErrForbidden(c, err.Error())
+	case errors.Is(err, ErrSaleNotFound), errors.Is(err, ErrCustomerNotFound),
+		errors.Is(err, customer.ErrCustomerNotFound), errors.Is(err, ErrProductNotFound):
+		return httpx.ErrNotFound(c, err.Error())
 	default:
-		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+		log.Printf("[sale] internal error: %v", err)
+		return httpx.ErrInternal(c)
 	}
 }

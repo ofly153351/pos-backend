@@ -41,6 +41,18 @@ func (r *fakeStoreRepo) UserCanManageStore(ctx context.Context, storeID, userID,
 	return true, nil
 }
 
+func (r *fakeStoreRepo) ListBankAccounts(ctx context.Context, storeID string) ([]storemodule.StoreBankAccount, error) {
+	return nil, nil
+}
+
+func (r *fakeStoreRepo) CreateBankAccount(ctx context.Context, acc storemodule.StoreBankAccount) (storemodule.StoreBankAccount, error) {
+	return acc, nil
+}
+
+func (r *fakeStoreRepo) DeleteBankAccount(ctx context.Context, storeID, id string) error {
+	return nil
+}
+
 type fakeLogoStorage struct {
 	saveURL   string
 	deleted   []string

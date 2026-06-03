@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"errors"
+	"log"
 	"fmt"
 	"strconv"
 	"strings"
@@ -98,14 +99,35 @@ func (h Handler) ExportPDF(c *fiber.Ctx) error {
 
 func writeInvoiceError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidInvoiceItems), errors.Is(err, ErrInvalidInvoiceItem), errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrInvalidPaymentMethod), errors.Is(err, ErrInvalidProofFileType), errors.Is(err, ErrInvalidProofFileSize), errors.Is(err, ErrInvalidVATPercent), errors.Is(err, ErrInvalidUnpayReason), errors.Is(err, ErrInvalidDiscountType), errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue), errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceeds), errors.Is(err, ErrProductNotFound), errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrInvoiceAlreadyPaid), errors.Is(err, ErrInvoiceAlreadyUnpaid), errors.Is(err, ErrPaymentExceedsRemaining):
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrInvalidInvoiceItems), errors.Is(err, ErrInvalidInvoiceItem):
+		return httpx.Err422(c, "items", err.Error())
+	case errors.Is(err, ErrInvalidPaidAmount), errors.Is(err, ErrPaymentExceedsRemaining):
+		return httpx.Err422(c, "paid_amount", err.Error())
+	case errors.Is(err, ErrInvalidPaymentMethod):
+		return httpx.Err422(c, "payment_method", err.Error())
+	case errors.Is(err, ErrInvalidProofFileType), errors.Is(err, ErrInvalidProofFileSize):
+		return httpx.Err422(c, "proof", err.Error())
+	case errors.Is(err, ErrInvalidVATPercent):
+		return httpx.Err422(c, "vat_percent", err.Error())
+	case errors.Is(err, ErrInvalidUnpayReason):
+		return httpx.Err422(c, "reason", err.Error())
+	case errors.Is(err, ErrInvalidDiscountType):
+		return httpx.Err422(c, "discount_type", err.Error())
+	case errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue),
+		errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceeds):
+		return httpx.Err422(c, "discount_value", err.Error())
+	case errors.Is(err, ErrInvoiceAlreadyPaid), errors.Is(err, ErrInvoiceAlreadyUnpaid):
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
+		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
-	case errors.Is(err, ErrInvoiceNotFound), errors.Is(err, ErrCustomerNotFound), errors.Is(err, ErrPaymentProofNotFound):
-		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		return httpx.ErrForbidden(c, err.Error())
+	case errors.Is(err, ErrInvoiceNotFound), errors.Is(err, ErrCustomerNotFound),
+		errors.Is(err, ErrPaymentProofNotFound), errors.Is(err, ErrProductNotFound):
+		return httpx.ErrNotFound(c, err.Error())
 	default:
-		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+		log.Printf("[invoice] internal error: %v", err)
+		return httpx.ErrInternal(c)
 	}
 }
 

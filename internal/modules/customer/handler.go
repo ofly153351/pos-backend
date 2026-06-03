@@ -2,6 +2,7 @@ package customer
 
 import (
 	"errors"
+	"log"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -115,13 +116,22 @@ func (h Handler) DeleteLevelDiscount(c *fiber.Ctx) error {
 
 func writeCustomerError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrInvalidCustomerName), errors.Is(err, ErrInvalidCustomerEmail), errors.Is(err, ErrCustomerStoreIDRequired), errors.Is(err, ErrInvalidLevel), errors.Is(err, ErrInvalidDiscountPercent):
-		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrInvalidCustomerName):
+		return httpx.Err422(c, "full_name", err.Error())
+	case errors.Is(err, ErrInvalidCustomerEmail):
+		return httpx.Err422(c, "email", err.Error())
+	case errors.Is(err, ErrInvalidLevel):
+		return httpx.Err422(c, "level", err.Error())
+	case errors.Is(err, ErrInvalidDiscountPercent):
+		return httpx.Err422(c, "discount_percent", err.Error())
+	case errors.Is(err, ErrCustomerStoreIDRequired):
+		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrCustomerForbidden):
-		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+		return httpx.ErrForbidden(c, err.Error())
 	case errors.Is(err, ErrCustomerNotFound):
-		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		return httpx.ErrNotFound(c, err.Error())
 	default:
-		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+		log.Printf("[customer] internal error: %v", err)
+		return httpx.ErrInternal(c)
 	}
 }

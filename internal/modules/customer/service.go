@@ -199,6 +199,20 @@ func normalizeEmail(email string) (string, error) {
 	return value, nil
 }
 
+// ValidateCustomerInput exposes the core validation rules for testing without DB access.
+func (s Service) ValidateCustomerInput(fullName, email string, level int) error {
+	if strings.TrimSpace(fullName) == "" {
+		return ErrInvalidCustomerName
+	}
+	if _, err := normalizeEmail(email); err != nil {
+		return err
+	}
+	if level <= 0 {
+		return ErrInvalidLevel
+	}
+	return nil
+}
+
 type SaleBenefitResolver struct {
 	repo Repository
 }
