@@ -11,7 +11,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR"
 FRONTEND_DIR="$(dirname "$SCRIPT_DIR")/pos-frontend"
-TUNNEL_CONFIG="$HOME/.cloudflared/pos-config.yml"
+TUNNEL_CONFIG="$HOME/.cloudflared/config.yml"
+
+# ── Git credentials (token stored in ~/.git-credentials via credential.helper store)
+GITHUB_USER="ofly153351"
+GITHUB_TOKEN_FILE="$HOME/.github_token"   # token เก็บแยกไฟล์ ไม่ hard-code ใน script
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -51,6 +55,37 @@ command -v docker      &>/dev/null || die "docker ไม่ได้ติดต
 command -v go          &>/dev/null || die "go ไม่ได้ติดตั้ง — รัน setup.sh ก่อน"
 command -v node        &>/dev/null || die "node ไม่ได้ติดตั้ง — รัน setup.sh ก่อน"
 command -v pm2         &>/dev/null || die "pm2 ไม่ได้ติดตั้ง — รัน: npm install -g pm2"
+[[ -f "$GITHUB_TOKEN_FILE" ]] || die "ไม่พบ token file ที่ $GITHUB_TOKEN_FILE — รัน: echo 'ghp_xxx' > $GITHUB_TOKEN_FILE && chmod 600 $GITHUB_TOKEN_FILE"
+
+ok "ทุกอย่างพร้อม"
+
+# ── 1. Git pull latest code ──────────────────────────────────────────────────
+step "Git pull (backend + frontend)"
+
+GITHUB_TOKEN="$(cat "$GITHUB_TOKEN_FILE" | tr -d '[:space:]')"
+
+# ตั้ง remote URL พร้อม token ชั่วคราว (ไม่เขียนลง config ถาวร)
+_be_remote=$(git -C "$BACKEND_DIR"  remote get-url origin 2>/dev/null || echo "")
+_fe_remote=$(git -C "$FRONTEND_DIR" remote get-url origin 2>/dev/null || echo "")
+
+_inject_token() {
+  local url="$1"
+  # แทน https://github.com/ → https://user:token@github.com/
+  echo "$url" | sed "s|https://|https://${GITHUB_USER}:${GITHUB_TOKEN}@|"
+}
+
+git -C "$BACKEND_DIR"  remote set-url origin "$(_inject_token "$_be_remote")"
+git -C "$FRONTEND_DIR" remote set-url origin "$(_inject_token "$_fe_remote")"
+
+info "Pulling pos-backend..."
+git -C "$BACKEND_DIR"  pull --ff-only origin fix-of/dev && ok "pos-backend updated"
+
+info "Pulling pos-frontend..."
+git -C "$FRONTEND_DIR" pull --ff-only origin fix-of/dev && ok "pos-frontend updated"
+
+# คืน remote URL กลับเป็นแบบไม่มี token (ปลอดภัย)
+git -C "$BACKEND_DIR"  remote set-url origin "$_be_remote"
+git -C "$FRONTEND_DIR" remote set-url origin "$_fe_remote"
 command -v cloudflared &>/dev/null || die "cloudflared ไม่ได้ติดตั้ง — รัน setup.sh ก่อน"
 [[ -f "$TUNNEL_CONFIG" ]] || die "ไม่พบ tunnel config ที่ $TUNNEL_CONFIG — รัน setup.sh --tunnel ก่อน"
 
