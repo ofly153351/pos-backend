@@ -48,11 +48,7 @@ func (r PostgresRepository) CreateParkedBill(ctx context.Context, bill *ParkedBi
 		"vat_percent":              bill.VATPercent,
 		"created_at":               bill.CreatedAt,
 	}
-	if bill.Note == "" {
-		payload["note"] = nil
-	} else {
-		payload["note"] = bill.Note
-	}
+	payload["note"] = bill.Note
 	if bill.CustomerID == "" {
 		payload["customer_id"] = nil
 	} else {
