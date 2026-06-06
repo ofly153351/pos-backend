@@ -6,12 +6,8 @@ import (
 	"html/template"
 	"math"
 	"os"
-	"regexp"
 	"strings"
 	"time"
-
-	"github.com/skip2/go-qrcode"
-	"encoding/base64"
 
 	"pos-backend/internal/modules/auth"
 	"pos-backend/internal/platform/receipthtml"
@@ -45,7 +41,7 @@ func defaultSettings() ReceiptSettingsView {
 		ShowStoreName: true, ShowAddress: true, ShowPhone: true, ShowTaxId: true,
 		TaxMode: "exclusive", VatRate: 7, TaxLabel: "ภาษีมูลค่าเพิ่ม (VAT 7%)",
 		FooterText: "ขอบคุณที่ใช้บริการ",
-		ShowQr: true, QrSize: "medium", PaperSize: "58mm",
+		ShowQr: true, QrSize: "medium", PaperSize: "80mm",
 	}
 }
 
@@ -127,10 +123,15 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 	promptPayQR := ""
 	// Only generate QR when: setting enabled + ID present + generated URI is non-empty
 	if sv.ShowQr && promptPayID != "" {
-		uri := buildPromptPayQRDataURI(promptPayID, grandTotal)
+		uri := receipthtml.PromptPayQRDataURI(promptPayID, grandTotal)
 		if uri != "" {
 			promptPayQR = uri
 		}
+	}
+
+	totalQty := 0
+	for _, it := range items {
+		totalQty += it.Qty
 	}
 
 	sale := receipthtml.SaleData{
@@ -139,6 +140,7 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		CustomerName:   customerName,
 		Staff:          fallback(staff, "-"),
 		Items:          items,
+		TotalQty:       totalQty,
 		Subtotal:       roundMoney(s.SubtotalAmount),
 		DiscountTotal:  discountTotal,
 		AfterDiscount:  afterDiscount,
@@ -146,6 +148,9 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		GrandTotal:     grandTotal,
 		GrandTotalText: formatThaiBahtText(grandTotal),
 		PaymentMethod:  fallback(s.PaymentMethod, "-"),
+		PaymentLabel:   receipthtml.PaymentLabel(s.PaymentMethod),
+		Paid:           roundMoney(s.PaidAmount),
+		Change:         roundMoney(s.ChangeAmount),
 		PromptPayQRURI: template.URL(promptPayQR),
 	}
 
@@ -153,8 +158,9 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		Name:        fallback(s.StoreName, "-"),
 		Address:     fallback(s.StoreAddress, "-"),
 		Phone:       fallback(s.StorePhone, "-"),
-		TaxID:       fallback(os.Getenv("APP_STORE_TAX_ID"), "-"),
+		TaxID:       fallback(s.StoreTaxID, fallback(os.Getenv("APP_STORE_TAX_ID"), "-")),
 		PromptPayID: promptPayID,
+		LogoURL:     strings.TrimSpace(s.StoreLogoURL),
 	}
 
 	cfg := receipthtml.Config{
@@ -256,80 +262,3 @@ func fallback(v, d string) string {
 	return v
 }
 
-var nonDigitRegex = regexp.MustCompile(`\D`)
-
-func buildPromptPayQRDataURI(promptPayID string, amount float64) string {
-	payload := buildPromptPayPayload(promptPayID, amount)
-	if payload == "" {
-		return ""
-	}
-	png, err := qrcode.Encode(payload, qrcode.Medium, 256)
-	if err != nil {
-		return ""
-	}
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
-}
-
-func buildPromptPayPayload(promptPayID string, amount float64) string {
-	id := normalizePromptPayID(promptPayID)
-	if id == "" {
-		return ""
-	}
-	merchantInfo := ""
-	switch len(id) {
-	case 13:
-		if strings.HasPrefix(id, "0066") {
-			merchantInfo = formatEMV("29", formatEMV("00", "A000000677010111")+formatEMV("01", id))
-		} else {
-			merchantInfo = formatEMV("29", formatEMV("00", "A000000677010111")+formatEMV("02", id))
-		}
-	case 15:
-		merchantInfo = formatEMV("29", formatEMV("00", "A000000677010111")+formatEMV("03", id))
-	default:
-		return ""
-	}
-	amountValue := ""
-	if amount > 0 {
-		amountValue = formatEMV("54", fmt.Sprintf("%.2f", amount))
-	}
-	raw := "000201" + "010211" + merchantInfo + "5802TH" + "5303764" + amountValue + "6304"
-	crc := crc16CCITT(raw)
-	return raw + strings.ToUpper(fmt.Sprintf("%04X", crc))
-}
-
-func normalizePromptPayID(input string) string {
-	digits := nonDigitRegex.ReplaceAllString(strings.TrimSpace(input), "")
-	if digits == "" {
-		return ""
-	}
-	if len(digits) == 13 && strings.HasPrefix(digits, "0066") {
-		return digits
-	}
-	if len(digits) == 11 && strings.HasPrefix(digits, "66") {
-		return "00" + digits
-	}
-	if len(digits) == 10 && strings.HasPrefix(digits, "0") {
-		return "0066" + digits[1:]
-	}
-	return digits
-}
-
-func formatEMV(tag, value string) string {
-	return tag + fmt.Sprintf("%02d", len(value)) + value
-}
-
-func crc16CCITT(s string) uint16 {
-	const poly uint16 = 0x1021
-	var crc uint16 = 0xFFFF
-	for i := 0; i < len(s); i++ {
-		crc ^= uint16(s[i]) << 8
-		for bit := 0; bit < 8; bit++ {
-			if crc&0x8000 != 0 {
-				crc = (crc << 1) ^ poly
-			} else {
-				crc <<= 1
-			}
-		}
-	}
-	return crc
-}

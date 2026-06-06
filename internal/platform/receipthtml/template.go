@@ -47,19 +47,23 @@ type SaleItem struct {
 
 // SaleData is the sale record used for rendering.
 type SaleData struct {
-	OrderNo          string
-	DateTime         string
-	CustomerName     string
-	Staff            string
-	Items            []SaleItem
-	Subtotal         float64
-	DiscountTotal    float64
-	AfterDiscount    float64
-	VatAmount        float64
-	GrandTotal       float64
-	GrandTotalText   string
-	PaymentMethod    string
-	PromptPayQRURI   template.URL // data:image/png;base64,... or "" — must be template.URL to avoid #ZgotmplZ sanitization
+	OrderNo        string
+	DateTime       string
+	CustomerName   string
+	Staff          string
+	Items          []SaleItem
+	TotalQty       int // sum of all item quantities (ชิ้น)
+	Subtotal       float64
+	DiscountTotal  float64
+	AfterDiscount  float64
+	VatAmount      float64
+	GrandTotal     float64
+	GrandTotalText string
+	PaymentMethod  string
+	PaymentLabel   string  // Thai display label (เงินสด / พร้อมเพย์)
+	Paid           float64 // amount received
+	Change         float64 // change given
+	PromptPayQRURI template.URL // data:image/png;base64,... or "" — must be template.URL to avoid #ZgotmplZ sanitization
 }
 
 func qrWidth(size string) int {
@@ -75,12 +79,64 @@ func qrWidth(size string) int {
 
 func printWidth(paperSize string) string {
 	switch paperSize {
-	case "80mm":
-		return "80mm"
 	case "a4":
 		return "210mm"
+	default: // "80mm" and anything else
+		return "80mm"
+	}
+}
+
+// paperWidth returns the on-screen/render width of the receipt body.
+func paperWidth(paperSize string) string {
+	switch paperSize {
+	case "a4":
+		return "190mm"
+	default: // 80mm thermal
+		return "80mm"
+	}
+}
+
+// formatThousands formats a float as "1,234.56" with comma thousands separators.
+func formatThousands(v float64) string {
+	s := fmt.Sprintf("%.2f", v)
+	intPart, decPart := s, ""
+	if dot := strings.IndexByte(s, '.'); dot >= 0 {
+		intPart, decPart = s[:dot], s[dot:]
+	}
+	neg := strings.HasPrefix(intPart, "-")
+	if neg {
+		intPart = intPart[1:]
+	}
+	var b strings.Builder
+	n := len(intPart)
+	for i, c := range intPart {
+		if i > 0 && (n-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	out := b.String() + decPart
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
+// PaymentLabel maps a payment-method code to a Thai display label.
+func PaymentLabel(method string) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "cash":
+		return "เงินสด"
+	case "promptpay", "qr", "transfer":
+		return "พร้อมเพย์ / โอน"
+	case "card", "credit", "debit":
+		return "บัตรเครดิต / เดบิต"
+	case "truemoney":
+		return "TrueMoney"
+	case "":
+		return "-"
 	default:
-		return "58mm"
+		return method
 	}
 }
 
@@ -89,144 +145,177 @@ const receiptTpl = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ใบเสร็จ {{.Sale.OrderNo}}</title>
+<title>ใบเสร็จรับเงิน — {{.Sale.OrderNo}}</title>
 <style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: #ffffff;
-    color: #1f2933;
-    font-family: "Noto Sans Thai", "Tahoma", Arial, sans-serif;
-    font-size: 11px;
-    line-height: 1.35;
+  *{box-sizing:border-box;margin:0;padding:0}
+
+  body{
+    font-family:'Sarabun','Noto Sans Thai','Tahoma',sans-serif;
+    color:#000;
+    -webkit-font-smoothing:antialiased;
   }
-  .receipt {
-    width: 360px;
-    margin: 0 auto;
-    padding: 28px 24px 26px;
-    background: #ffffff;
+
+  @media screen{
+    body{background:#fff}
   }
-  .center { text-align: center; }
-  .right  { text-align: right; }
-  .muted  { color: #606975; }
-  .logo-wrap { margin-bottom: 10px; }
-  .logo-wrap img { width: 60px; height: 60px; object-fit: contain; border-radius: 8px; }
-  .logo-center { text-align: center; }
-  .logo-left   { text-align: left; }
-  .logo-right  { text-align: right; }
-  .store-name  { color: #111827; font-size: 17px; font-weight: 700; line-height: 1.25; margin-bottom: 4px; }
-  .store-meta  { font-size: 10.5px; line-height: 1.45; }
-  .doc-title   { margin-top: 20px; color: #111827; font-size: 18px; font-weight: 700; line-height: 1.2; }
-  .doc-subtitle{ margin-top: 2px; color: #6b7280; font-size: 11px; }
-  .meta        { margin-top: 16px; display: grid; gap: 4px; }
-  .meta-row    { display: grid; grid-template-columns: 72px 1fr; column-gap: 8px; }
-  .meta-pair   { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
-  .meta-pair .meta-row:last-child { grid-template-columns: 54px 1fr; }
-  .divider     { border-top: 1px solid #d9dde3; margin: 16px 0 10px; }
-  table        { width: 100%; border-collapse: collapse; }
-  th, td       { vertical-align: top; }
-  th           { color: #606975; font-size: 10.5px; font-weight: 600; padding: 0 0 7px; border-bottom: 1px solid #d9dde3; }
-  td           { padding: 6px 0; border-bottom: 1px solid #eef0f3; }
-  .item-name   { width: 47%; }
-  .qty         { width: 14%; text-align: center; }
-  .money-col   { width: 19.5%; text-align: right; white-space: nowrap; }
-  .summary     { margin-top: 10px; display: grid; gap: 6px; }
-  .summary-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
-  .summary-total { margin-top: 2px; padding-top: 8px; border-top: 1px solid #d9dde3; color: #111827; font-size: 13px; font-weight: 700; }
-  .footer-note { margin-top: 16px; padding: 8px 10px; border-radius: 8px; background: #f3f4f6; color: #374151; text-align: center; font-size: 11px; white-space: pre-line; }
-  .qr-block    { margin-top: 16px; }
-  .qr-block img { width: {{.QrWidth}}px; height: {{.QrWidth}}px; }
-  @media print {
-    @page { margin: 0; size: {{.PrintWidth}} auto; }
-    body { background: #ffffff; }
-    .receipt { width: {{.PrintWidth}}; padding: 7mm 6mm; }
+
+  @media print{
+    body{background:#fff}
+    @page{size:{{.PrintWidth}} auto;margin:0}
   }
+
+  .receipt{
+    width:{{.PaperWidth}};
+    margin:0 auto;
+    padding:5mm 4mm 6mm;
+    font-size:12.5px;
+    line-height:1.45;
+    background:#fff;
+  }
+
+  /* Header */
+  .center{text-align:center}
+  .logo-wrap{margin-bottom:6px}
+  .logo-wrap img{max-height:48px;max-width:140px;object-fit:contain}
+  .logo-left{text-align:left}
+  .logo-right{text-align:right}
+  .store-name{font-size:20px;font-weight:800;letter-spacing:.3px;margin-bottom:2px}
+  .store-meta{font-size:12px;line-height:1.5}
+
+  .divider{border:none;border-top:1.5px dashed #000;margin:7px 0}
+
+  .doc-title{font-size:16px;font-weight:800;margin-bottom:1px}
+  .doc-title-en{font-size:12px;font-weight:400;color:#222}
+
+  /* Info rows */
+  .info{font-size:12.5px}
+  .info-row{display:flex;margin-bottom:2px}
+  .info-label{width:64px;flex-shrink:0;font-weight:600}
+  .info-value{flex:1;word-break:break-word}
+  .mono{font-variant-numeric:tabular-nums}
+
+  /* Items */
+  .item{padding:5px 0;border-bottom:1px dashed #aaa}
+  .item:first-child{padding-top:2px}
+  .item-line1{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .item-name{font-weight:600}
+  .item-amount{font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .item-qty{padding-left:16px;color:#222;font-size:12px;margin-top:1px;font-variant-numeric:tabular-nums}
+
+  /* Count */
+  .count-row{display:flex;justify-content:space-between;padding:5px 0 0;font-size:12.5px}
+  .count-pieces{font-variant-numeric:tabular-nums}
+
+  /* Totals */
+  .total-row{display:flex;justify-content:space-between;margin-bottom:2px;font-size:12.5px}
+  .total-row .v{font-variant-numeric:tabular-nums}
+
+  .grand{display:flex;justify-content:space-between;align-items:baseline;margin:4px 0}
+  .grand .l{font-size:18px;font-weight:800}
+  .grand .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+
+  /* QR */
+  .qr-block{text-align:center;margin:8px 0}
+  .qr-block img{width:{{.QrWidth}}px;height:{{.QrWidth}}px}
+
+  /* Footer */
+  .footer{text-align:center;font-size:13px;line-height:1.7;white-space:pre-line}
+  .footer .thanks{font-weight:600}
 </style>
 </head>
 <body>
-<main class="receipt">
-  <header class="center">
+<div class="receipt">
+
+  <!-- HEADER -->
+  <div class="center">
     {{if and .Cfg.ShowLogo .Store.LogoURL}}
-    <div class="logo-wrap logo-{{logoClass .Cfg.LogoPosition}}">
-      <img src="{{.Store.LogoURL}}" alt="logo">
-    </div>
+    <div class="logo-wrap logo-{{logoClass .Cfg.LogoPosition}}"><img src="{{.Store.LogoURL}}" alt="logo"></div>
     {{end}}
     {{if .Cfg.ShowStoreName}}<div class="store-name">{{.Store.Name}}</div>{{end}}
-    <div class="store-meta muted">
-      {{if .Cfg.ShowAddress}}{{.Store.Address}}<br>{{end}}
-      {{if .Cfg.ShowTaxId}}เลขประจำตัวผู้เสียภาษี: {{or .Store.TaxID "-"}}<br>{{end}}
-      {{if .Cfg.ShowPhone}}โทร: {{or .Store.Phone "-"}}{{end}}
-    </div>
+    {{if .Cfg.ShowAddress}}<div class="store-meta">{{.Store.Address}}</div>{{end}}
+    {{if .Cfg.ShowPhone}}<div class="store-meta">โทร: {{or .Store.Phone "-"}}</div>{{end}}
+    {{if .Cfg.ShowTaxId}}<div class="store-meta">เลขประจำตัวผู้เสียภาษี: {{or .Store.TaxID "-"}}</div>{{end}}
+  </div>
+
+  <hr class="divider"/>
+
+  <div class="center">
     <div class="doc-title">ใบเสร็จรับเงิน / ใบกำกับภาษีอย่างย่อ</div>
-    <div class="doc-subtitle">(Receipt / Abbreviated Tax Invoice)</div>
-  </header>
+    <div class="doc-title-en">Receipt / Abbreviated Tax Invoice</div>
+  </div>
 
-  <section class="meta">
-    <div class="meta-row" style="grid-template-columns:auto 1fr;gap:6px">
-      <span style="white-space:nowrap">เลขที่ (Doc No.):</span>
-      <span class="right" style="word-break:break-all;font-size:9.5px;line-height:1.4">{{.Sale.OrderNo}}</span>
+  <hr class="divider"/>
+
+  <!-- INFO -->
+  <div class="info">
+    <div class="info-row"><span class="info-label">เลขที่:</span><span class="info-value mono">{{.Sale.OrderNo}}</span></div>
+    <div class="info-row"><span class="info-label">วันที่:</span><span class="info-value mono">{{.Sale.DateTime}}</span></div>
+    <div class="info-row"><span class="info-label">ลูกค้า:</span><span class="info-value">{{.Sale.CustomerName}}</span></div>
+    <div class="info-row"><span class="info-label">พนักงาน:</span><span class="info-value">{{.Sale.Staff}}</span></div>
+    <div class="info-row"><span class="info-label">ชำระโดย:</span><span class="info-value">{{.Sale.PaymentLabel}}</span></div>
+  </div>
+
+  <hr class="divider"/>
+
+  <!-- ITEMS -->
+  <div class="items">
+    {{range $i, $it := .Sale.Items}}
+    <div class="item">
+      <div class="item-line1"><span class="item-name">{{add $i 1}}. {{$it.Name}}</span><span class="item-amount">{{baht $it.Total}}</span></div>
+      <div class="item-qty">{{$it.Qty}} x {{money $it.Price}}</div>
     </div>
-    <div class="meta-pair">
-      <div class="meta-row"><span>วันที่ (Date):</span><span></span></div>
-      <div class="meta-row"><span></span><span class="right">{{.Sale.DateTime}}</span></div>
-    </div>
-    <div class="meta-pair">
-      <div class="meta-row"><span>ลูกค้า (Customer):</span><span></span></div>
-      <div class="meta-row"><span></span><span class="right">{{.Sale.CustomerName}}</span></div>
-    </div>
-  </section>
-
-  <div class="divider"></div>
-
-  <table aria-label="receipt items">
-    <thead>
-      <tr>
-        <th class="item-name">รายการ (Item)</th>
-        <th class="qty">จำนวน</th>
-        <th class="money-col">ราคา</th>
-        <th class="money-col">รวม</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range .Sale.Items}}
-      <tr>
-        <td class="item-name">{{.Name}}</td>
-        <td class="qty">{{.Qty}}</td>
-        <td class="money-col">{{money .Price}}</td>
-        <td class="money-col">{{money .Total}}</td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-
-  <section class="summary">
-    {{if gt .Sale.DiscountTotal 0.0}}
-    <div class="summary-row muted"><span>ส่วนลด (Discount):</span><span>-{{money .Sale.DiscountTotal}} ฿</span></div>
     {{end}}
+  </div>
+
+  <hr class="divider"/>
+
+  <!-- COUNT -->
+  <div class="count-row">
+    <span>รายการทั้งหมด {{len .Sale.Items}} รายการ</span>
+    <span class="count-pieces">{{.Sale.TotalQty}} ชิ้น</span>
+  </div>
+
+  <hr class="divider"/>
+
+  <!-- TOTALS -->
+  <div class="totals">
     {{if eq .Cfg.TaxMode "exclusive"}}
-    <div class="summary-row"><span>มูลค่าก่อนภาษี:</span><span>{{money .Sale.AfterDiscount}} ฿</span></div>
-    <div class="summary-row"><span>{{.Cfg.TaxLabel}} {{printf "%.0f" .Cfg.VatRate}}%:</span><span>{{money .Sale.VatAmount}} ฿</span></div>
+    <div class="total-row"><span>รวมก่อน VAT</span><span class="v">{{baht .Sale.AfterDiscount}}</span></div>
+    <div class="total-row"><span>{{.Cfg.TaxLabel}} {{printf "%.0f" .Cfg.VatRate}}%</span><span class="v">{{baht .Sale.VatAmount}}</span></div>
     {{end}}
-    {{if eq .Cfg.TaxMode "inclusive"}}
-    <div class="summary-row muted"><span>ราคารวมภาษีแล้ว:</span><span>✓</span></div>
+    {{if gt .Sale.DiscountTotal 0.0}}
+    <div class="total-row"><span>ส่วนลด</span><span class="v">{{baht .Sale.DiscountTotal}}</span></div>
     {{end}}
-    <div class="summary-row summary-total"><span>ยอดชำระสุทธิ (Net Total):</span><span>{{money .Sale.GrandTotal}} ฿</span></div>
-  </section>
+  </div>
 
-  <div class="footer-note">{{.Sale.GrandTotalText}}</div>
+  <hr class="divider"/>
+
+  <div class="grand">
+    <span class="l">ยอดสุทธิ</span>
+    <span class="v">{{baht .Sale.GrandTotal}}</span>
+  </div>
+  {{if gt .Sale.Paid 0.0}}
+  <div class="total-row"><span>รับเงิน</span><span class="v">{{baht .Sale.Paid}}</span></div>
+  <div class="total-row"><span>เงินทอน</span><span class="v">{{baht .Sale.Change}}</span></div>
+  {{end}}
+
+  <hr class="divider"/>
 
   {{if and .Cfg.ShowQr .Sale.PromptPayQRURI}}
-  <div class="qr-block center">
-    <b>สแกนเพื่อชำระเงิน (PromptPay)</b><br>
+  <div class="qr-block">
+    <div style="font-weight:600;margin-bottom:4px">สแกนเพื่อชำระเงิน (PromptPay)</div>
     <img src="{{.Sale.PromptPayQRURI}}" alt="PromptPay QR">
   </div>
+  <hr class="divider"/>
   {{end}}
 
-  {{if .Cfg.FooterText}}
-  <div class="footer-note" style="margin-top:12px; background:transparent; border-top:1px dashed #d9dde3; padding-top:12px;">{{.Cfg.FooterText}}</div>
-  {{end}}
-</main>
+  <!-- FOOTER -->
+  <div class="footer">
+    {{if .Cfg.FooterText}}<div>{{.Cfg.FooterText}}</div>{{else}}<div>ขอบคุณที่ใช้บริการ</div>{{end}}
+    <div class="thanks">*** ขอบคุณครับ ***</div>
+  </div>
+
+</div>
 </body>
 </html>`
 
@@ -280,13 +369,26 @@ func RenderReceiptHTML(sale SaleData, store StoreInfo, cfg Config) ([]byte, erro
 	}
 
 	tpl, err := template.New("receipt").Funcs(template.FuncMap{
-		"money": func(v float64) string { return fmt.Sprintf("%.2f", v) },
+		"money":     func(v float64) string { return fmt.Sprintf("%.2f", v) },
+		"baht":      func(v float64) string { return "฿" + formatThousands(v) },
 		"logoClass": logoClassFn,
 		"or":        orFn,
 		"printf":    fmt.Sprintf,
+		"add":       func(a, b int) int { return a + b },
+		"len":       func(items []SaleItem) int { return len(items) },
 	}).Parse(receiptTpl)
 	if err != nil {
 		return nil, err
+	}
+
+	// Auto-fill PaymentLabel + TotalQty when caller left them blank.
+	if sale.PaymentLabel == "" {
+		sale.PaymentLabel = PaymentLabel(sale.PaymentMethod)
+	}
+	if sale.TotalQty == 0 {
+		for _, it := range sale.Items {
+			sale.TotalQty += it.Qty
+		}
 	}
 
 	data := map[string]any{
@@ -295,6 +397,7 @@ func RenderReceiptHTML(sale SaleData, store StoreInfo, cfg Config) ([]byte, erro
 		"Cfg":        cfg,
 		"QrWidth":    qrWidth(cfg.QrSize),
 		"PrintWidth": printWidth(cfg.PaperSize),
+		"PaperWidth": paperWidth(cfg.PaperSize),
 	}
 
 	var buf bytes.Buffer

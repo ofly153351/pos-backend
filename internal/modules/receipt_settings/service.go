@@ -66,7 +66,7 @@ func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSet
 		ID:                  newID(),
 		StoreID:             storeID,
 		TemplateKey:         "modern_classic",
-		PaperSize:           "58mm",
+		PaperSize:           "80mm",
 		PaperLength:         "auto",
 		TaxMode:             "exclusive",
 		VatRate:             7.00,
@@ -159,7 +159,7 @@ func (s Service) PreviewHTML(ctx context.Context, actor auth.Claims, storeID str
 		Name:        storeRecord.Name,
 		Address:     storeRecord.Address,
 		Phone:       storeRecord.Phone,
-		TaxID:       "",
+		TaxID:       storeRecord.TaxID,
 		PromptPayID: storeRecord.PromptPayID,
 		LogoURL:     storeRecord.LogoURL,
 	}
@@ -194,23 +194,28 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 
 	promptPayQR := ""
 	if s.ShowQr && store.PromptPayID != "" {
-		// For preview we skip actual QR generation — show placeholder text
-		promptPayQR = ""
+		promptPayQR = receipthtml.PromptPayQRDataURI(store.PromptPayID, grandTotal)
 	}
+
+	paid := math.Ceil(grandTotal)
 
 	return receipthtml.SaleData{
 		OrderNo:        "INV-20250526",
 		DateTime:       dateStr,
-		CustomerName:   "ลูกค้าทั่วไป (เงินสด)",
+		CustomerName:   "ลูกค้าทั่วไป",
 		Staff:          "Admin",
 		Items:          items,
+		TotalQty:       4,
 		Subtotal:       subtotal,
 		DiscountTotal:  discountTotal,
 		AfterDiscount:  afterDiscount,
 		VatAmount:      vatAmount,
 		GrandTotal:     grandTotal,
 		GrandTotalText: "หกสิบสามบาทหกสิบห้าสตางค์",
-		PaymentMethod:  "เงินสด",
+		PaymentMethod:  "cash",
+		PaymentLabel:   "เงินสด",
+		Paid:           paid,
+		Change:         math.Round((paid-grandTotal)*100) / 100,
 		PromptPayQRURI: template.URL(promptPayQR),
 	}
 }

@@ -294,7 +294,9 @@ func (r PostgresRepository) buildStoreExtraSelect(ctx context.Context) string {
 	if hasColumn, err := r.hasStoreTaxIDColumn(ctx); err == nil && hasColumn {
 		taxID = "COALESCE(st.tax_id, '') AS store_tax_id"
 	}
-	return promptPay + ", " + taxID
+	// logo_url is part of the base stores schema — always present.
+	logoURL := "COALESCE(st.logo_url, '') AS store_logo_url"
+	return promptPay + ", " + taxID + ", " + logoURL
 }
 
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
