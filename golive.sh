@@ -64,37 +64,31 @@ step "Git pull (backend + frontend)"
 
 GITHUB_TOKEN="$(cat "$GITHUB_TOKEN_FILE" | tr -d '[:space:]')"
 
-# ตั้ง remote URL พร้อม token ชั่วคราว (ไม่เขียนลง config ถาวร)
-_be_remote=$(git -C "$BACKEND_DIR"  remote get-url origin 2>/dev/null || echo "")
-_fe_remote=$(git -C "$FRONTEND_DIR" remote get-url origin 2>/dev/null || echo "")
+# Production deploys from main.
+BRANCH="main"
 
-_inject_token() {
-  local url="$1"
-  # แทน https://github.com/ → https://user:token@github.com/
-  echo "$url" | sed "s|https://|https://${GITHUB_USER}:${GITHUB_TOKEN}@|"
+# Build a tokenized fetch URL from origin WITHOUT persisting the token in git config.
+# Strips any existing creds first → idempotent (no double-injection even if a prior
+# run left a token baked into the remote URL).
+tokened_url() {
+  local clean
+  clean=$(git -C "$1" remote get-url origin | sed -E 's#https://[^@/]+@#https://#')
+  echo "$clean" | sed "s#https://#https://${GITHUB_USER}:${GITHUB_TOKEN}@#"
 }
 
-git -C "$BACKEND_DIR"  remote set-url origin "$(_inject_token "$_be_remote")"
-git -C "$FRONTEND_DIR" remote set-url origin "$(_inject_token "$_fe_remote")"
-
 # Force-sync a repo to origin/<BRANCH> regardless of current branch / local state.
-# Production deploys from main. Always restore the token-free remote URL afterwards.
-BRANCH="main"
 sync_repo() {
-  local dir="$1" name="$2"
+  local dir="$1" name="$2" url
+  url=$(tokened_url "$dir")
   info "Syncing $name → origin/$BRANCH..."
-  git -C "$dir" fetch origin "$BRANCH" || die "$name: git fetch failed"
-  git -C "$dir" checkout -B "$BRANCH" "origin/$BRANCH" || die "$name: checkout failed"
-  git -C "$dir" reset --hard "origin/$BRANCH" || die "$name: reset failed"
+  git -C "$dir" fetch "$url" "$BRANCH" || die "$name: git fetch failed (token in $GITHUB_TOKEN_FILE?)"
+  git -C "$dir" checkout -B "$BRANCH" 2>/dev/null || die "$name: checkout failed"
+  git -C "$dir" reset --hard FETCH_HEAD || die "$name: reset failed"
   ok "$name updated → $(git -C "$dir" rev-parse --short HEAD)"
 }
 
 sync_repo "$BACKEND_DIR"  "pos-backend"
 sync_repo "$FRONTEND_DIR" "pos-frontend"
-
-# คืน remote URL กลับเป็นแบบไม่มี token (ปลอดภัย)
-git -C "$BACKEND_DIR"  remote set-url origin "$_be_remote"
-git -C "$FRONTEND_DIR" remote set-url origin "$_fe_remote"
 command -v cloudflared &>/dev/null || die "cloudflared ไม่ได้ติดตั้ง — รัน setup.sh ก่อน"
 [[ -f "$TUNNEL_CONFIG" ]] || die "ไม่พบ tunnel config ที่ $TUNNEL_CONFIG — รัน setup.sh --tunnel ก่อน"
 
