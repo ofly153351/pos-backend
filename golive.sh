@@ -126,6 +126,8 @@ step "Build Next.js frontend"
 cd "$FRONTEND_DIR"
 info "npm install..."
 npm install --prefer-offline 2>/dev/null || npm install
+info "ล้าง .next cache เก่า..."
+rm -rf "$FRONTEND_DIR/.next"
 info "npm run build..."
 npm run build
 ok "Frontend build complete"
