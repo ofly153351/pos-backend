@@ -77,11 +77,20 @@ _inject_token() {
 git -C "$BACKEND_DIR"  remote set-url origin "$(_inject_token "$_be_remote")"
 git -C "$FRONTEND_DIR" remote set-url origin "$(_inject_token "$_fe_remote")"
 
-info "Pulling pos-backend..."
-git -C "$BACKEND_DIR"  pull --ff-only origin fix-of/dev && ok "pos-backend updated"
+# Force-sync a repo to origin/<BRANCH> regardless of current branch / local state.
+# Production deploys from main. Always restore the token-free remote URL afterwards.
+BRANCH="main"
+sync_repo() {
+  local dir="$1" name="$2"
+  info "Syncing $name → origin/$BRANCH..."
+  git -C "$dir" fetch origin "$BRANCH" || die "$name: git fetch failed"
+  git -C "$dir" checkout -B "$BRANCH" "origin/$BRANCH" || die "$name: checkout failed"
+  git -C "$dir" reset --hard "origin/$BRANCH" || die "$name: reset failed"
+  ok "$name updated → $(git -C "$dir" rev-parse --short HEAD)"
+}
 
-info "Pulling pos-frontend..."
-git -C "$FRONTEND_DIR" pull --ff-only origin fix-of/dev && ok "pos-frontend updated"
+sync_repo "$BACKEND_DIR"  "pos-backend"
+sync_repo "$FRONTEND_DIR" "pos-frontend"
 
 # คืน remote URL กลับเป็นแบบไม่มี token (ปลอดภัย)
 git -C "$BACKEND_DIR"  remote set-url origin "$_be_remote"
