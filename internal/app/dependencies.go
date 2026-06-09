@@ -4,6 +4,7 @@ import (
 	"gorm.io/gorm"
 
 	"pos-backend/internal/config"
+	"pos-backend/internal/modules/payment"
 )
 
 func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
@@ -36,5 +37,6 @@ func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 		documentHandler:           newDocumentHandler(db),
 		activityLogHandler: newActivityLogHandler(db),
 		userSettingsHandler:       newUserSettingsHandler(db),
+		paymentHandler:            payment.NewHandler(db),
 	}
 }

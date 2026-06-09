@@ -7,6 +7,7 @@ import (
 	"pos-backend/internal/middleware"
 	"pos-backend/internal/modules/activity_log"
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/modules/payment"
 	"pos-backend/internal/modules/usersettings"
 )
 
@@ -37,6 +38,7 @@ type appDependencies struct {
 	documentHandler           any
 	activityLogHandler        activity_log.Handler
 	userSettingsHandler       usersettings.Handler
+	paymentHandler            payment.Handler
 }
 
 func registerBaseRoutes(app *fiber.App, cfg config.Config) {
@@ -81,6 +83,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerDocumentRoutes(protected, deps)
 	registerActivityLogRoutes(protected, deps)
 	registerUserSettingsRoutes(protected, deps)
+	registerPaymentRoutes(protected, deps)
 
 	admin := api.Group("/admin", middleware.AuthRequired(deps.tokenManager, deps.authUserRepo), middleware.RequireRoles(auth.RolePlatformAdmin))
 	registerAdminSubscriptionRoutes(admin, deps)
