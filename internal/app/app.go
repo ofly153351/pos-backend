@@ -36,6 +36,8 @@ type appDependencies struct {
 	warehouseReceiptHandler   any
 	receiptSettingsHandler    any
 	documentHandler           any
+	expenseHandler            any
+	financeHandler            any
 	activityLogHandler        activity_log.Handler
 	userSettingsHandler       usersettings.Handler
 	paymentHandler            payment.Handler
@@ -81,6 +83,8 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerWarehouseReceiptRoutes(protected, deps)
 	registerReceiptSettingsRoutes(protected, deps)
 	registerDocumentRoutes(protected, deps)
+	registerExpenseRoutes(protected, deps)
+	registerFinanceRoutes(protected, deps)
 	registerActivityLogRoutes(protected, deps)
 	registerUserSettingsRoutes(protected, deps)
 	registerPaymentRoutes(protected, deps)

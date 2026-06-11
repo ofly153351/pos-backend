@@ -53,6 +53,8 @@ const (
 	PrefixStockMovement         = "sm"
 	PrefixStoreBankAccount      = "sba"
 	PrefixActivityLog           = "al"
+	PrefixExpense               = "exp"
+	PrefixExpenseCategory       = "exc"
 )
 
 // Generate returns {prefix}-{8-digit number}, e.g. "pd-30144739".
