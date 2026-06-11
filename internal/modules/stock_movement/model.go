@@ -7,12 +7,13 @@ import (
 
 // Movement type constants
 const (
-	MovementTypeIn       = "IN"
-	MovementTypeOut      = "OUT"
-	MovementTypeTransfer = "TRANSFER"
-	MovementTypeSale     = "SALE"
-	MovementTypeAdjust   = "ADJUST"
-	MovementTypeReturn   = "RETURN"
+	MovementTypeIn              = "IN"
+	MovementTypeOut             = "OUT"
+	MovementTypeTransfer        = "TRANSFER"
+	MovementTypeSale            = "SALE"
+	MovementTypeAdjust          = "ADJUST"
+	MovementTypeReturn          = "RETURN"
+	MovementTypeCountCorrection = "COUNT_CORRECTION"
 )
 
 type StockMovement struct {
@@ -59,18 +60,20 @@ type RemoveStockRequest struct {
 }
 
 type TransferStockRequest struct {
-	ProductID         string `json:"product_id"`
-	SourceLocationID  string `json:"source_location_id"`
-	DestLocationID    string `json:"dest_location_id"`
-	Quantity          int    `json:"quantity"`
-	Note              string `json:"note"`
+	ProductID        string `json:"product_id"`
+	SourceLocationID string `json:"source_location_id"`
+	DestLocationID   string `json:"dest_location_id"`
+	Quantity         int    `json:"quantity"`
+	Note             string `json:"note"`
 }
 
 type AdjustStockRequest struct {
-	ProductID     string `json:"product_id"`
-	LocationID    string `json:"location_id"`
-	PhysicalQty   int    `json:"physical_quantity"`
-	Note          string `json:"note"`
+	ProductID    string `json:"product_id"`
+	LocationID   string `json:"location_id"`
+	PhysicalQty  int    `json:"physical_quantity"`
+	ReferenceID  string `json:"reference_id"`
+	MovementType string `json:"movement_type"`
+	Note         string `json:"note"`
 }
 
 type ListMovementsQuery struct {
@@ -92,10 +95,10 @@ type AdditionResult struct {
 }
 
 var (
-	ErrStockForbidden      = errors.New("user cannot operate this store")
-	ErrStockNoItems        = errors.New("at least one item is required")
-	ErrStockBadQty         = errors.New("quantity must be greater than zero")
-	ErrProductNotFound     = errors.New("product not found")
-	ErrInsufficientStock   = errors.New("insufficient stock quantity")
-	ErrLocationMismatch    = errors.New("source and destination locations must be different")
+	ErrStockForbidden    = errors.New("user cannot operate this store")
+	ErrStockNoItems      = errors.New("at least one item is required")
+	ErrStockBadQty       = errors.New("quantity must be greater than zero")
+	ErrProductNotFound   = errors.New("product not found")
+	ErrInsufficientStock = errors.New("insufficient stock quantity")
+	ErrLocationMismatch  = errors.New("source and destination locations must be different")
 )

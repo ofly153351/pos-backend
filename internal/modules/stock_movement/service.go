@@ -319,6 +319,14 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 
 	diff := req.PhysicalQty - currentQty
 	now := time.Now().UTC()
+	movementType := strings.TrimSpace(req.MovementType)
+	if movementType == "" {
+		movementType = MovementTypeAdjust
+	}
+	var refPtr *string
+	if ref := strings.TrimSpace(req.ReferenceID); ref != "" {
+		refPtr = &ref
+	}
 
 	mg := StockMovement{
 		ID:             newID(),
@@ -326,7 +334,8 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		ProductID:      req.ProductID,
 		LocationID:     locPtr,
 		QuantityChange: diff,
-		Type:           MovementTypeAdjust,
+		Type:           movementType,
+		ReferenceID:    refPtr,
 		Note:           fmt.Sprintf("adjusted from %d to %d. %s", currentQty, req.PhysicalQty, strings.TrimSpace(req.Note)),
 		CreatedBy:      actor.UserID,
 		CreatedAt:      now,

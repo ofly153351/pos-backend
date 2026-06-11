@@ -74,8 +74,10 @@ func (c Config) DatabaseURL() string {
 		return c.DatabaseURLValue
 	}
 
+	// client_encoding=UTF8 ensures the client↔server connection negotiates UTF-8
+	// so Thai text round-trips correctly (paired with the UTF8 DB from docker-compose).
 	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s&client_encoding=UTF8",
 		c.DBUser,
 		c.DBPassword,
 		c.DBHost,

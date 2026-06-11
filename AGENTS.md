@@ -67,3 +67,38 @@ Subscription is modeled at the store level because POS access is tenant-oriented
 - Keep business rules in services, not handlers.
 - Keep SQL in repositories and prefer explicit queries over hidden ORM behavior.
 - New schema changes should be added as forward-only SQL files in `init-db/`.
+
+## Known Issues
+
+### DATABASE ENCODING — Thai text garbled in expense_categories (and any table seeded with Thai names)
+
+**Status:** Active bug. Do NOT attempt to fix by wiping the volume without a full backup/export first.
+
+**Root cause:** The `postgres_data` Docker volume was initialised without `POSTGRES_INITDB_ARGS: "--encoding=UTF8"`.
+PostgreSQL used the container's default locale encoding (not UTF-8), so Thai characters written to the database
+are stored as the wrong byte sequence and returned as `à¸à¸...` mojibake.
+
+**Scope:**
+- Affects: any row with Thai text written before the volume is recreated (e.g. `expense_categories.name` seeds).
+- Does NOT affect: financial amounts, IDs, dates, or ASCII strings — these are all correct.
+- The `/finance/pnl` expense-breakdown widget shows garbled category names for this reason.
+
+**Workaround applied:**
+- `config.go` DSN already has `&client_encoding=UTF8` — new rows written in Thai will be correct if the
+  underlying column encoding supports it (limited mitigation only).
+- `docker-compose.yml` already has `POSTGRES_INITDB_ARGS: "--encoding=UTF8 ..."` — applies to FRESH volumes only.
+
+**Correct fix (when ready):**
+1. Export all data: `pg_dump -U postgres pos_db > pos_db_backup.sql`
+2. Recreate the volume: `docker compose down -v && docker compose up -d postgres`
+3. Restore: `psql -U postgres -d pos_db < pos_db_backup.sql`
+4. Re-seed if categories come out wrong (run the app once to trigger lazy-seed).
+
+**⚠ NEVER run `docker compose down -v` without a verified backup. This deletes all data.**
+
+### Go server must be restarted after adding new modules
+
+`go run cmd/api/main.go` compiles once at startup and does NOT hot-reload.
+After adding a new module and wiring its routes in `internal/app/`, the process must be restarted
+for the new routes to be registered. Symptom: route returns `Cannot GET /api/v1/stores/.../new-route`
+even though the source file is correct.

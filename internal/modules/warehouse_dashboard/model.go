@@ -18,16 +18,20 @@ type Query struct {
 
 // KPI is the top-row summary card data.
 type KPI struct {
-	StockValue            float64 `json:"stock_value"`
-	StockValueChangePct   float64 `json:"stock_value_change_pct"`
-	TotalSKUs             int64   `json:"total_skus"`
-	LowStockCount         int64   `json:"low_stock_count"`
-	ReceivedTodayQty      int64   `json:"received_today_qty"`
-	ReceivedTodayValue    float64 `json:"received_today_value"`
-	IssuedTodayQty        int64   `json:"issued_today_qty"`
-	IssuedTodayValue      float64 `json:"issued_today_value"`
-	TransferredTodayQty   int64   `json:"transferred_today_qty"`
-	TransferredTodayValue float64 `json:"transferred_today_value"`
+	StockValue              float64 `json:"stock_value"`
+	StockValueChangePct     float64 `json:"stock_value_change_pct"`
+	TotalSKUs               int64   `json:"total_skus"`
+	AvailableStockQty       int64   `json:"available_stock_qty"`
+	LowStockCount           int64   `json:"low_stock_count"`
+	OutOfStockCount         int64   `json:"out_of_stock_count"`
+	InTransitStockQty       int64   `json:"in_transit_stock_qty"`
+	PendingTransferRequests int64   `json:"pending_transfer_requests"`
+	ReceivedTodayQty        int64   `json:"received_today_qty"`
+	ReceivedTodayValue      float64 `json:"received_today_value"`
+	IssuedTodayQty          int64   `json:"issued_today_qty"`
+	IssuedTodayValue        float64 `json:"issued_today_value"`
+	TransferredTodayQty     int64   `json:"transferred_today_qty"`
+	TransferredTodayValue   float64 `json:"transferred_today_value"`
 }
 
 // MovementChartPoint is a single day's movement aggregation.
@@ -75,12 +79,17 @@ type WarehouseDistribution struct {
 
 // RecentActivity is a single stock-movement event.
 type RecentActivity struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`        // IN | OUT | SALE | TRANSFER | ADJUST | RETURN
-	Description string    `json:"description"` // human-readable Thai string
-	ReferenceID string    `json:"reference_id"`
-	Time        string    `json:"time"` // "HH:MM"
-	CreatedAt   time.Time `json:"created_at"`
+	ID                  string    `json:"id"`
+	Type                string    `json:"type"`        // IN | OUT | SALE | TRANSFER | ADJUST | RETURN
+	Description         string    `json:"description"` // legacy human-readable Thai string
+	ReferenceID         string    `json:"reference_id"`
+	Time                string    `json:"time"` // "HH:MM"
+	CreatedAt           time.Time `json:"created_at"`
+	ProductName         string    `json:"product_name"`
+	Unit                string    `json:"unit"`
+	QuantityChange      int       `json:"quantity_change"`
+	LocationName        string    `json:"location_name"`
+	DestinationLocation string    `json:"destination_location_name"`
 }
 
 // DashboardData is the complete response body.

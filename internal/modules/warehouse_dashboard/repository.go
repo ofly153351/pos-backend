@@ -81,17 +81,23 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 		kpi.StockValueChangePct = math.Round(netChange/prevValue*1000) / 10
 	}
 
-	// 3. Total active SKUs + low-stock count
+	// 3. Total active SKUs + stock action counts
 	var skuRow struct {
-		TotalSKUs     int64 `gorm:"column:total_skus"`
-		LowStockCount int64 `gorm:"column:low_stock_count"`
+		TotalSKUs         int64 `gorm:"column:total_skus"`
+		AvailableStockQty int64 `gorm:"column:available_stock_qty"`
+		LowStockCount     int64 `gorm:"column:low_stock_count"`
+		OutOfStockCount   int64 `gorm:"column:out_of_stock_count"`
 	}
 	if err := r.db.WithContext(ctx).Raw(`
 		SELECT
 			COUNT(*) AS total_skus,
+			COALESCE(SUM(GREATEST(COALESCE(s_agg.qty, 0), 0)), 0) AS available_stock_qty,
 			COUNT(*) FILTER (
 				WHERE p.min_stock > 0 AND COALESCE(s_agg.qty, 0) <= p.min_stock
-			) AS low_stock_count
+			) AS low_stock_count,
+			COUNT(*) FILTER (
+				WHERE COALESCE(s_agg.qty, 0) = 0
+			) AS out_of_stock_count
 		FROM products p
 		LEFT JOIN (
 			SELECT product_id, SUM(quantity) AS qty
@@ -103,7 +109,26 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 		return kpi, err
 	}
 	kpi.TotalSKUs = skuRow.TotalSKUs
+	kpi.AvailableStockQty = skuRow.AvailableStockQty
 	kpi.LowStockCount = skuRow.LowStockCount
+	kpi.OutOfStockCount = skuRow.OutOfStockCount
+
+	// 3.5 Pending transfer queue in warehouse inventory
+	var transferQueueRow struct {
+		PendingTransferRequests int64 `gorm:"column:pending_transfer_requests"`
+		InTransitStockQty       int64 `gorm:"column:in_transit_stock_qty"`
+	}
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			COUNT(*) AS pending_transfer_requests,
+			COALESCE(SUM(quantity), 0) AS in_transit_stock_qty
+		FROM warehouse_inventory
+		WHERE store_id = ? AND quantity > 0
+	`, storeID).Scan(&transferQueueRow).Error; err != nil {
+		return kpi, err
+	}
+	kpi.PendingTransferRequests = transferQueueRow.PendingTransferRequests
+	kpi.InTransitStockQty = transferQueueRow.InTransitStockQty
 
 	// 4. Today's movements (single query)
 	var todayRow struct {
@@ -405,14 +430,20 @@ func (r PostgresRepository) GetRecentActivity(ctx context.Context, storeID strin
 			refID = *row.ReferenceID
 		}
 		out[i] = RecentActivity{
-			ID:          row.ID,
-			Type:        row.Type,
-			Description: formatDescription(row.Type, row.ProductName, row.Unit, row.QuantityChange, row.DestLocationName),
-			ReferenceID: refID,
-			Time:        row.CreatedAt.Format("15:04"),
-			CreatedAt:   row.CreatedAt,
+			ID:                  row.ID,
+			Type:                row.Type,
+			Description:         formatDescription(row.Type, row.ProductName, row.Unit, row.QuantityChange, row.DestLocationName),
+			ReferenceID:         refID,
+			Time:                row.CreatedAt.Format("15:04"),
+			CreatedAt:           row.CreatedAt,
+			ProductName:         row.ProductName,
+			Unit:                row.Unit,
+			QuantityChange:      row.QuantityChange,
+			LocationName:        row.LocationName,
+			DestinationLocation: row.DestLocationName,
 		}
 	}
+
 	return out, nil
 }
 

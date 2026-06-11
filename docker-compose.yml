@@ -7,6 +7,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Force the database to be created with UTF-8 so Thai text stores correctly.
+      # NOTE: only applies on a FRESH data dir — existing volumes keep their old
+      # encoding (see init-db README / handoff: recreate the volume to fix existing data).
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
