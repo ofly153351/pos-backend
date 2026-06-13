@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+// HashPassword exposes the package's password KDF to sibling modules that must
+// create user rows directly (e.g. store-staff management). It uses the exact same
+// derivation as Register/Login, so credentials minted through it verify normally.
+func HashPassword(password string) (string, error) {
+	return hashPassword(password)
+}
+
 func hashPassword(password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {

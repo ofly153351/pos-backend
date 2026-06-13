@@ -230,7 +230,7 @@ func writePurchasingError(c *fiber.Ctx, err error) error {
 		errors.Is(err, ErrPOProductNotFound), errors.Is(err, ErrSupplierProductNotFound):
 		return httpx.ErrNotFound(c, err.Error())
 	case errors.Is(err, ErrPOAlreadyCompleted), errors.Is(err, ErrPOAlreadyCancelled),
-		errors.Is(err, ErrSupplierProductExists):
+		errors.Is(err, ErrSupplierProductExists), errors.Is(err, ErrPOOrderNumberConflict):
 		return httpx.ErrConflict(c, err.Error())
 	default:
 		log.Printf("[purchasing] internal error: %v", err)

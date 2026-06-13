@@ -54,6 +54,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		Email:     email,
 		Address:   strings.TrimSpace(input.Address),
 		Note:      strings.TrimSpace(input.Note),
+		TaxID:     strings.TrimSpace(input.TaxID),
+		Branch:    strings.TrimSpace(input.Branch),
 		IsActive:  isActive,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -114,6 +116,12 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, custome
 	}
 	if input.Note != nil {
 		existing.Note = strings.TrimSpace(*input.Note)
+	}
+	if input.TaxID != nil {
+		existing.TaxID = strings.TrimSpace(*input.TaxID)
+	}
+	if input.Branch != nil {
+		existing.Branch = strings.TrimSpace(*input.Branch)
 	}
 	if input.IsActive != nil {
 		existing.IsActive = *input.IsActive

@@ -18,6 +18,11 @@ type Store struct {
 	PromptPayID           string    `json:"promptpay_id,omitempty" gorm:"column:promptpay_id"`
 	TaxID                 string    `json:"tax_id,omitempty" gorm:"column:tax_id"`
 	CurrencyCode          string    `json:"currency_code" gorm:"column:currency_code"`
+	// Role is the caller's store_members.role for THIS store (owner/manager/
+	// cashier/warehouse), surfaced on /me/stores so the frontend can gate UI on
+	// the real per-store role instead of the global users.role. Not a stored
+	// column (gorm:"-") — it is projected per-user in ListByUser.
+	Role                  string    `json:"role,omitempty" gorm:"-"`
 	SubscriptionPlanCode  string    `json:"subscription_plan_code" gorm:"-"`
 	SubscriptionStatus    string    `json:"subscription_status" gorm:"-"`
 	SubscriptionPeriodEnd time.Time `json:"subscription_period_end" gorm:"-"`

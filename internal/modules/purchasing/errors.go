@@ -19,6 +19,7 @@ var (
 	ErrPOProductNotFound       = errors.New("product not found")
 	ErrPOReceiveInvalidQty     = errors.New("received quantity cannot exceed ordered quantity")
 	ErrPOOrderNumberGenerate   = errors.New("failed to generate order number")
+	ErrPOOrderNumberConflict   = errors.New("could not allocate a unique purchase order number, please retry")
 	ErrSupplierProductExists   = errors.New("product already linked to this supplier")
 	ErrSupplierProductNotFound = errors.New("supplier product link not found")
 	ErrSupplierProductRequired = errors.New("product_id is required")

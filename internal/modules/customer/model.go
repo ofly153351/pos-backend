@@ -11,6 +11,8 @@ type Customer struct {
 	Email     string    `json:"email,omitempty" gorm:"column:email"`
 	Address   string    `json:"address,omitempty" gorm:"column:address"`
 	Note      string    `json:"note,omitempty" gorm:"column:note"`
+	TaxID     string    `json:"tax_id,omitempty" gorm:"column:tax_id"`
+	Branch    string    `json:"branch,omitempty" gorm:"column:branch"`
 	IsActive  bool      `json:"is_active" gorm:"column:is_active"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
@@ -31,6 +33,8 @@ type CreateCustomerRequest struct {
 	Email    string `json:"email"`
 	Address  string `json:"address"`
 	Note     string `json:"note"`
+	TaxID    string `json:"tax_id"`
+	Branch   string `json:"branch"`
 	IsActive *bool  `json:"is_active"`
 }
 
@@ -41,6 +45,8 @@ type UpdateCustomerRequest struct {
 	Email    *string `json:"email"`
 	Address  *string `json:"address"`
 	Note     *string `json:"note"`
+	TaxID    *string `json:"tax_id"`
+	Branch   *string `json:"branch"`
 	IsActive *bool   `json:"is_active"`
 }
 

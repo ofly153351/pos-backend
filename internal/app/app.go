@@ -21,6 +21,7 @@ type appDependencies struct {
 	productBrandHandler       any
 	productHandler            any
 	customerHandler           any
+	memberHandler             any
 	vatHandler                any
 	saleHandler               any
 	parkedBillHandler         any
@@ -38,6 +39,9 @@ type appDependencies struct {
 	documentHandler           any
 	expenseHandler            any
 	financeHandler            any
+	stockCountHandler         any
+	creditSaleHandler         any
+	promotionHandler          any
 	activityLogHandler        activity_log.Handler
 	userSettingsHandler       usersettings.Handler
 	paymentHandler            payment.Handler
@@ -68,6 +72,7 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerProductBrandRoutes(protected, deps)
 	registerProductRoutes(protected, deps)
 	registerCustomerRoutes(protected, deps)
+	registerMemberRoutes(protected, deps)
 	registerVATRoutes(protected, deps)
 	registerSaleRoutes(protected, deps)
 	registerParkedBillRoutes(protected, deps)
@@ -85,6 +90,9 @@ func registerVersionedAPIRoutes(api fiber.Router, deps appDependencies) {
 	registerDocumentRoutes(protected, deps)
 	registerExpenseRoutes(protected, deps)
 	registerFinanceRoutes(protected, deps)
+	registerStockCountRoutes(protected, deps)
+	registerCreditSaleRoutes(protected, deps)
+	registerPromotionRoutes(protected, deps)
 	registerActivityLogRoutes(protected, deps)
 	registerUserSettingsRoutes(protected, deps)
 	registerPaymentRoutes(protected, deps)

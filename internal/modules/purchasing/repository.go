@@ -5,8 +5,19 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+
+	"pos-backend/internal/idgen"
 )
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint violation
+// (SQLSTATE 23505) — used to detect a duplicate (store_id, order_number) collision
+// so CreatePO can retry with a freshly recomputed sequence.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 type Repository interface {
 	// Suppliers
@@ -29,7 +40,7 @@ type Repository interface {
 	ListPOs(ctx context.Context, storeID string) ([]PurchaseOrder, error)
 	GetPO(ctx context.Context, storeID, poID string) (PurchaseOrder, error)
 	UpdatePO(ctx context.Context, po PurchaseOrder) error
-	UpdatePOStatus(ctx context.Context, poID string, status PurchaseOrderStatus, receivedAt *timeSetter) error
+	UpdatePOStatus(ctx context.Context, poID string, status PurchaseOrderStatus, receivedAt *timeSetter, receivedBy string) error
 	GetPOItems(ctx context.Context, poID string) ([]PurchaseOrderItem, error)
 	UpdatePOItemReceived(ctx context.Context, itemID string, receivedQty int, lineTotal float64) error
 	GetPODailySequence(ctx context.Context, storeID, datePrefix string) (int, error)
@@ -37,11 +48,12 @@ type Repository interface {
 
 	// Products
 	GetProduct(ctx context.Context, storeID, productID string) (ProductRef, error)
-	UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64) error
+	UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64, createdBy, referenceID string) error
 	CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error)
 
 	// Access
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type timeSetter struct {
@@ -199,6 +211,11 @@ func (r PostgresRepository) CreatePO(ctx context.Context, po PurchaseOrder) (Pur
 	} else {
 		payload["notes"] = strings.TrimSpace(po.Notes)
 	}
+	if strings.TrimSpace(po.CreatedBy) == "" {
+		payload["created_by"] = nil
+	} else {
+		payload["created_by"] = po.CreatedBy
+	}
 
 	if err := r.db.WithContext(ctx).Table("purchase_orders").Create(payload).Error; err != nil {
 		return PurchaseOrder{}, err
@@ -273,13 +290,16 @@ func (r PostgresRepository) UpdatePO(ctx context.Context, po PurchaseOrder) erro
 	return nil
 }
 
-func (r PostgresRepository) UpdatePOStatus(ctx context.Context, poID string, status PurchaseOrderStatus, receivedAt *timeSetter) error {
+func (r PostgresRepository) UpdatePOStatus(ctx context.Context, poID string, status PurchaseOrderStatus, receivedAt *timeSetter, receivedBy string) error {
 	updates := map[string]any{
 		"status":     string(status),
 		"updated_at": gorm.Expr("NOW()"),
 	}
 	if receivedAt != nil && receivedAt.Valid {
 		updates["received_at"] = receivedAt.Time
+	}
+	if strings.TrimSpace(receivedBy) != "" {
+		updates["received_by"] = receivedBy
 	}
 	return r.db.WithContext(ctx).
 		Model(&PurchaseOrder{}).
@@ -359,7 +379,7 @@ func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID s
 	}, nil
 }
 
-func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64) error {
+func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64, createdBy, referenceID string) error {
 	// Find or create a default receiving location in this store
 	var locID string
 	err := r.db.WithContext(ctx).
@@ -410,7 +430,10 @@ func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, store
 	}
 found:
 
-	// Upsert stock at location, update cost_price on product
+	// Upsert stock at location, update cost_price on product, and record the IN
+	// movement so the ledger stays consistent with stocks / product_view. When the
+	// caller (ReceiveStock) already runs inside a transaction this nests as a
+	// savepoint, so the whole receive is still atomic.
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
@@ -422,9 +445,24 @@ found:
 		).Error; err != nil {
 			return err
 		}
-		return tx.Table("products").
+		if err := tx.Table("products").
 			Where("id = ?", productID).
-			Update("cost_price", costPrice).Error
+			Update("cost_price", costPrice).Error; err != nil {
+			return err
+		}
+		return tx.Table("stock_movements").Create(map[string]any{
+			"id":              idgen.Generate(idgen.PrefixStockMovement),
+			"store_id":        storeID,
+			"product_id":      productID,
+			"location_id":     locID,
+			"quantity_change": addQty,
+			"type":            "IN",
+			"reference_id":    referenceID,
+			"note":            "purchase order receive",
+			"created_by":      createdBy,
+			"created_at":      gorm.Expr("NOW()"),
+			"updated_at":      gorm.Expr("NOW()"),
+		}).Error
 	})
 }
 
@@ -481,6 +519,11 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 
 // ---- Access ----
 
+// UserCanOperateStore reports whether the user may perform operate-level actions
+// (list/get + receive stock). Warehouse staff are included here so they can
+// receive POs; cashiers are included per product decision (receiving is a floor
+// task). Management actions (PO/supplier create/edit/cancel) use the stricter
+// UserCanManageStore below. Suspended members are excluded.
 func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -488,7 +531,26 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// UserCanManageStore reports whether the user is owner/manager of the store (or a
+// platform admin). Creating/editing/cancelling/deleting suppliers, supplier-product
+// links, and purchase orders are management actions; warehouse/cashier may only
+// LIST/GET and receive stock. Suspended members are excluded.
+func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
+	if role == "platform_admin" {
+		return true, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err

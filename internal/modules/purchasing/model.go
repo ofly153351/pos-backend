@@ -52,6 +52,8 @@ type PurchaseOrder struct {
 	Notes      string              `json:"notes,omitempty" gorm:"column:notes"`
 	TotalCost  float64             `json:"total_cost" gorm:"column:total_cost"`
 	ReceivedAt *time.Time          `json:"received_at,omitempty" gorm:"column:received_at"`
+	CreatedBy  string              `json:"created_by,omitempty" gorm:"column:created_by"`
+	ReceivedBy string              `json:"received_by,omitempty" gorm:"column:received_by"`
 	CreatedAt  time.Time           `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt  time.Time           `json:"updated_at" gorm:"column:updated_at"`
 

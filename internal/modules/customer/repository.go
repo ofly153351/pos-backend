@@ -60,6 +60,16 @@ func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Cust
 	} else {
 		payload["note"] = strings.TrimSpace(customer.Note)
 	}
+	if strings.TrimSpace(customer.TaxID) == "" {
+		payload["tax_id"] = nil
+	} else {
+		payload["tax_id"] = strings.TrimSpace(customer.TaxID)
+	}
+	if strings.TrimSpace(customer.Branch) == "" {
+		payload["branch"] = nil
+	} else {
+		payload["branch"] = strings.TrimSpace(customer.Branch)
+	}
 
 	if err := r.db.WithContext(ctx).Table("customers").Create(payload).Error; err != nil {
 		return Customer{}, err
@@ -119,6 +129,16 @@ func (r PostgresRepository) Update(ctx context.Context, customer Customer) (Cust
 		updates["note"] = nil
 	} else {
 		updates["note"] = strings.TrimSpace(customer.Note)
+	}
+	if strings.TrimSpace(customer.TaxID) == "" {
+		updates["tax_id"] = nil
+	} else {
+		updates["tax_id"] = strings.TrimSpace(customer.TaxID)
+	}
+	if strings.TrimSpace(customer.Branch) == "" {
+		updates["branch"] = nil
+	} else {
+		updates["branch"] = strings.TrimSpace(customer.Branch)
 	}
 
 	result := r.db.WithContext(ctx).

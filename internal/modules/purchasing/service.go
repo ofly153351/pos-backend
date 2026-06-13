@@ -27,7 +27,7 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 	if strings.TrimSpace(storeID) == "" {
 		return Supplier{}, ErrSupplierStoreIDReq
 	}
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return Supplier{}, err
 	}
 	if strings.TrimSpace(input.Name) == "" {
@@ -87,7 +87,7 @@ func (s Service) GetSupplier(ctx context.Context, actor auth.Claims, storeID, su
 }
 
 func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string, input UpdateSupplierRequest) (Supplier, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return Supplier{}, err
 	}
 
@@ -171,7 +171,7 @@ func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID,
 }
 
 func (s Service) DeleteSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string) error {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return err
 	}
 	return s.repo.DeleteSupplier(ctx, storeID, supplierID)
@@ -183,7 +183,7 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 	if strings.TrimSpace(storeID) == "" {
 		return PurchaseOrder{}, ErrPOStoreIDRequired
 	}
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -191,7 +191,7 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 		return PurchaseOrder{}, ErrPOItemsRequired
 	}
 
-	// Validate items
+	// Validate items once, before the retry loop (idempotent).
 	for _, item := range input.Items {
 		if item.Quantity <= 0 {
 			return PurchaseOrder{}, ErrPOInvalidQuantity
@@ -205,60 +205,79 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 		}
 	}
 
-	// Generate order number
 	now := time.Now().UTC()
 	datePrefix := now.Format("20060102")
-	seq, err := s.repo.GetPODailySequence(ctx, storeID, datePrefix)
-	if err != nil {
-		return PurchaseOrder{}, ErrPOOrderNumberGenerate
-	}
-	orderNumber := fmt.Sprintf("PO-%s-%05d", datePrefix, seq+1)
 
-	// Calculate total
+	// Total is independent of the order number; compute it once.
 	var totalCost float64
 	for _, item := range input.Items {
 		totalCost += float64(item.Quantity) * item.UnitCost
 	}
 
-	po := PurchaseOrder{
-		ID:          newID(),
-		StoreID:     storeID,
-		SupplierID:  strings.TrimSpace(input.SupplierID),
-		OrderNumber: orderNumber,
-		Status:      POStatusPending,
-		Notes:       strings.TrimSpace(input.Notes),
-		TotalCost:   totalCost,
-		CreatedAt:   now,
-	}
-
+	// The order number is derived from a COUNT (GetPODailySequence) that is not
+	// atomic with the insert, so two concurrent creates for the same store/day can
+	// race to the same PO-<date>-NNNNN. Generating the sequence INSIDE the insert
+	// tx narrows the window; the UNIQUE (store_id, order_number) index (migration
+	// 030) is the correctness backstop — it rejects the loser with SQLSTATE 23505,
+	// and we recompute the sequence and retry so the race stays invisible to the
+	// caller. Only after exhausting the attempts do we surface a conflict.
+	const maxOrderNumberAttempts = 5
 	var createdID string
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := NewPostgresRepository(tx)
+	for attempt := 0; attempt < maxOrderNumberAttempts; attempt++ {
+		txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			txRepo := NewPostgresRepository(tx)
 
-		created, err := txRepo.CreatePO(ctx, po)
-		if err != nil {
-			return err
-		}
-		createdID = created.ID
+			seq, gerr := txRepo.GetPODailySequence(ctx, storeID, datePrefix)
+			if gerr != nil {
+				return ErrPOOrderNumberGenerate
+			}
 
-		for _, item := range input.Items {
-			itemLineTotal := float64(item.Quantity) * item.UnitCost
-			poItem := PurchaseOrderItem{
-				ID:              newPOItemID(),
-				PurchaseOrderID: created.ID,
-				ProductID:       item.ProductID,
-				Quantity:        item.Quantity,
-				UnitCost:        item.UnitCost,
-				LineTotal:       itemLineTotal,
-				CreatedAt:       now,
+			po := PurchaseOrder{
+				ID:          newID(),
+				StoreID:     storeID,
+				SupplierID:  strings.TrimSpace(input.SupplierID),
+				OrderNumber: fmt.Sprintf("PO-%s-%05d", datePrefix, seq+1),
+				Status:      POStatusPending,
+				Notes:       strings.TrimSpace(input.Notes),
+				TotalCost:   totalCost,
+				CreatedBy:   actor.UserID,
+				CreatedAt:   now,
 			}
-			if err := txRepo.CreatePOItem(ctx, poItem); err != nil {
-				return err
+
+			created, cerr := txRepo.CreatePO(ctx, po)
+			if cerr != nil {
+				return cerr // unique-violation bubbles up here on a collision
 			}
+			createdID = created.ID
+
+			for _, item := range input.Items {
+				itemLineTotal := float64(item.Quantity) * item.UnitCost
+				poItem := PurchaseOrderItem{
+					ID:              newPOItemID(),
+					PurchaseOrderID: created.ID,
+					ProductID:       item.ProductID,
+					Quantity:        item.Quantity,
+					UnitCost:        item.UnitCost,
+					LineTotal:       itemLineTotal,
+					CreatedAt:       now,
+				}
+				if ierr := txRepo.CreatePOItem(ctx, poItem); ierr != nil {
+					return ierr
+				}
+			}
+			return nil
+		})
+
+		if txErr == nil {
+			break
 		}
-		return nil
-	}); err != nil {
-		return PurchaseOrder{}, err
+		if isUniqueViolation(txErr) {
+			if attempt < maxOrderNumberAttempts-1 {
+				continue // collision — recompute the sequence and retry
+			}
+			return PurchaseOrder{}, ErrPOOrderNumberConflict
+		}
+		return PurchaseOrder{}, txErr
 	}
 
 	// Reload with relations
@@ -280,7 +299,7 @@ func (s Service) GetPO(ctx context.Context, actor auth.Claims, storeID, poID str
 }
 
 func (s Service) UpdatePO(ctx context.Context, actor auth.Claims, storeID, poID string, input UpdatePORequest) (PurchaseOrder, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -342,69 +361,72 @@ func (s Service) ReceiveStock(ctx context.Context, actor auth.Claims, storeID, p
 		receiveMap[item.ProductID] = item.Quantity
 	}
 
-	allCompleted := true
-	anyReceived := false
 	now := time.Now().UTC()
 
-	for i := range existing.Items {
-		item := &existing.Items[i]
-		reqQty, ok := receiveMap[item.ProductID]
-		if !ok {
-			// Not in receive request, skip
-			if item.ReceivedQuantity < item.Quantity {
+	// All received lines, their stock/cost updates, the IN movements, and the PO
+	// status update run in ONE transaction: a failure on any line rolls back the
+	// entire receive, so stock, the PO, and the movement ledger never diverge.
+	txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewPostgresRepository(tx)
+		allCompleted := true
+		anyReceived := false
+
+		for i := range existing.Items {
+			item := &existing.Items[i]
+			reqQty, ok := receiveMap[item.ProductID]
+			if !ok {
+				// Not in receive request, skip
+				if item.ReceivedQuantity < item.Quantity {
+					allCompleted = false
+				}
+				continue
+			}
+
+			if reqQty < 0 {
+				return ErrPOReceiveInvalidQty
+			}
+
+			newReceived := item.ReceivedQuantity + reqQty
+			if newReceived > item.Quantity {
+				return ErrPOReceiveInvalidQty
+			}
+
+			newLineTotal := float64(newReceived) * item.UnitCost
+			if err := txRepo.UpdatePOItemReceived(ctx, item.ID, newReceived, newLineTotal); err != nil {
+				return err
+			}
+			if err := txRepo.UpdateProductStockAndCost(ctx, storeID, item.ProductID, reqQty, item.UnitCost, actor.UserID, poID); err != nil {
+				return err
+			}
+
+			item.ReceivedQuantity = newReceived
+			anyReceived = true
+
+			if newReceived < item.Quantity {
 				allCompleted = false
 			}
-			continue
 		}
 
-		if reqQty < 0 {
-			return PurchaseOrder{}, ErrPOReceiveInvalidQty
+		if !anyReceived {
+			return ErrPOReceiveInvalidQty
 		}
 
-		newReceived := item.ReceivedQuantity + reqQty
-		if newReceived > item.Quantity {
-			return PurchaseOrder{}, ErrPOReceiveInvalidQty
+		newStatus := POStatusPartial
+		if allCompleted {
+			newStatus = POStatusCompleted
 		}
-
-		// Update PO item received quantity
-		newLineTotal := float64(newReceived) * item.UnitCost
-		if err := s.repo.UpdatePOItemReceived(ctx, item.ID, newReceived, newLineTotal); err != nil {
-			return PurchaseOrder{}, err
-		}
-
-		// Update product stock and cost price
-		if err := s.repo.UpdateProductStockAndCost(ctx, storeID, item.ProductID, reqQty, item.UnitCost); err != nil {
-			return PurchaseOrder{}, err
-		}
-
-		item.ReceivedQuantity = newReceived
-		anyReceived = true
-
-		if newReceived < item.Quantity {
-			allCompleted = false
-		}
-	}
-
-	if !anyReceived {
-		return PurchaseOrder{}, ErrPOReceiveInvalidQty
-	}
-
-	// Update PO status
-	newStatus := POStatusPartial
-	if allCompleted {
-		newStatus = POStatusCompleted
-	}
-
-	ts := &timeSetter{Time: now, Valid: true}
-	if err := s.repo.UpdatePOStatus(ctx, poID, newStatus, ts); err != nil {
-		return PurchaseOrder{}, err
+		ts := &timeSetter{Time: now, Valid: true}
+		return txRepo.UpdatePOStatus(ctx, poID, newStatus, ts, actor.UserID)
+	})
+	if txErr != nil {
+		return PurchaseOrder{}, txErr
 	}
 
 	return s.repo.GetPO(ctx, storeID, poID)
 }
 
 func (s Service) CancelPO(ctx context.Context, actor auth.Claims, storeID, poID string) (PurchaseOrder, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -420,7 +442,7 @@ func (s Service) CancelPO(ctx context.Context, actor auth.Claims, storeID, poID 
 		return PurchaseOrder{}, ErrPOAlreadyCancelled
 	}
 
-	if err := s.repo.UpdatePOStatus(ctx, poID, POStatusCancelled, nil); err != nil {
+	if err := s.repo.UpdatePOStatus(ctx, poID, POStatusCancelled, nil, ""); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -441,7 +463,7 @@ func (s Service) ListSupplierProducts(ctx context.Context, actor auth.Claims, st
 }
 
 func (s Service) AddSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID string, input AddSupplierProductRequest) (SupplierProductResponse, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return SupplierProductResponse{}, err
 	}
 
@@ -501,7 +523,7 @@ func (s Service) AddSupplierProduct(ctx context.Context, actor auth.Claims, stor
 }
 
 func (s Service) UpdateSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID, productID string, input UpdateSupplierProductRequest) (SupplierProductResponse, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return SupplierProductResponse{}, err
 	}
 
@@ -542,7 +564,7 @@ func (s Service) UpdateSupplierProduct(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) RemoveSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID, productID string) error {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return err
 	}
 	// Verify supplier belongs to store
@@ -553,7 +575,7 @@ func (s Service) RemoveSupplierProduct(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Claims, storeID, supplierID string, input CreateSupplierProductAndLinkRequest) (SupplierProductResponse, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
 		return SupplierProductResponse{}, err
 	}
 
@@ -616,6 +638,8 @@ func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Cl
 	}, nil
 }
 
+// ensureAccess gates operate-level actions (list/get + receive stock): owner,
+// manager, cashier, and warehouse members all pass.
 func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID string) error {
 	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
@@ -623,6 +647,21 @@ func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID st
 	}
 	if !ok {
 		return ErrSupplierForbidden
+	}
+	return nil
+}
+
+// ensureManageAccess gates management actions (create/edit/cancel/delete of
+// suppliers, supplier-product links, and purchase orders): only owner/manager
+// (or platform_admin) pass. `forbidden` is the domain-specific 403 error to
+// return so supplier vs PO call sites surface the right message.
+func (s Service) ensureManageAccess(ctx context.Context, actor auth.Claims, storeID string, forbidden error) error {
+	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return forbidden
 	}
 	return nil
 }

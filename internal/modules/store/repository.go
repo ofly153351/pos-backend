@@ -227,6 +227,7 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 		PromptPayID           string     `gorm:"column:promptpay_id"`
 		TaxID                 string     `gorm:"column:tax_id"`
 		CurrencyCode          string     `gorm:"column:currency_code"`
+		MemberRole            string     `gorm:"column:member_role"`
 		SubscriptionPlanCode  string     `gorm:"column:subscription_plan_code"`
 		SubscriptionStatus    string     `gorm:"column:subscription_status"`
 		SubscriptionPeriodEnd *time.Time `gorm:"column:subscription_period_end"`
@@ -236,6 +237,14 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 	promptPaySelect := "'' AS promptpay_id"
 	if hasPromptPayColumn {
 		promptPaySelect = "COALESCE(s.promptpay_id, '') AS promptpay_id"
+	}
+
+	// A platform_admin lists every store without a store_members join, so there is
+	// no per-store role to read — report 'platform_admin'. Regular users join their
+	// membership row, so project its role (suspended members are filtered out below).
+	roleSelect := "'platform_admin' AS member_role"
+	if role != "platform_admin" {
+		roleSelect = "COALESCE(sm.role, '') AS member_role"
 	}
 
 	query := r.db.WithContext(ctx).
@@ -253,11 +262,12 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 			%s,
 			COALESCE(s.tax_id, '') AS tax_id,
 			s.currency_code,
+			%s,
 			COALESCE(sub.plan_code, '') AS subscription_plan_code,
 			COALESCE(sub.status, '') AS subscription_status,
 			sub.current_period_end AS subscription_period_end,
 			s.created_at
-		`, promptPaySelect)).
+		`, promptPaySelect, roleSelect)).
 		Joins(`
 			LEFT JOIN (
 				SELECT DISTINCT ON (ss.store_id)
@@ -274,7 +284,7 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 	if role != "platform_admin" {
 		query = query.
 			Joins("JOIN store_members sm ON sm.store_id = s.id").
-			Where("sm.user_id = ?", userID)
+			Where("sm.user_id = ? AND sm.status <> 'suspended'", userID)
 	}
 
 	var rows []storeListRow
@@ -297,6 +307,7 @@ func (r PostgresRepository) ListByUser(ctx context.Context, userID, role string)
 			PromptPayID:          row.PromptPayID,
 			TaxID:                row.TaxID,
 			CurrencyCode:         row.CurrencyCode,
+			Role:                 row.MemberRole,
 			SubscriptionPlanCode: row.SubscriptionPlanCode,
 			SubscriptionStatus:   row.SubscriptionStatus,
 			CreatedAt:            row.CreatedAt,
