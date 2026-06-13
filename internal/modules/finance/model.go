@@ -27,10 +27,12 @@ type Revenue struct {
 	Refunds        float64 `json:"refunds"`
 }
 
-// COGS = SUM(sale_item.quantity * product.cost_price) over the window. Uses the
-// product's CURRENT cost (no historical cost snapshot exists). MissingCostLines
-// counts sold lines whose product has no cost (or was deleted) — these
-// understate COGS and overstate profit, surfaced as a data-quality warning.
+// COGS = SUM(sale_item.quantity * COALESCE(unit_cost, product.cost_price, 0)) over
+// the window. New sales freeze the sale-time cost in sale_items.unit_cost
+// (migration 025); historical rows (NULL unit_cost) fall back to the product's
+// current cost. MissingCostLines counts sold lines with no resolvable cost (or a
+// deleted product) — these understate COGS and overstate profit, surfaced as a
+// data-quality warning.
 type COGS struct {
 	Total            float64 `json:"total"`
 	MissingCostLines int64   `json:"missing_cost_lines"`
@@ -80,6 +82,23 @@ type InventoryHealth struct {
 	DeadStock  int64 `json:"dead_stock"`
 }
 
+// DeadStockStat is the dead-stock count + tied capital (at cost) for products whose
+// last sale predates `days` ago (or that never sold). Computed in SQL from full sale
+// history — never from a capped client-side movement scan.
+type DeadStockStat struct {
+	Days  int     `json:"days"`
+	Count int64   `json:"count"`
+	Value float64 `json:"value"`
+}
+
+// InventoryReport backs the Inventory Value & Dead Stock report. Both halves are
+// DB aggregates (GetInventorySnapshot + GetDeadStock), so the report scales to any
+// dataset size with no client-side movement scanning.
+type InventoryReport struct {
+	Snapshot  InventorySnapshot `json:"snapshot"`
+	DeadStock DeadStockStat     `json:"dead_stock"`
+}
+
 // TrendPoint is one day of the sales-performance chart. Profit is the gross
 // margin from sales (revenue − COGS); operating expenses are not day-attributable.
 type TrendPoint struct {
@@ -94,8 +113,8 @@ type TopProduct struct {
 	ProductName  string  `json:"product_name"`
 	QuantitySold int64   `json:"quantity_sold"`
 	Revenue      float64 `json:"revenue"`
-	// Profit = revenue − (quantity × current cost_price). Uses current product
-	// cost (no per-sale cost snapshot), same caveat as COGS.
+	// Profit = revenue − (quantity × COALESCE(unit_cost, current cost_price)) —
+	// sale-time cost when snapshotted, current product cost otherwise.
 	Profit float64 `json:"profit"`
 }
 

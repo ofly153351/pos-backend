@@ -163,6 +163,39 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 	}, nil
 }
 
+// GetInventoryReport returns the point-in-time stock-health snapshot plus the
+// dead-stock count/value for the given idle threshold (default 30 days). Both are
+// SQL aggregates over the full dataset — no capped client-side movement scan.
+func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, storeID string, deadDays int) (InventoryReport, error) {
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+	if !allowed {
+		return InventoryReport{}, ErrForbiddenStoreAccess
+	}
+
+	if deadDays <= 0 {
+		deadDays = 30
+	}
+
+	snapshot, err := s.repo.GetInventorySnapshot(ctx, storeID)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+
+	soldBefore := time.Now().UTC().AddDate(0, 0, -deadDays)
+	count, value, err := s.repo.GetDeadStock(ctx, storeID, soldBefore)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+
+	return InventoryReport{
+		Snapshot:  snapshot,
+		DeadStock: DeadStockStat{Days: deadDays, Count: count, Value: value},
+	}, nil
+}
+
 // normalizeRange resolves either an explicit From/To window (max 366 days) or a
 // named period (7d/30d/90d, default 30d) into a concrete [from, to) range.
 func normalizeRange(query PnLQuery) (string, time.Time, time.Time, error) {

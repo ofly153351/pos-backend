@@ -7,6 +7,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// saleVoidedStatus mirrors sale.SaleStatusVoided — voided sales (e.g. a cancelled
+// credit sale whose goods were restocked) are excluded from every dashboard
+// revenue/sales aggregate. Kept local to avoid a module dependency, matching
+// finance/repository.go.
+const saleVoidedStatus = "voided"
+
 type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetSummary(ctx context.Context, storeID string, from, to time.Time) (Summary, error)
@@ -51,7 +57,7 @@ func (r PostgresRepository) GetSummary(ctx context.Context, storeID string, from
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
 			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	return result, err
 }
@@ -65,7 +71,7 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Group("COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown')").
 		Order("amount DESC").
 		Find(&items).Error
@@ -83,7 +89,7 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 			COALESCE(SUM(si.line_total), 0) AS amount
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Group("si.product_id, si.product_name").
 		Order("quantity_sold DESC, amount DESC").
 		Limit(limit).
@@ -119,7 +125,7 @@ func (r PostgresRepository) GetRecentSales(ctx context.Context, storeID string, 
 		`).
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Order("s.sold_at DESC, s.created_at DESC").
 		Limit(limit).
 		Find(&items).Error

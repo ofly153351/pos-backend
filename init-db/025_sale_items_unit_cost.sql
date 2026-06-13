@@ -1,0 +1,13 @@
+-- 025: Snapshot product cost onto each sale line at sale time.
+--
+-- Why: COGS was valued at the product's CURRENT cost_price, so a later price
+-- change retroactively rewrote the COGS/profit of all past periods. Capturing the
+-- cost at the moment of sale freezes historical accounting.
+--
+-- Nullable on purpose: existing rows stay NULL and fall back to the current
+-- product cost via COALESCE(sale_items.unit_cost, products.cost_price, 0) in the
+-- finance COGS queries. New sales populate unit_cost with the true sale-time cost.
+-- No backfill — historical rows are not rewritten.
+--
+-- Idempotent: safe to re-run (ADD COLUMN IF NOT EXISTS).
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(12,2);

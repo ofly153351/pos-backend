@@ -25,19 +25,21 @@ var AllowedPaymentMethods = map[string]bool{
 	"card":     true,
 }
 
-// DefaultCategoryNames seeds new stores (user-editable afterwards).
+// DefaultCategoryNames seeds new stores (user-editable afterwards). Kept in sync
+// with the SQL seed in init-db/020_expenses.sql so a store gets the SAME nine
+// categories whether it was seeded by the migration (existing stores) or lazily
+// by the service on first category list (new stores) — no language/granularity
+// drift between the two paths.
 var DefaultCategoryNames = []string{
-	"Rent",
-	"Electricity",
-	"Water",
-	"Salary",
-	"Fuel",
-	"Transportation",
-	"Telephone",
-	"Internet",
-	"Maintenance",
-	"Office Supplies",
-	"Other",
+	"ค่าเช่า",
+	"ค่าน้ำค่าไฟ",
+	"ค่าน้ำมัน",
+	"ค่าขนส่ง",
+	"เงินเดือน",
+	"ค่าซ่อมบำรุง",
+	"อุปกรณ์สำนักงาน",
+	"การตลาด",
+	"อื่นๆ",
 }
 
 type ExpenseCategory struct {

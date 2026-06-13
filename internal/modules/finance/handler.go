@@ -2,6 +2,7 @@ package finance
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +44,18 @@ func (h Handler) GetSummary(c *fiber.Ctx) error {
 		return writeFinanceError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "summary fetched", result)
+}
+
+func (h Handler) GetInventory(c *fiber.Ctx) error {
+	// dead_days = idle threshold for dead-stock (30/60/90 from the report filter);
+	// invalid/absent falls back to the service default (30).
+	deadDays, _ := strconv.Atoi(strings.TrimSpace(c.Query("dead_days")))
+
+	result, err := h.service.GetInventoryReport(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), deadDays)
+	if err != nil {
+		return writeFinanceError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "inventory report fetched", result)
 }
 
 func writeFinanceError(c *fiber.Ctx, err error) error {

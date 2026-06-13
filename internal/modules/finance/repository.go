@@ -11,6 +11,11 @@ import (
 // expenses count as operating cost in the P&L (kept local to avoid a module dep).
 const expenseApprovedStatus = "approved"
 
+// saleVoidedStatus mirrors sale.SaleStatusVoided — voided sales (e.g. a cancelled
+// credit sale whose goods were restocked) are excluded from all revenue/COGS
+// reporting. Kept local to avoid a module dependency (same rationale as above).
+const saleVoidedStatus = "voided"
+
 type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error)
@@ -51,8 +56,9 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	return count > 0, nil
 }
 
-// GetRevenue sums sale totals over [from, to). Refunds are not tracked yet (sales
-// only ever have status 'completed'), so the caller leaves Refunds at 0.
+// GetRevenue sums sale totals over [from, to), excluding voided sales (e.g. a
+// cancelled credit sale that was restocked). Refunds are not separately tracked,
+// so the caller leaves Refunds at 0.
 func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error) {
 	var result Revenue
 	err := r.db.WithContext(ctx).
@@ -63,25 +69,26 @@ func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
 			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	return result, err
 }
 
-// GetCOGS values every sold line at the product's current cost. A line whose
-// product was deleted (product_id NULL) or has no cost counts toward
-// MissingCostLines and contributes 0 to the total.
+// GetCOGS values every sold line at its snapshotted sale-time cost
+// (sale_items.unit_cost), falling back to the product's current cost for historical
+// rows. A line whose product was deleted (product_id NULL) or has no resolvable
+// cost counts toward MissingCostLines and contributes 0 to the total.
 func (r PostgresRepository) GetCOGS(ctx context.Context, storeID string, from, to time.Time) (COGS, error) {
 	var result COGS
 	err := r.db.WithContext(ctx).
 		Table("sale_items si").
 		Select(`
-			COALESCE(SUM(si.quantity * COALESCE(p.cost_price, 0)), 0) AS total,
-			COALESCE(SUM(CASE WHEN COALESCE(p.cost_price, 0) <= 0 THEN 1 ELSE 0 END), 0) AS missing_cost_lines
+			COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS total,
+			COALESCE(SUM(CASE WHEN COALESCE(si.unit_cost, p.cost_price, 0) <= 0 THEN 1 ELSE 0 END), 0) AS missing_cost_lines
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	return result, err
 }
@@ -140,7 +147,7 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Group("COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown')").
 		Order("amount DESC").
 		Find(&items).Error
@@ -181,7 +188,7 @@ func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, so
 		Table("sale_items si").
 		Select("si.product_id AS product_id, MAX(s.sold_at) AS last_sold").
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ?", storeID).
+		Where("s.store_id = ? AND s.status <> ?", storeID, saleVoidedStatus).
 		Group("si.product_id")
 
 	inner := r.db.WithContext(ctx).
@@ -201,8 +208,8 @@ func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, so
 }
 
 // GetTopProducts ranks products by units sold and includes per-product profit
-// (line revenue − quantity × current product cost). Lines whose product was
-// deleted (product_id NULL) contribute 0 cost.
+// (line revenue − quantity × COALESCE(unit_cost, current product cost)). Lines
+// whose product was deleted (product_id NULL) contribute 0 cost.
 func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, from, to time.Time, limit int) ([]TopProduct, error) {
 	var items []TopProduct
 	err := r.db.WithContext(ctx).
@@ -212,11 +219,11 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 			si.product_name,
 			COALESCE(SUM(si.quantity), 0) AS quantity_sold,
 			COALESCE(SUM(si.line_total), 0) AS revenue,
-			COALESCE(SUM(si.line_total), 0) - COALESCE(SUM(si.quantity * COALESCE(p.cost_price, 0)), 0) AS profit
+			COALESCE(SUM(si.line_total), 0) - COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS profit
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Group("si.product_id, si.product_name").
 		Order("quantity_sold DESC, revenue DESC").
 		Limit(limit).
@@ -231,7 +238,7 @@ func (r PostgresRepository) GetSalesCounters(ctx context.Context, storeID string
 	err := r.db.WithContext(ctx).
 		Table("sale_items si").
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Select("COALESCE(SUM(si.quantity), 0)").
 		Scan(&units).Error
 	if err != nil {
@@ -241,7 +248,7 @@ func (r PostgresRepository) GetSalesCounters(ctx context.Context, storeID string
 	var customers int64
 	err = r.db.WithContext(ctx).
 		Table("sales s").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Select("COUNT(DISTINCT s.customer_id)").
 		Scan(&customers).Error
 	return units, customers, err
@@ -258,22 +265,24 @@ func (r PostgresRepository) GetCategoryBreakdown(ctx context.Context, storeID st
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
 		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Group("COALESCE(p.product_type_id, ''), pt.name").
 		Order("total DESC").
 		Find(&rows).Error
 	return rows, err
 }
 
-// GetSalesByHour buckets revenue and order count by hour-of-day (0–23, UTC).
-// Sparse: only hours with sales are returned; the client fills the 24-hour grid.
+// GetSalesByHour buckets revenue and order count by hour-of-day (0–23) in the
+// store's Asia/Bangkok timezone, so a 12:00 local sale lands in bucket 12 (not 05
+// as raw UTC would). Sparse: only hours with sales are returned; the client fills
+// the 24-hour grid.
 func (r PostgresRepository) GetSalesByHour(ctx context.Context, storeID string, from, to time.Time) ([]HourStat, error) {
 	var rows []HourStat
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'UTC')::int AS hour, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
-		Group("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'UTC')").
+		Select("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'Asia/Bangkok')::int AS hour, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Group("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'Asia/Bangkok')").
 		Order("hour ASC").
 		Find(&rows).Error
 	return rows, err
@@ -291,9 +300,9 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 	var revRows []revRow
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select("to_char(s.sold_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
-		Group("to_char(s.sold_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')").
+		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS day, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')").
 		Order("day ASC").
 		Find(&revRows).Error
 	if err != nil {
@@ -307,11 +316,11 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 	var cogsRows []cogsRow
 	err = r.db.WithContext(ctx).
 		Table("sale_items si").
-		Select("to_char(s.sold_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, COALESCE(SUM(si.quantity * COALESCE(p.cost_price, 0)), 0) AS cogs").
+		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS day, COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS cogs").
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ?", storeID, from, to).
-		Group("to_char(s.sold_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')").
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')").
 		Find(&cogsRows).Error
 	if err != nil {
 		return nil, 0, err
