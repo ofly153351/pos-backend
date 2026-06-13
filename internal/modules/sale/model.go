@@ -46,6 +46,7 @@ type SaleItem struct {
 	UnitType              string    `json:"unit_type" gorm:"column:unit_type"`
 	Quantity              int       `json:"quantity" gorm:"column:quantity"`
 	UnitPrice             float64   `json:"unit_price" gorm:"column:unit_price"`
+	UnitCost              float64   `json:"unit_cost" gorm:"column:unit_cost"`
 	DiscountType          string    `json:"discount_type,omitempty" gorm:"column:discount_type"`
 	DiscountValue         *float64  `json:"discount_value,omitempty" gorm:"column:discount_value"`
 	DiscountAmountPerUnit float64   `json:"discount_amount_per_unit" gorm:"column:discount_amount_per_unit"`
@@ -59,14 +60,36 @@ func (Sale) TableName() string     { return "sales" }
 func (SaleItem) TableName() string { return "sale_items" }
 
 type CreateSaleRequest struct {
-	PaymentMethod string                  `json:"payment_method"`
-	PaidAmount    float64                 `json:"paid_amount"`
-	DiscountBill  float64                 `json:"discount_bill,omitempty"`
-	VATIncluded   *bool                   `json:"vat_included,omitempty"`
-	VATPercent    *float64                `json:"vat_percent,omitempty"`
-	Note          string                  `json:"note"`
-	CustomerID    string                  `json:"customer_id"`
-	Items         []CreateSaleItemRequest `json:"items"`
+	PaymentMethod  string                  `json:"payment_method"`
+	PaidAmount     float64                 `json:"paid_amount"`
+	DiscountBill   float64                 `json:"discount_bill,omitempty"`   // deprecated fallback (treated as manual)
+	ManualDiscount *float64                `json:"manual_discount,omitempty"` // explicit cashier bill discount
+	PromoDiscount  *float64                `json:"promo_discount,omitempty"`  // promotion-derived discount (server-verified)
+	PromotionIDs   []string                `json:"promotion_ids,omitempty"`   // applied active promotion ids
+	VATIncluded    *bool                   `json:"vat_included,omitempty"`
+	VATPercent     *float64                `json:"vat_percent,omitempty"`
+	Note           string                  `json:"note"`
+	CustomerID     string                  `json:"customer_id"`
+	Items          []CreateSaleItemRequest `json:"items"`
+}
+
+// DiscountInput carries the validated bill-discount inputs from the request into the
+// repository, where the cart subtotal is known. ManualDiscount/PromoDiscount are
+// pointers so an absent (nil) split falls back to the deprecated LegacyBill field.
+type DiscountInput struct {
+	ManualDiscount *float64
+	PromoDiscount  *float64
+	PromotionIDs   []string
+	LegacyBill     float64 // discount_bill fallback (treated as manual)
+	IsElevated     bool    // actor is owner/manager/platform_admin for this store
+}
+
+// appliedPromoResult reports which promotions the server actually honored on a sale
+// and the total verified promo discount, so the sale-create transaction can record
+// promotion usage (promotion_usages + promotions.usage_count/discount_given_total).
+type appliedPromoResult struct {
+	VerifiedDiscount float64
+	PromotionIDs     []string
 }
 
 type CreateSaleItemRequest struct {
@@ -83,6 +106,7 @@ type productSnapshot struct {
 	UnitType            string
 	IsActive            bool
 	BasePrice           float64
+	CostPrice           float64
 	SpecialPrice        *float64
 	SpecialPriceStartAt *time.Time
 	SpecialPriceEndAt   *time.Time

@@ -42,9 +42,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		SaleNumber:         newSaleNumber(now),
 		CashierUserID:      actor.UserID,
 		Status:             saleStatusCompleted,
-		PaymentMethod:      strings.TrimSpace(req.PaymentMethod),
+		PaymentMethod:      normalizePaymentMethod(req.PaymentMethod),
 		PaidAmount:         req.PaidAmount,
-		BillDiscountAmount: roundMoney(req.DiscountBill),
 		Note:               strings.TrimSpace(req.Note),
 		CustomerID:         strings.TrimSpace(req.CustomerID),
 		VATIncluded:        true,
@@ -81,7 +80,20 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		sale.TotalItems += item.Quantity
 	}
 
-	return s.repo.Create(ctx, sale)
+	// Owner/manager (or platform_admin) may apply a manual bill discount up to the
+	// remaining subtotal; cashiers are capped at 20% (enforced in resolveBillDiscount).
+	isElevated, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return Sale{}, err
+	}
+
+	return s.repo.Create(ctx, sale, DiscountInput{
+		ManualDiscount: req.ManualDiscount,
+		PromoDiscount:  req.PromoDiscount,
+		PromotionIDs:   req.PromotionIDs,
+		LegacyBill:     req.DiscountBill,
+		IsElevated:     isElevated,
+	})
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Sale, error) {
@@ -107,7 +119,8 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, saleID
 }
 
 func validateCreateRequest(req CreateSaleRequest) error {
-	if strings.TrimSpace(req.PaymentMethod) == "" {
+	method := normalizePaymentMethod(req.PaymentMethod)
+	if method == "" || !AllowedPaymentMethods[method] {
 		return ErrInvalidPaymentMethod
 	}
 	if req.PaidAmount < 0 {

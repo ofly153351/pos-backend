@@ -78,6 +78,8 @@ func writeSaleError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "paid_amount", err.Error())
 	case errors.Is(err, ErrInvalidBillDiscount), errors.Is(err, ErrBillDiscountExceedsAmount):
 		return httpx.Err422(c, "bill_discount_value", err.Error())
+	case errors.Is(err, ErrManualDiscountExceedsCap):
+		return httpx.Err422(c, "manual_discount", err.Error())
 	case errors.Is(err, ErrInvalidDiscountType):
 		return httpx.Err422(c, "discount_type", err.Error())
 	case errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue),

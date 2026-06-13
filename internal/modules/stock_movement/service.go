@@ -101,56 +101,65 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 	now := time.Now().UTC()
 	var movements []StockMovement
 
-	for _, item := range input.Items {
-		exists, err := s.productExistsInStore(ctx, storeID, item.ProductID)
-		if err != nil {
-			return AdditionResult{}, err
-		}
-		if !exists {
-			return AdditionResult{}, ErrProductNotFound
-		}
-
-		// Resolve the target location: use the provided one, or auto-find the
-		// store's first active sale-point location so the stocks table is always updated.
-		resolvedLocID := item.LocationID
-		if resolvedLocID == "" {
-			defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
+	// Wrap every movement + stock write in one transaction so a mid-loop failure
+	// rolls back all of them (no movement-without-stock drift, no partial add).
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewPostgresRepository(tx)
+		for _, item := range input.Items {
+			exists, err := s.productExistsInStore(ctx, storeID, item.ProductID)
 			if err != nil {
-				return AdditionResult{}, err
+				return err
 			}
-			resolvedLocID = defaultLoc
-		}
-
-		var locPtr *string
-		if resolvedLocID != "" {
-			locPtr = &resolvedLocID
-		}
-
-		mg := StockMovement{
-			ID:             newID(),
-			StoreID:        storeID,
-			ProductID:      item.ProductID,
-			LocationID:     locPtr,
-			QuantityChange: item.Quantity,
-			Type:           MovementTypeIn,
-			Note:           strings.TrimSpace(item.Note),
-			CreatedBy:      actor.UserID,
-			CreatedAt:      now,
-		}
-
-		created, err := s.repo.Create(ctx, mg)
-		if err != nil {
-			return AdditionResult{}, err
-		}
-
-		// Update stock in the locations table
-		if resolvedLocID != "" {
-			if err := s.repo.UpsertStock(ctx, storeID, item.ProductID, resolvedLocID, item.Quantity); err != nil {
-				return AdditionResult{}, err
+			if !exists {
+				return ErrProductNotFound
 			}
-		}
 
-		movements = append(movements, created)
+			// Resolve the target location: use the provided one, or auto-find the
+			// store's first active sale-point location so the stocks table is always updated.
+			resolvedLocID := item.LocationID
+			if resolvedLocID == "" {
+				defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
+				if err != nil {
+					return err
+				}
+				resolvedLocID = defaultLoc
+			}
+
+			var locPtr *string
+			if resolvedLocID != "" {
+				locPtr = &resolvedLocID
+			}
+
+			mg := StockMovement{
+				ID:             newID(),
+				StoreID:        storeID,
+				ProductID:      item.ProductID,
+				LocationID:     locPtr,
+				QuantityChange: item.Quantity,
+				Type:           MovementTypeIn,
+				Note:           strings.TrimSpace(item.Note),
+				CreatedBy:      actor.UserID,
+				CreatedAt:      now,
+			}
+
+			created, err := txRepo.Create(ctx, mg)
+			if err != nil {
+				return err
+			}
+
+			// Update stock in the locations table
+			if resolvedLocID != "" {
+				if err := txRepo.UpsertStock(ctx, storeID, item.ProductID, resolvedLocID, item.Quantity); err != nil {
+					return err
+				}
+			}
+
+			movements = append(movements, created)
+		}
+		return nil
+	})
+	if err != nil {
+		return AdditionResult{}, err
 	}
 
 	return AdditionResult{Movements: movements}, nil
@@ -198,15 +207,25 @@ func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID str
 		CreatedAt:      now,
 	}
 
-	created, err := s.repo.Create(ctx, mg)
+	// Movement + stock deduction in one transaction: if the guarded UpsertStock
+	// rejects an over-removal, the OUT movement is rolled back too (no drift).
+	var created StockMovement
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewPostgresRepository(tx)
+		var err error
+		created, err = txRepo.Create(ctx, mg)
+		if err != nil {
+			return err
+		}
+		if req.LocationID != "" {
+			if err := txRepo.UpsertStock(ctx, storeID, req.ProductID, req.LocationID, -req.Quantity); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return StockMovement{}, err
-	}
-
-	if req.LocationID != "" {
-		if err := s.repo.UpsertStock(ctx, storeID, req.ProductID, req.LocationID, -req.Quantity); err != nil {
-			return StockMovement{}, err
-		}
 	}
 
 	return created, nil
@@ -256,22 +275,27 @@ func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID s
 		CreatedAt:             now,
 	}
 
-	outCreated, err := s.repo.Create(ctx, outMg)
+	// Movement + source deduction + destination addition in one transaction so a
+	// mid-transfer failure can never split stock between the two locations.
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		txRepo := NewPostgresRepository(tx)
+		outCreated, err := txRepo.Create(ctx, outMg)
+		if err != nil {
+			return err
+		}
+		if err := txRepo.UpsertStock(ctx, storeID, req.ProductID, req.SourceLocationID, -req.Quantity); err != nil {
+			return err
+		}
+		if err := txRepo.UpsertStock(ctx, storeID, req.ProductID, req.DestLocationID, req.Quantity); err != nil {
+			return err
+		}
+		movements = append(movements, outCreated)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Deduct from source
-	if err := s.repo.UpsertStock(ctx, storeID, req.ProductID, req.SourceLocationID, -req.Quantity); err != nil {
-		return nil, err
-	}
-
-	// Add to destination
-	if err := s.repo.UpsertStock(ctx, storeID, req.ProductID, req.DestLocationID, req.Quantity); err != nil {
-		return nil, err
-	}
-
-	movements = append(movements, outCreated)
 	return movements, nil
 }
 
@@ -311,13 +335,6 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		locPtr = &resolvedLocID
 	}
 
-	// Get current quantity at resolved location
-	currentQty, err := s.repo.GetCurrentStockQty(ctx, storeID, req.ProductID, resolvedLocID)
-	if err != nil {
-		return StockMovement{}, err
-	}
-
-	diff := req.PhysicalQty - currentQty
 	now := time.Now().UTC()
 	movementType := strings.TrimSpace(req.MovementType)
 	if movementType == "" {
@@ -328,25 +345,46 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		refPtr = &ref
 	}
 
-	mg := StockMovement{
-		ID:             newID(),
-		StoreID:        storeID,
-		ProductID:      req.ProductID,
-		LocationID:     locPtr,
-		QuantityChange: diff,
-		Type:           movementType,
-		ReferenceID:    refPtr,
-		Note:           fmt.Sprintf("adjusted from %d to %d. %s", currentQty, req.PhysicalQty, strings.TrimSpace(req.Note)),
-		CreatedBy:      actor.UserID,
-		CreatedAt:      now,
-	}
-
-	created, err := s.repo.Create(ctx, mg)
+	// Lock the stock row, read current qty, write the movement, and set the new
+	// absolute quantity — all in one transaction so a concurrent sale/adjust cannot
+	// interleave (closes the read-modify-write race) and the movement is never
+	// recorded without the matching stock change.
+	var created StockMovement
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if resolvedLocID != "" {
+			// Row lock (no-op if the row doesn't exist yet; SetStockQuantity creates it).
+			if err := tx.Exec(
+				"SELECT 1 FROM stocks WHERE store_id = ? AND product_id = ? AND location_id = ? FOR UPDATE",
+				storeID, req.ProductID, resolvedLocID,
+			).Error; err != nil {
+				return err
+			}
+		}
+		txRepo := NewPostgresRepository(tx)
+		currentQty, err := txRepo.GetCurrentStockQty(ctx, storeID, req.ProductID, resolvedLocID)
+		if err != nil {
+			return err
+		}
+		mg := StockMovement{
+			ID:             newID(),
+			StoreID:        storeID,
+			ProductID:      req.ProductID,
+			LocationID:     locPtr,
+			QuantityChange: req.PhysicalQty - currentQty,
+			Type:           movementType,
+			ReferenceID:    refPtr,
+			Note:           fmt.Sprintf("adjusted from %d to %d. %s", currentQty, req.PhysicalQty, strings.TrimSpace(req.Note)),
+			CreatedBy:      actor.UserID,
+			CreatedAt:      now,
+		}
+		c, err := txRepo.Create(ctx, mg)
+		if err != nil {
+			return err
+		}
+		created = c
+		return txRepo.SetStockQuantity(ctx, storeID, req.ProductID, resolvedLocID, req.PhysicalQty)
+	})
 	if err != nil {
-		return StockMovement{}, err
-	}
-
-	if err := s.repo.SetStockQuantity(ctx, storeID, req.ProductID, resolvedLocID, req.PhysicalQty); err != nil {
 		return StockMovement{}, err
 	}
 

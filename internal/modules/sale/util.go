@@ -9,6 +9,11 @@ import (
 )
 
 const saleStatusCompleted = "completed"
+
+// SaleStatusVoided marks a sale that has been reversed (e.g. a cancelled credit
+// sale whose goods were restocked). Voided sales are excluded from all
+// revenue/COGS reporting.
+const SaleStatusVoided = "voided"
 const (
 	DiscountTypeAmount  = "amount"
 	DiscountTypePercent = "percent"
@@ -19,6 +24,8 @@ func newID() string { return idgen.Generate(idgen.PrefixSale) }
 func newSaleItemID() string { return idgen.Generate(idgen.PrefixSaleItem) }
 
 func newStockMovementID() string { return idgen.Generate(idgen.PrefixStockMovement) }
+
+func newPromotionUsageID() string { return idgen.Generate(idgen.PrefixPromotionUsage) }
 
 func newSaleNumber(now time.Time) string {
 	id := idgen.Generate(idgen.PrefixSale)

@@ -51,6 +51,20 @@ for arg in "$@"; do
   esac
 done
 
+compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+    return
+  fi
+
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+    return
+  fi
+
+  die "Neither 'docker compose' nor 'docker-compose' is available"
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # detect OS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -392,7 +406,7 @@ POSTGRES_HOST=127.0.0.1
 POSTGRES_DB=pos_db
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=${db_pass}
-POSTGRES_PORT=5432
+POSTGRES_PORT=15432
 POSTGRES_SSLMODE=disable
 
 MINIO_ROOT_USER=minioadmin
@@ -445,18 +459,18 @@ start_docker_services() {
   step "Docker services (PostgreSQL + MinIO)"
   cd "$BACKEND_DIR"
 
-  # export vars so docker compose can read them
+  # export vars so Docker Compose can read them
   set -a; source .env; set +a
 
   info "Starting containers..."
-  docker compose up -d postgres minio minio-client >> "$LOG_FILE" 2>&1
+  compose_cmd up -d postgres minio minio-client >> "$LOG_FILE" 2>&1
 
   info "Waiting for PostgreSQL to be healthy..."
   local attempts=0
-  until docker compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" &>/dev/null; do
+  until compose_cmd exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" &>/dev/null; do
     attempts=$((attempts+1))
     if (( attempts > 30 )); then
-      die "PostgreSQL did not become healthy after 30 s. Check: docker compose logs postgres"
+      die "PostgreSQL did not become healthy after 30 s. Check: docker-compose logs postgres"
     fi
     sleep 1
   done
