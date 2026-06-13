@@ -32,13 +32,48 @@ func RunMigrations(db *gorm.DB, migrationsDir string) error {
 
 	sort.Strings(entries)
 
+	// Ledger table records which migration files have been applied so each runs
+	// exactly once. Created here (not as a migration file) so it bootstraps itself
+	// and works on both fresh and existing databases. Existing DBs (which already
+	// have 001-025 applied but no ledger) re-run those files once — they are all
+	// idempotent — and record them; subsequent boots skip everything recorded.
+	if err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		filename   TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`).Error; err != nil {
+		return fmt.Errorf("create schema_migrations: %w", err)
+	}
+
+	var appliedRows []struct {
+		Filename string `gorm:"column:filename"`
+	}
+	if err := db.Raw(`SELECT filename FROM schema_migrations`).Scan(&appliedRows).Error; err != nil {
+		return fmt.Errorf("read schema_migrations: %w", err)
+	}
+	applied := make(map[string]bool, len(appliedRows))
+	for _, r := range appliedRows {
+		applied[r.Filename] = true
+	}
+
 	for _, path := range entries {
+		name := filepath.Base(path)
+		if applied[name] {
+			continue
+		}
+
 		sqlBytes, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 
-		if err := db.Exec(string(sqlBytes)).Error; err != nil {
+		// Run the migration and record it in ONE transaction: a failed migration
+		// rolls back cleanly and is retried (never half-applied) on the next boot.
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(string(sqlBytes)).Error; err != nil {
+				return fmt.Errorf("migration %s: %w", name, err)
+			}
+			return tx.Exec(`INSERT INTO schema_migrations (filename) VALUES (?)`, name).Error
+		}); err != nil {
 			return err
 		}
 	}

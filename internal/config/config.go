@@ -11,6 +11,7 @@ import (
 
 type Config struct {
 	AppName          string
+	Env              string
 	Host             string
 	Port             string
 	TokenKey         string
@@ -36,14 +37,19 @@ type Config struct {
 
 var dotenvOnce sync.Once
 
+// defaultTokenKey is the placeholder JWT signing secret shipped in .env.example.
+// It is only acceptable in local development (APP_ENV=development).
+const defaultTokenKey = "change-this-secret"
+
 func Load() Config {
 	loadDotEnvFile()
 
 	return Config{
 		AppName:          getEnv("APP_NAME", "pos-backend"),
+		Env:              strings.ToLower(getEnv("APP_ENV", "development")),
 		Host:             getEnv("APP_HOST", "0.0.0.0"),
 		Port:             getEnv("APP_PORT", "8080"),
-		TokenKey:         getEnv("APP_TOKEN_KEY", "change-this-secret"),
+		TokenKey:         getEnv("APP_TOKEN_KEY", defaultTokenKey),
 		TokenTTL:         24,
 		CORSAllowOrigins: getEnv("APP_CORS_ALLOW_ORIGINS", "http://localhost:3000"),
 		DatabaseURLValue: getEnv("DATABASE_URL", ""),
@@ -67,6 +73,22 @@ func Load() Config {
 
 func (c Config) HTTPAddress() string {
 	return c.Host + ":" + c.Port
+}
+
+// Validate enforces production-safety invariants. It must be called once at
+// startup (see cmd/api.go) before the server boots. It refuses to start a
+// staging/production process that is still using the shipped default secret.
+func (c Config) Validate() error {
+	switch c.Env {
+	case "production", "prod", "staging":
+		if c.TokenKey == defaultTokenKey {
+			return fmt.Errorf(
+				"APP_TOKEN_KEY is still the insecure default %q but APP_ENV=%q: set APP_TOKEN_KEY to a strong random secret (e.g. `openssl rand -hex 32`) before starting in %s",
+				defaultTokenKey, c.Env, c.Env,
+			)
+		}
+	}
+	return nil
 }
 
 func (c Config) DatabaseURL() string {

@@ -1,16 +1,18 @@
-// Package idgen generates structured, human-readable IDs.
-// Format: {prefix}-{8-digit monotonic number}
-// Example: pd-30144739
+// Package idgen generates structured, collision-resistant IDs.
+// Format: {prefix}-{xid}  (e.g. "pd-cbva8q9k4r7f3m2n1p0g").
 //
-// The counter is seeded from the current millisecond on startup so restarting
-// the process advances the starting point, making collisions practically
-// impossible (would require 100 million IDs before wrapping).
+// Entity IDs use rs/xid — a globally-unique, k-sortable 20-char identifier
+// (4-byte time + 3-byte machine + 2-byte pid + 3-byte counter). It is safe
+// across process restarts and multiple instances (PM2/cluster), unlike the
+// legacy millisecond-seeded per-process counter which could collide on restart.
+// NextInt() keeps a process-local counter for non-entity file-name tokens only.
 package idgen
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/rs/xid"
 )
 
 var counter uint64
@@ -55,14 +57,19 @@ const (
 	PrefixActivityLog           = "al"
 	PrefixExpense               = "exp"
 	PrefixExpenseCategory       = "exc"
+	PrefixStockCountSession     = "scs"
+	PrefixStockCountItem        = "sci"
+	PrefixCreditSale            = "crs"
+	PrefixCreditPayment         = "crp"
+	PrefixPromotion             = "promo"
+	PrefixPromotionUsage        = "pru"
 )
 
-// Generate returns {prefix}-{8-digit number}, e.g. "pd-30144739".
-// The numeric part is a monotonically increasing atomic counter seeded from
-// the process start time, guaranteeing uniqueness within a single process.
+// Generate returns {prefix}-{xid}, e.g. "pd-cbva8q9k4r7f3m2n1p0g".
+// xid is globally unique and k-sortable, so IDs never collide across process
+// restarts or multiple running instances.
 func Generate(prefix string) string {
-	n := atomic.AddUint64(&counter, 1) % 100_000_000
-	return fmt.Sprintf("%s-%08d", prefix, n)
+	return prefix + "-" + xid.New().String()
 }
 
 // NextInt returns just the 8-digit number, useful for file names or other

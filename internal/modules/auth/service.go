@@ -19,11 +19,11 @@ func NewService(repo UserRepository, tokens TokenManager) Service {
 }
 
 func (s Service) Register(ctx context.Context, input RegisterRequest) (AuthResponse, error) {
-	role := strings.TrimSpace(input.Role)
-	if role == "" {
-		role = RoleOwner
-	}
-	input.Role = role
+	// Public self-registration always receives the lowest global role. Elevated
+	// roles (platform_admin/owner/manager) are NEVER assignable from the request
+	// body — store ownership is granted via store membership when the user creates
+	// a store (store.CreateWithOwner inserts an 'owner' member), not via users.role.
+	input.Role = RoleCashier
 
 	if err := validateRegister(input); err != nil {
 		return AuthResponse{}, err

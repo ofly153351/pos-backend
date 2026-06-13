@@ -15,8 +15,8 @@ type Repository interface {
 	UpdateStatus(id string, status DocumentStatus) error
 	MarkPaid(id string) error
 	Delete(id string) error
-	BulkDelete(ids []string) error
-	BulkSetStatus(ids []string, status DocumentStatus) error
+	BulkDelete(storeID string, ids []string) error
+	BulkSetStatus(storeID string, ids []string, status DocumentStatus) error
 	NextSeq(storeID string, docType DocumentType) (int64, error)
 }
 
@@ -128,13 +128,13 @@ func (r *repository) Delete(id string) error {
 	return r.db.Delete(&Document{}, "id = ?", id).Error
 }
 
-func (r *repository) BulkDelete(ids []string) error {
-	return r.db.Delete(&Document{}, "id IN ?", ids).Error
+func (r *repository) BulkDelete(storeID string, ids []string) error {
+	return r.db.Delete(&Document{}, "store_id = ? AND id IN ?", storeID, ids).Error
 }
 
-func (r *repository) BulkSetStatus(ids []string, status DocumentStatus) error {
+func (r *repository) BulkSetStatus(storeID string, ids []string, status DocumentStatus) error {
 	return r.db.Model(&Document{}).
-		Where("id IN ?", ids).
+		Where("store_id = ? AND id IN ?", storeID, ids).
 		Updates(map[string]any{
 			"status":     status,
 			"updated_at": time.Now(),

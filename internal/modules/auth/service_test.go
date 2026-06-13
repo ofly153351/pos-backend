@@ -59,18 +59,22 @@ func TestRegisterAndLogin(t *testing.T) {
 	}
 	service := NewService(repo, NewTokenManager("test-secret", 24))
 
+	// Even when the request body asks for an elevated role, public registration
+	// must force the lowest global role (cashier). Store ownership is granted via
+	// store membership (store.CreateWithOwner), never via users.role — so the
+	// platform_admin escalation through /auth/register is closed.
 	registerRes, err := service.Register(context.Background(), RegisterRequest{
 		Name:     "POS Admin",
 		Email:    "admin@example.com",
 		Password: "password123",
-		Role:     RoleOwner,
+		Role:     RolePlatformAdmin,
 	})
 	if err != nil {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	if registerRes.User.Role != RoleOwner {
-		t.Fatalf("unexpected role: %s", registerRes.User.Role)
+	if registerRes.User.Role != RoleCashier {
+		t.Fatalf("expected register to force role=%s, got: %s", RoleCashier, registerRes.User.Role)
 	}
 
 	repo.stores[registerRes.User.ID] = "store_123"

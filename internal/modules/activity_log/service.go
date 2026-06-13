@@ -1,6 +1,14 @@
 package activity_log
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	"pos-backend/internal/modules/auth"
+)
+
+// ErrForbidden is returned when the actor is not a member of the requested store.
+var ErrForbidden = errors.New("forbidden")
 
 type Service struct {
 	repo Repository
@@ -36,7 +44,15 @@ func (s Service) Log(ctx context.Context, req LogRequest) {
 	})
 }
 
-func (s Service) List(ctx context.Context, q ListQuery) (ListResponse, error) {
+func (s Service) List(ctx context.Context, actor auth.Claims, q ListQuery) (ListResponse, error) {
+	ok, err := s.repo.UserCanOperateStore(ctx, q.StoreID, actor.UserID, actor.Role)
+	if err != nil {
+		return ListResponse{}, err
+	}
+	if !ok {
+		return ListResponse{}, ErrForbidden
+	}
+
 	if q.Page < 1 {
 		q.Page = 1
 	}

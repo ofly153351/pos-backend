@@ -319,12 +319,12 @@ func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID stri
 	}
 	switch req.Action {
 	case "DELETE":
-		return s.repo.BulkDelete(req.IDs)
+		return s.repo.BulkDelete(storeID, req.IDs)
 	case "SET_STATUS":
 		if req.Status == nil {
 			return ErrInvalidInput
 		}
-		return s.repo.BulkSetStatus(req.IDs, *req.Status)
+		return s.repo.BulkSetStatus(storeID, req.IDs, *req.Status)
 	default:
 		return ErrBadAction
 	}
@@ -408,6 +408,18 @@ type WHTCertOptions struct {
 func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
 	if storeID == "" {
 		return ErrInvalidInput
+	}
+	if actor.Role == auth.RolePlatformAdmin {
+		return nil
+	}
+	var count int64
+	if err := s.db.Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, actor.UserID, []string{"owner", "manager", "cashier"}).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrForbidden
 	}
 	return nil
 }
