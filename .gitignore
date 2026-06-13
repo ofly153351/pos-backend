@@ -2,3 +2,7 @@
 .cache/
 api/
 bin/
+
+# local development artifacts
+.tmp/
+outputs/
