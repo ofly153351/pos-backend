@@ -105,6 +105,8 @@ func writeProductError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "product_unit_id", err.Error())
 	case errors.Is(err, ErrInvalidBrandID):
 		return httpx.Err422(c, "brand_id", err.Error())
+	case errors.Is(err, ErrInvalidDefaultLocation):
+		return httpx.Err422(c, "default_location_id", err.Error())
 	case errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrInvalidStockStatus):
 		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
@@ -128,10 +130,11 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 		SKU:             c.FormValue("sku"),
 		Barcode:         c.FormValue("barcode"),
 		ProductCode:     strings.TrimSpace(c.FormValue("product_code")),
-		Description:     strings.TrimSpace(c.FormValue("description")),
-		StorageLocation: strings.TrimSpace(c.FormValue("storage_location")),
-		ProductTypeID:   c.FormValue("product_type_id"),
-		ProductUnitID:   c.FormValue("unit_id"),
+		Description:       strings.TrimSpace(c.FormValue("description")),
+		StorageLocation:   strings.TrimSpace(c.FormValue("storage_location")),
+		DefaultLocationID: strings.TrimSpace(c.FormValue("default_location_id")),
+		ProductTypeID:     c.FormValue("product_type_id"),
+		ProductUnitID:     c.FormValue("unit_id"),
 	}
 	if value := strings.TrimSpace(c.FormValue("min_stock")); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -277,6 +280,16 @@ func parseUpdateRequest(c *fiber.Ctx) (UpdateProductRequest, error) {
 	}
 	if value := c.FormValue("storage_location"); value != "" {
 		req.StorageLocation = &value
+	}
+	if value := strings.TrimSpace(c.FormValue("default_location_id")); value != "" {
+		req.DefaultLocationID = &value
+	}
+	if value := strings.TrimSpace(c.FormValue("clear_default_location")); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return UpdateProductRequest{}, err
+		}
+		req.ClearDefaultLocation = parsed
 	}
 	if value := strings.TrimSpace(c.FormValue("clear_product_code")); value != "" {
 		parsed, err := strconv.ParseBool(value)

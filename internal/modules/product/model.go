@@ -30,6 +30,7 @@ type Product struct {
 	ProductCode         string     `json:"product_code,omitempty" gorm:"column:product_code"`
 	Description         string     `json:"description,omitempty" gorm:"column:description"`
 	StorageLocation     string     `json:"storage_location,omitempty" gorm:"column:storage_location"`
+	DefaultLocationID   *string    `json:"default_location_id" gorm:"column:default_location_id"`
 	TotalStock          int        `json:"total_stock" gorm:"column:total_stock"`
 	IsActive            bool       `json:"is_active" gorm:"column:is_active"`
 	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at"`
@@ -48,6 +49,7 @@ type CreateProductRequest struct {
 	ProductCode         string
 	Description         string
 	StorageLocation     string
+	DefaultLocationID   string
 	ProductTypeID       string
 	ProductUnitID       string
 	MinStock            *int
@@ -69,9 +71,11 @@ type UpdateProductRequest struct {
 	ProductCode         *string
 	Description         *string
 	StorageLocation     *string
+	DefaultLocationID   *string
 	ClearBarcode        bool
 	ClearSKU            bool
 	ClearProductCode    bool
+	ClearDefaultLocation bool
 	ProductTypeID       *string
 	ProductUnitID       *string
 	MinStock            *int

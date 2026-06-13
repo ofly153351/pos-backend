@@ -61,6 +61,9 @@ func (r *fakeProductRepo) ProductUnitExists(ctx context.Context, storeID, produc
 func (r *fakeProductRepo) BrandExists(ctx context.Context, storeID, brandID string) (bool, error) {
 	return true, nil
 }
+func (r *fakeProductRepo) LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error) {
+	return true, nil
+}
 func (r *fakeProductRepo) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	return true, nil
 }

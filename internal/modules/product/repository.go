@@ -24,6 +24,7 @@ type Repository interface {
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
 	BrandExists(ctx context.Context, storeID, brandID string) (bool, error)
+	LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -46,6 +47,7 @@ type productQueryRow struct {
 	ProductCode         *string    `gorm:"column:product_code"`
 	Description         *string    `gorm:"column:description"`
 	StorageLocation     *string    `gorm:"column:storage_location"`
+	DefaultLocationID   *string    `gorm:"column:default_location_id"`
 	CostPrice           float64    `gorm:"column:cost_price"`
 	ImageURL            *string    `gorm:"column:image_url"`
 	MinStock            int        `gorm:"column:min_stock"`
@@ -123,6 +125,11 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	} else {
 		payload["storage_location"] = product.StorageLocation
 	}
+	if product.DefaultLocationID == nil || *product.DefaultLocationID == "" {
+		payload["default_location_id"] = nil
+	} else {
+		payload["default_location_id"] = *product.DefaultLocationID
+	}
 
 	if err := r.db.WithContext(ctx).Table("products").Create(payload).Error; err != nil {
 		return Product{}, err
@@ -163,7 +170,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
 				ELSE 'active'
 			END AS stock_status,
-			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location
+			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location, pv.default_location_id
 		`).
 		Order(func() string {
 			if sortBy == "updated_at" { return "pv.updated_at DESC" }
@@ -197,7 +204,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
 				ELSE 'active'
 			END AS stock_status,
-			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location
+			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location, pv.default_location_id
 		`).
 		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
 		Take(&row).Error
@@ -267,6 +274,11 @@ func (r PostgresRepository) Update(ctx context.Context, product Product) (Produc
 		updates["storage_location"] = nil
 	} else {
 		updates["storage_location"] = product.StorageLocation
+	}
+	if product.DefaultLocationID == nil || *product.DefaultLocationID == "" {
+		updates["default_location_id"] = nil
+	} else {
+		updates["default_location_id"] = *product.DefaultLocationID
 	}
 
 	if err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -445,6 +457,21 @@ func (r PostgresRepository) BrandExists(ctx context.Context, storeID, brandID st
 	return count > 0, nil
 }
 
+func (r PostgresRepository) LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error) {
+	if locationID == "" {
+		return false, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("locations").
+		Where("store_id = ? AND id = ?", storeID, locationID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -514,6 +541,7 @@ func (row productQueryRow) toProduct() Product {
 	if row.StorageLocation != nil {
 		product.StorageLocation = *row.StorageLocation
 	}
+	product.DefaultLocationID = row.DefaultLocationID
 	return product
 }
 

@@ -12,6 +12,7 @@ var (
 	ErrInvalidProductTypeID    = errors.New("product type does not belong to this store")
 	ErrInvalidProductUnitID    = errors.New("product unit does not belong to this store")
 	ErrInvalidBrandID          = errors.New("brand does not belong to this store")
+	ErrInvalidDefaultLocation  = errors.New("default storage location does not belong to this store")
 	ErrInvalidPagination       = errors.New("invalid pagination query")
 	ErrInvalidStockStatus      = errors.New("invalid stock_status filter")
 	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")

@@ -54,6 +54,17 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Product{}, ErrInvalidBrandID
 	}
 
+	defaultLocationID := strings.TrimSpace(input.DefaultLocationID)
+	if defaultLocationID != "" {
+		ok, err = s.repo.LocationBelongsToStore(ctx, storeID, defaultLocationID)
+		if err != nil {
+			return Product{}, err
+		}
+		if !ok {
+			return Product{}, ErrInvalidDefaultLocation
+		}
+	}
+
 	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
 	if err != nil {
 		return Product{}, err
@@ -84,6 +95,9 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
 		IsActive:            isActive,
 		CreatedAt:           time.Now().UTC(),
+	}
+	if defaultLocationID != "" {
+		product.DefaultLocationID = &defaultLocationID
 	}
 	if input.MinStock != nil {
 		product.MinStock = *input.MinStock
@@ -214,6 +228,24 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	}
 	if input.StorageLocation != nil {
 		current.StorageLocation = strings.TrimSpace(*input.StorageLocation)
+	}
+	if input.DefaultLocationID != nil {
+		loc := strings.TrimSpace(*input.DefaultLocationID)
+		if loc != "" {
+			belongs, lerr := s.repo.LocationBelongsToStore(ctx, storeID, loc)
+			if lerr != nil {
+				return Product{}, lerr
+			}
+			if !belongs {
+				return Product{}, ErrInvalidDefaultLocation
+			}
+			current.DefaultLocationID = &loc
+		} else {
+			current.DefaultLocationID = nil
+		}
+	}
+	if input.ClearDefaultLocation {
+		current.DefaultLocationID = nil
 	}
 	if input.ProductTypeID != nil {
 		current.ProductTypeID = strings.TrimSpace(*input.ProductTypeID)
