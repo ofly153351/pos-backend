@@ -48,7 +48,7 @@ type Repository interface {
 
 	// Products
 	GetProduct(ctx context.Context, storeID, productID string) (ProductRef, error)
-	UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64, createdBy, referenceID string) error
+	UpdateProductStockAndCost(ctx context.Context, storeID, productID, locationID, warehouseID string, addQty int, costPrice float64, createdBy, referenceID string) error
 	CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error)
 
 	// Access
@@ -379,61 +379,14 @@ func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID s
 	}, nil
 }
 
-func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, storeID, productID string, addQty int, costPrice float64, createdBy, referenceID string) error {
-	// Find or create a default receiving location in this store
-	var locID string
-	err := r.db.WithContext(ctx).
-		Table("locations").
-		Where("store_id = ? AND is_sale_point = ?", storeID, false).
-		Order("created_at ASC").
-		Select("id").
-		Take(&locID).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Try any location (for stores with only sale_point locations)
-			if err2 := r.db.WithContext(ctx).
-				Table("locations").
-				Where("store_id = ?", storeID).
-				Order("created_at ASC").
-				Select("id").
-				Take(&locID).Error; err2 == nil {
-				goto found
-			}
-			// Auto-create a default receiving location
-			locID = newLocationID()
-			var whID string
-			if err := r.db.WithContext(ctx).
-				Table("warehouses").
-				Where("store_id = ?", storeID).
-				Order("created_at ASC").
-				Select("id").
-				Take(&whID).Error; err != nil {
-				return err
-			}
-			if err := r.db.WithContext(ctx).
-				Table("locations").
-				Create(map[string]any{
-					"id":           locID,
-					"store_id":     storeID,
-					"warehouse_id": whID,
-					"name":         "รับสินค้าเข้า",
-					"is_sale_point": false,
-					"is_active":    true,
-					"created_at":   gorm.Expr("NOW()"),
-					"updated_at":   gorm.Expr("NOW()"),
-				}).Error; err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-found:
-
-	// Upsert stock at location, update cost_price on product, and record the IN
-	// movement so the ledger stays consistent with stocks / product_view. When the
-	// caller (ReceiveStock) already runs inside a transaction this nests as a
-	// savepoint, so the whole receive is still atomic.
+// UpdateProductStockAndCost adds received stock for a product at an ALREADY-RESOLVED
+// location (resolved by the caller from products.default_location_id via the shared
+// warehouse-receipt resolver — this function no longer selects or creates a
+// location). It upserts the per-location stock, the warehouse-level inventory pool,
+// updates cost_price, and records the IN movement. When the caller (ReceiveStock)
+// already runs inside a transaction this nests as a savepoint, so the whole receive
+// stays atomic.
+func (r PostgresRepository) UpdateProductStockAndCost(ctx context.Context, storeID, productID, locationID, warehouseID string, addQty int, costPrice float64, createdBy, referenceID string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
 			`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
@@ -441,7 +394,16 @@ found:
 			 ON CONFLICT (product_id, location_id)
 			 DO UPDATE SET quantity = stocks.quantity + ?, updated_at = NOW()
 			 WHERE (stocks.quantity + ?) >= 0`,
-			newStockID(), storeID, productID, locID, addQty, addQty, addQty,
+			newStockID(), storeID, productID, locationID, addQty, addQty, addQty,
+		).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(
+			`INSERT INTO warehouse_inventory (id, store_id, warehouse_id, product_id, quantity, transferred_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())
+			 ON CONFLICT (warehouse_id, product_id)
+			 DO UPDATE SET quantity = warehouse_inventory.quantity + EXCLUDED.quantity, updated_at = NOW()`,
+			idgen.Generate(idgen.PrefixWarehouseInventory), storeID, warehouseID, productID, addQty,
 		).Error; err != nil {
 			return err
 		}
@@ -454,7 +416,7 @@ found:
 			"id":              idgen.Generate(idgen.PrefixStockMovement),
 			"store_id":        storeID,
 			"product_id":      productID,
-			"location_id":     locID,
+			"location_id":     locationID,
 			"quantity_change": addQty,
 			"type":            "IN",
 			"reference_id":    referenceID,

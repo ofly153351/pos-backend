@@ -222,7 +222,10 @@ func writePurchasingError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "quantity", err.Error())
 	case errors.Is(err, ErrPOInvalidUnitCost):
 		return httpx.Err422(c, "unit_cost", err.Error())
-	case errors.Is(err, ErrPOInvalidStatus), errors.Is(err, ErrSupplierStoreIDReq), errors.Is(err, ErrPOStoreIDRequired):
+	case errors.Is(err, ErrPOInvalidStatus), errors.Is(err, ErrSupplierStoreIDReq), errors.Is(err, ErrPOStoreIDRequired),
+		errors.Is(err, ErrPOReceiveNoDefaultLocation), errors.Is(err, ErrPOReceiveLocationNotFound),
+		errors.Is(err, ErrPOReceiveLocationInactive), errors.Is(err, ErrPOReceiveLocationSalePoint),
+		errors.Is(err, ErrPOReceiveLocationWrongWarehouse):
 		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrSupplierForbidden), errors.Is(err, ErrPOForbidden):
 		return httpx.ErrForbidden(c, err.Error())

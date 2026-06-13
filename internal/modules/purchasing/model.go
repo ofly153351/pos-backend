@@ -151,7 +151,12 @@ type ReceivePOItemRequest struct {
 }
 
 type ReceivePORequest struct {
-	Items []ReceivePOItemRequest `json:"items"`
+	// WarehouseID is optional. When set, the resolved product default location must
+	// belong to it (wrong-warehouse rejection). When empty, each product is received
+	// into its default location's own warehouse. The location itself always comes
+	// from products.default_location_id — never from the client.
+	WarehouseID string                 `json:"warehouse_id"`
+	Items       []ReceivePOItemRequest `json:"items"`
 }
 
 type SupplierProduct struct {

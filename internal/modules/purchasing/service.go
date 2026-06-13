@@ -2,6 +2,7 @@ package purchasing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/modules/warehouse_receipt"
 )
 
 type Service struct {
@@ -395,7 +397,16 @@ func (s Service) ReceiveStock(ctx context.Context, actor auth.Claims, storeID, p
 			if err := txRepo.UpdatePOItemReceived(ctx, item.ID, newReceived, newLineTotal); err != nil {
 				return err
 			}
-			if err := txRepo.UpdateProductStockAndCost(ctx, storeID, item.ProductID, reqQty, item.UnitCost, actor.UserID, poID); err != nil {
+			// Resolve the destination from the product's AUTHORITATIVE default location
+			// (products.default_location_id) via the shared warehouse-receipt resolver —
+			// the same source of truth and validation as canonical Goods Receiving. This
+			// runs inside the transaction immediately before the stock mutation; any
+			// invalid default rolls back the entire receive.
+			loc, resolveErr := warehouse_receipt.ResolveValidReceivingLocation(ctx, tx, storeID, input.WarehouseID, item.ProductID)
+			if resolveErr != nil {
+				return translateReceivingLocationError(resolveErr)
+			}
+			if err := txRepo.UpdateProductStockAndCost(ctx, storeID, item.ProductID, loc.ID, loc.WarehouseID, reqQty, item.UnitCost, actor.UserID, poID); err != nil {
 				return err
 			}
 
@@ -423,6 +434,28 @@ func (s Service) ReceiveStock(ctx context.Context, actor auth.Claims, storeID, p
 	}
 
 	return s.repo.GetPO(ctx, storeID, poID)
+}
+
+// translateReceivingLocationError maps the shared warehouse-receipt resolver errors
+// onto purchasing-domain errors so Quick Receive returns clear HTTP 400 responses
+// without leaking the warehouse-receipt error vocabulary.
+func translateReceivingLocationError(err error) error {
+	switch {
+	case errors.Is(err, warehouse_receipt.ErrReceiptItemLocationMissing):
+		return ErrPOReceiveNoDefaultLocation
+	case errors.Is(err, warehouse_receipt.ErrReceiptLocationNotFound):
+		return ErrPOReceiveLocationNotFound
+	case errors.Is(err, warehouse_receipt.ErrReceiptLocationInactive):
+		return ErrPOReceiveLocationInactive
+	case errors.Is(err, warehouse_receipt.ErrReceiptLocationSalePoint):
+		return ErrPOReceiveLocationSalePoint
+	case errors.Is(err, warehouse_receipt.ErrReceiptLocationWrongWarehouse):
+		return ErrPOReceiveLocationWrongWarehouse
+	case errors.Is(err, warehouse_receipt.ErrReceiptProductNotFound):
+		return ErrPOProductNotFound
+	default:
+		return err
+	}
 }
 
 func (s Service) CancelPO(ctx context.Context, actor auth.Claims, storeID, poID string) (PurchaseOrder, error) {

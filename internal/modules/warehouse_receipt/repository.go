@@ -438,39 +438,80 @@ func (r PostgresRepository) GetLocationSnapshot(ctx context.Context, storeID, lo
 	return item, nil
 }
 
-// ResolveValidReceivingLocation resolves a product's authoritative default
-// storage location and validates it as a receiving destination for the given
-// warehouse. It is the single source of truth used by both submit and confirm,
-// so the rules stay identical. Works against r.db OR a transaction (when called
-// on PostgresRepository{db: tx}).
-func (r PostgresRepository) ResolveValidReceivingLocation(ctx context.Context, storeID, warehouseID, productID string) (locationSnapshot, error) {
+// ResolvedReceivingLocation is a product's validated default receiving location.
+type ResolvedReceivingLocation struct {
+	ID          string `gorm:"column:id"`
+	WarehouseID string `gorm:"column:warehouse_id"`
+	Name        string `gorm:"column:name"`
+	ZoneName    string `gorm:"column:zone_name"`
+	FloorName   string `gorm:"column:floor_name"`
+	IsActive    bool   `gorm:"column:is_active"`
+	IsSalePoint bool   `gorm:"column:is_sale_point"`
+}
+
+// ResolveValidReceivingLocation resolves a product's authoritative default storage
+// location (products.default_location_id) and validates it as a receiving
+// destination. It is the SINGLE source of truth shared by warehouse receipts and
+// purchasing Quick Receive, so the rules stay identical. Validations: the product
+// exists, has a default location, the location exists in the same store, is active,
+// and is not a sale point. Pass a non-empty warehouseID to additionally require the
+// location to belong to it; pass "" to skip the warehouse check (Quick Receive has
+// no document warehouse). Works against r.db OR a transaction's *gorm.DB.
+func ResolveValidReceivingLocation(ctx context.Context, db *gorm.DB, storeID, warehouseID, productID string) (ResolvedReceivingLocation, error) {
 	var def struct {
 		DefaultLocationID *string `gorm:"column:default_location_id"`
 	}
-	err := r.db.WithContext(ctx).Table("products").Select("default_location_id").Where("id = ? AND store_id = ?", productID, storeID).Take(&def).Error
+	err := db.WithContext(ctx).Table("products").Select("default_location_id").Where("id = ? AND store_id = ?", productID, storeID).Take(&def).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return locationSnapshot{}, ErrReceiptProductNotFound
+			return ResolvedReceivingLocation{}, ErrReceiptProductNotFound
 		}
-		return locationSnapshot{}, err
+		return ResolvedReceivingLocation{}, err
 	}
 	if def.DefaultLocationID == nil || strings.TrimSpace(*def.DefaultLocationID) == "" {
-		return locationSnapshot{}, ErrReceiptItemLocationMissing
+		return ResolvedReceivingLocation{}, ErrReceiptItemLocationMissing
 	}
-	location, err := r.GetLocationSnapshot(ctx, storeID, strings.TrimSpace(*def.DefaultLocationID))
+	var loc ResolvedReceivingLocation
+	err = db.WithContext(ctx).Table("locations").
+		Select("id, warehouse_id, name, COALESCE(zone_name, '') AS zone_name, COALESCE(floor_name, '') AS floor_name, is_active, is_sale_point").
+		Where("id = ? AND store_id = ?", strings.TrimSpace(*def.DefaultLocationID), storeID).
+		Take(&loc).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ResolvedReceivingLocation{}, ErrReceiptLocationNotFound
+		}
+		return ResolvedReceivingLocation{}, err
+	}
+	if !loc.IsActive {
+		return ResolvedReceivingLocation{}, ErrReceiptLocationInactive
+	}
+	if loc.IsSalePoint {
+		return ResolvedReceivingLocation{}, ErrReceiptLocationSalePoint
+	}
+	if warehouseID != "" && loc.WarehouseID != warehouseID {
+		return ResolvedReceivingLocation{}, ErrReceiptLocationWrongWarehouse
+	}
+	return loc, nil
+}
+
+// ResolveValidReceivingLocation (method) delegates to the package-level resolver,
+// preserving the existing signature used by submit/confirm. warehouse_receipt
+// always passes a non-empty warehouseID, so behavior is unchanged.
+func (r PostgresRepository) ResolveValidReceivingLocation(ctx context.Context, storeID, warehouseID, productID string) (locationSnapshot, error) {
+	loc, err := ResolveValidReceivingLocation(ctx, r.db, storeID, warehouseID, productID)
 	if err != nil {
 		return locationSnapshot{}, err
 	}
-	if !location.IsActive {
-		return locationSnapshot{}, ErrReceiptLocationInactive
-	}
-	if location.IsSalePoint {
-		return locationSnapshot{}, ErrReceiptLocationSalePoint
-	}
-	if location.WarehouseID != warehouseID {
-		return locationSnapshot{}, ErrReceiptLocationWrongWarehouse
-	}
-	return location, nil
+	return locationSnapshot{
+		ID:          loc.ID,
+		StoreID:     storeID,
+		WarehouseID: loc.WarehouseID,
+		Name:        loc.Name,
+		ZoneName:    loc.ZoneName,
+		FloorName:   loc.FloorName,
+		IsActive:    loc.IsActive,
+		IsSalePoint: loc.IsSalePoint,
+	}, nil
 }
 
 func (r PostgresRepository) WarehouseExists(ctx context.Context, storeID, warehouseID string) (bool, error) {
