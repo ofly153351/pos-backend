@@ -28,6 +28,7 @@ type Repository interface {
 	RecalculateTotals(ctx context.Context, receiptID string) error
 	GetProductSnapshot(ctx context.Context, storeID, productID string) (receiptProductSnapshot, error)
 	GetLocationSnapshot(ctx context.Context, storeID, locationID string) (locationSnapshot, error)
+	ResolveValidReceivingLocation(ctx context.Context, storeID, warehouseID, productID string) (locationSnapshot, error)
 	WarehouseExists(ctx context.Context, storeID, warehouseID string) (bool, error)
 	SupplierExists(ctx context.Context, storeID, supplierID string) (bool, error)
 	GetPurchaseOrder(ctx context.Context, storeID, purchaseOrderID string) (purchaseOrderSnapshot, error)
@@ -42,6 +43,8 @@ type Repository interface {
 	ComputePreview(ctx context.Context, receiptID string) ([]StockImpactPreview, error)
 	ConfirmDraft(ctx context.Context, receiptID, actorID string) error
 	CancelDraft(ctx context.Context, receiptID, actorID string) error
+	SubmitForReview(ctx context.Context, receiptID, actorID string) error
+	ReopenToDraft(ctx context.Context, receiptID, actorID string) error
 }
 
 type PostgresRepository struct{ db *gorm.DB }
@@ -77,7 +80,7 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 		return true, nil
 	}
 	var count int64
-	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).Count(&count).Error
+	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).Count(&count).Error
 	return count > 0, err
 }
 
@@ -86,7 +89,7 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 		return true, nil
 	}
 	var count int64
-	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).Count(&count).Error
+	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager"}).Count(&count).Error
 	return count > 0, err
 }
 
@@ -298,7 +301,7 @@ func (r PostgresRepository) CreateItems(ctx context.Context, items []WarehouseRe
 			"id":              item.ID,
 			"receipt_id":      item.ReceiptID,
 			"product_id":      item.ProductID,
-			"location_id":     item.LocationID,
+			"location_id":     nilIfEmpty(item.LocationID),
 			"warehouse_id":    item.WarehouseID,
 			"zone_name":       nilIfEmpty(item.ZoneName),
 			"floor_name":      nilIfEmpty(item.FloorName),
@@ -328,7 +331,7 @@ func (r PostgresRepository) CreateItems(ctx context.Context, items []WarehouseRe
 func (r PostgresRepository) UpdateItem(ctx context.Context, item WarehouseReceiptItem) error {
 	result := r.db.WithContext(ctx).Table("warehouse_receipt_items").Where("receipt_id = ? AND id = ?", item.ReceiptID, item.ID).Updates(map[string]any{
 		"product_id":      item.ProductID,
-		"location_id":     item.LocationID,
+		"location_id":     nilIfEmpty(item.LocationID),
 		"warehouse_id":    item.WarehouseID,
 		"zone_name":       nilIfEmpty(item.ZoneName),
 		"floor_name":      nilIfEmpty(item.FloorName),
@@ -413,7 +416,7 @@ func (r PostgresRepository) RecalculateTotals(ctx context.Context, receiptID str
 
 func (r PostgresRepository) GetProductSnapshot(ctx context.Context, storeID, productID string) (receiptProductSnapshot, error) {
 	var item receiptProductSnapshot
-	err := r.db.WithContext(ctx).Table("product_view").Select("id, store_id, name, COALESCE(sku, '') AS sku, COALESCE(barcode, '') AS barcode, COALESCE(product_unit_name, '') AS unit_name, is_active, COALESCE(cost_price, 0) AS cost_price").Where("id = ? AND store_id = ?", productID, storeID).Take(&item).Error
+	err := r.db.WithContext(ctx).Table("product_view").Select("id, store_id, name, COALESCE(sku, '') AS sku, COALESCE(barcode, '') AS barcode, COALESCE(product_unit_name, '') AS unit_name, is_active, COALESCE(cost_price, 0) AS cost_price, COALESCE(default_location_id, '') AS default_location_id").Where("id = ? AND store_id = ?", productID, storeID).Take(&item).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return receiptProductSnapshot{}, ErrReceiptProductNotFound
@@ -433,6 +436,41 @@ func (r PostgresRepository) GetLocationSnapshot(ctx context.Context, storeID, lo
 		return locationSnapshot{}, err
 	}
 	return item, nil
+}
+
+// ResolveValidReceivingLocation resolves a product's authoritative default
+// storage location and validates it as a receiving destination for the given
+// warehouse. It is the single source of truth used by both submit and confirm,
+// so the rules stay identical. Works against r.db OR a transaction (when called
+// on PostgresRepository{db: tx}).
+func (r PostgresRepository) ResolveValidReceivingLocation(ctx context.Context, storeID, warehouseID, productID string) (locationSnapshot, error) {
+	var def struct {
+		DefaultLocationID *string `gorm:"column:default_location_id"`
+	}
+	err := r.db.WithContext(ctx).Table("products").Select("default_location_id").Where("id = ? AND store_id = ?", productID, storeID).Take(&def).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return locationSnapshot{}, ErrReceiptProductNotFound
+		}
+		return locationSnapshot{}, err
+	}
+	if def.DefaultLocationID == nil || strings.TrimSpace(*def.DefaultLocationID) == "" {
+		return locationSnapshot{}, ErrReceiptItemLocationMissing
+	}
+	location, err := r.GetLocationSnapshot(ctx, storeID, strings.TrimSpace(*def.DefaultLocationID))
+	if err != nil {
+		return locationSnapshot{}, err
+	}
+	if !location.IsActive {
+		return locationSnapshot{}, ErrReceiptLocationInactive
+	}
+	if location.IsSalePoint {
+		return locationSnapshot{}, ErrReceiptLocationSalePoint
+	}
+	if location.WarehouseID != warehouseID {
+		return locationSnapshot{}, ErrReceiptLocationWrongWarehouse
+	}
+	return location, nil
 }
 
 func (r PostgresRepository) WarehouseExists(ctx context.Context, storeID, warehouseID string) (bool, error) {
@@ -622,8 +660,8 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 			}
 			return err
 		}
-		if receipt.Status != ReceiptStatusDraft {
-			return ErrReceiptConfirmOnlyDraft
+		if receipt.Status != ReceiptStatusDraft && receipt.Status != ReceiptStatusPendingReview {
+			return ErrReceiptConfirmInvalidStatus
 		}
 		items, err := repo.listItems(ctx, receiptID)
 		if err != nil {
@@ -669,6 +707,26 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 		}
 		now := time.Now().UTC()
 		for _, item := range items {
+			// Re-resolve the product's CURRENT authoritative default location inside
+			// the transaction and validate it (exists/active/same-store/same-warehouse/
+			// not a sale point). Any invalid item rolls back the entire confirmation.
+			location, err := repo.ResolveValidReceivingLocation(ctx, receipt.StoreID, receipt.WarehouseID, item.ProductID)
+			if err != nil {
+				return err
+			}
+			locationID := location.ID
+			// Persist the exact resolved location onto the item so confirmed history
+			// records where stock actually landed, independent of later product edits.
+			if err := tx.Table("warehouse_receipt_items").Where("id = ?", item.ID).Updates(map[string]any{
+				"location_id":   locationID,
+				"warehouse_id":  receipt.WarehouseID,
+				"location_name": location.Name,
+				"zone_name":     nilIfEmpty(location.ZoneName),
+				"floor_name":    nilIfEmpty(location.FloorName),
+				"updated_at":    now,
+			}).Error; err != nil {
+				return err
+			}
 			if err := tx.Exec(`
 				INSERT INTO warehouse_inventory (id, store_id, warehouse_id, product_id, quantity, transferred_at, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())
@@ -682,10 +740,9 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
 				ON CONFLICT (product_id, location_id)
 				DO UPDATE SET quantity = stocks.quantity + EXCLUDED.quantity, updated_at = NOW()
-			`, newID(), receipt.StoreID, item.ProductID, item.LocationID, item.Quantity).Error; err != nil {
+			`, newID(), receipt.StoreID, item.ProductID, locationID, item.Quantity).Error; err != nil {
 				return err
 			}
-			locationID := item.LocationID
 			referenceID := receipt.ID
 			if err := tx.Table("stock_movements").Create(map[string]any{
 				"id":              newStockMovementID(),
@@ -724,7 +781,7 @@ func (r PostgresRepository) CancelDraft(ctx context.Context, receiptID, actorID 
 			}
 			return err
 		}
-		if status != string(ReceiptStatusDraft) {
+		if status != string(ReceiptStatusDraft) && status != string(ReceiptStatusPendingReview) {
 			return ErrReceiptCancelOnlyDraft
 		}
 		now := time.Now().UTC()
@@ -737,6 +794,52 @@ func (r PostgresRepository) CancelDraft(ctx context.Context, receiptID, actorID 
 			return err
 		}
 		return PostgresRepository{db: tx}.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "cancel", Description: "receipt cancelled", ActorID: actorID, CreatedAt: now})
+	})
+}
+
+func (r PostgresRepository) SubmitForReview(ctx context.Context, receiptID, actorID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var status string
+		if err := tx.Table("warehouse_receipts").Select("status").Where("id = ?", receiptID).Take(&status).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrReceiptNotFound
+			}
+			return err
+		}
+		if status != string(ReceiptStatusDraft) {
+			return ErrReceiptSubmitOnlyDraft
+		}
+		now := time.Now().UTC()
+		if err := tx.Table("warehouse_receipts").Where("id = ?", receiptID).Updates(map[string]any{
+			"status":     string(ReceiptStatusPendingReview),
+			"updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		return PostgresRepository{db: tx}.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "submit", Description: "submitted for approval", ActorID: actorID, CreatedAt: now})
+	})
+}
+
+func (r PostgresRepository) ReopenToDraft(ctx context.Context, receiptID, actorID string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var status string
+		if err := tx.Table("warehouse_receipts").Select("status").Where("id = ?", receiptID).Take(&status).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrReceiptNotFound
+			}
+			return err
+		}
+		if status != string(ReceiptStatusPendingReview) {
+			return ErrReceiptReopenInvalidStatus
+		}
+		now := time.Now().UTC()
+		if err := tx.Table("warehouse_receipts").Where("id = ?", receiptID).Updates(map[string]any{
+			"status":     string(ReceiptStatusDraft),
+			"updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		return PostgresRepository{db: tx}.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "reopen", Description: "reopened to draft", ActorID: actorID, CreatedAt: now})
 	})
 }
 

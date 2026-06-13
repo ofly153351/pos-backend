@@ -31,6 +31,8 @@ func registerWarehouseReceiptRoutes(protected fiber.Router, deps appDependencies
 	protected.Post("/warehouse/receipts/:id/items", handler.AddItems)
 	protected.Put("/warehouse/receipts/:id/items/:item_id", handler.UpdateItem)
 	protected.Delete("/warehouse/receipts/:id/items/:item_id", handler.DeleteItem)
+	protected.Post("/warehouse/receipts/:id/submit", handler.Submit)
+	protected.Post("/warehouse/receipts/:id/reopen", handler.Reopen)
 	protected.Post("/warehouse/receipts/:id/confirm", handler.Confirm)
 	protected.Post("/warehouse/receipts/:id/cancel", handler.Cancel)
 	protected.Post("/warehouse/receipts/:id/attachment", handler.UploadAttachment)

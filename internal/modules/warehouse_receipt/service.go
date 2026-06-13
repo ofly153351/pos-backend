@@ -354,6 +354,55 @@ func (s Service) Confirm(ctx context.Context, actor auth.Claims, receiptID strin
 	return s.repo.GetByID(ctx, receiptID)
 }
 
+func (s Service) Submit(ctx context.Context, actor auth.Claims, receiptID string) (WarehouseReceipt, error) {
+	current, err := s.repo.GetByID(ctx, receiptID)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	if err := s.ensureOperateAccess(ctx, actor, current.StoreID); err != nil {
+		return WarehouseReceipt{}, err
+	}
+	if current.Status != ReceiptStatusDraft {
+		return WarehouseReceipt{}, ErrReceiptSubmitOnlyDraft
+	}
+	if len(current.Items) == 0 {
+		return WarehouseReceipt{}, ErrReceiptItemsRequired
+	}
+	// A receipt cannot move to pending_review while any positive-quantity item lacks
+	// a valid resolved location. Re-resolve each from the product's current default
+	// (exists/active/same-store/same-warehouse/not a sale point).
+	for _, item := range current.Items {
+		if item.Quantity <= 0 {
+			continue
+		}
+		if _, err := s.repo.ResolveValidReceivingLocation(ctx, current.StoreID, current.WarehouseID, item.ProductID); err != nil {
+			return WarehouseReceipt{}, err
+		}
+	}
+	if err := s.repo.SubmitForReview(ctx, receiptID, actor.UserID); err != nil {
+		return WarehouseReceipt{}, err
+	}
+	return s.repo.GetByID(ctx, receiptID)
+}
+
+func (s Service) Reopen(ctx context.Context, actor auth.Claims, receiptID string) (WarehouseReceipt, error) {
+	current, err := s.repo.GetByID(ctx, receiptID)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	allowed, err := s.repo.UserCanManageStore(ctx, current.StoreID, actor.UserID, actor.Role)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	if !allowed {
+		return WarehouseReceipt{}, ErrReceiptReopenForbidden
+	}
+	if err := s.repo.ReopenToDraft(ctx, receiptID, actor.UserID); err != nil {
+		return WarehouseReceipt{}, err
+	}
+	return s.repo.GetByID(ctx, receiptID)
+}
+
 func (s Service) Cancel(ctx context.Context, actor auth.Claims, receiptID string) (WarehouseReceipt, error) {
 	current, err := s.repo.GetByID(ctx, receiptID)
 	if err != nil {
@@ -654,10 +703,6 @@ func (s Service) materializeItem(ctx context.Context, repo Repository, receipt W
 	if productID == "" {
 		return WarehouseReceiptItem{}, ErrReceiptItemProductRequired
 	}
-	locationID := strings.TrimSpace(input.LocationID)
-	if locationID == "" {
-		return WarehouseReceiptItem{}, ErrReceiptItemLocationRequired
-	}
 	if input.Quantity < 1 {
 		return WarehouseReceiptItem{}, ErrReceiptItemQuantityRequired
 	}
@@ -668,18 +713,26 @@ func (s Service) materializeItem(ctx context.Context, repo Repository, receipt W
 	if !product.IsActive {
 		return WarehouseReceiptItem{}, ErrReceiptProductInactive
 	}
-	location, err := repo.GetLocationSnapshot(ctx, receipt.StoreID, locationID)
-	if err != nil {
-		return WarehouseReceiptItem{}, err
-	}
-	if !location.IsActive {
-		return WarehouseReceiptItem{}, ErrReceiptLocationInactive
-	}
-	if location.IsSalePoint {
-		return WarehouseReceiptItem{}, ErrReceiptLocationSalePoint
-	}
-	if location.WarehouseID != receipt.WarehouseID {
-		return WarehouseReceiptItem{}, ErrReceiptLocationWrongWarehouse
+	// The receiving location is resolved from the product's AUTHORITATIVE default
+	// location, never from the client. A product with no default location yet may
+	// be added to a draft with an empty location (nullable column); submit/confirm
+	// enforce a valid location. Any client-supplied location_id is ignored.
+	var locationID, locationName, zoneName, floorName string
+	if def := strings.TrimSpace(product.DefaultLocationID); def != "" {
+		location, err := repo.GetLocationSnapshot(ctx, receipt.StoreID, def)
+		switch {
+		case err == nil:
+			locationID = location.ID
+			locationName = location.Name
+			zoneName = location.ZoneName
+			floorName = location.FloorName
+		case errors.Is(err, ErrReceiptLocationNotFound):
+			// A dangling/cross-store default resolves to "not found" — leave the
+			// item's location unresolved (NULL draft) for correction rather than
+			// failing the whole add. Submit/confirm still block on it.
+		default:
+			return WarehouseReceiptItem{}, err
+		}
 	}
 	unitPrice := product.CostPrice
 	if input.UnitPrice != nil {
@@ -699,11 +752,11 @@ func (s Service) materializeItem(ctx context.Context, repo Repository, receipt W
 		ID:             newItemID(),
 		ReceiptID:      receipt.ID,
 		ProductID:      product.ID,
-		LocationID:     location.ID,
+		LocationID:     locationID,
 		WarehouseID:    receipt.WarehouseID,
-		ZoneName:       location.ZoneName,
-		FloorName:      location.FloorName,
-		LocationName:   location.Name,
+		ZoneName:       zoneName,
+		FloorName:      floorName,
+		LocationName:   locationName,
 		ProductName:    product.Name,
 		SKU:            product.SKU,
 		Barcode:        product.Barcode,

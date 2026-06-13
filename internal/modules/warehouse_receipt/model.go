@@ -8,9 +8,10 @@ import (
 type ReceiptStatus string
 
 const (
-	ReceiptStatusDraft     ReceiptStatus = "draft"
-	ReceiptStatusConfirmed ReceiptStatus = "confirmed"
-	ReceiptStatusCancelled ReceiptStatus = "cancelled"
+	ReceiptStatusDraft         ReceiptStatus = "draft"
+	ReceiptStatusPendingReview ReceiptStatus = "pending_review"
+	ReceiptStatusConfirmed     ReceiptStatus = "confirmed"
+	ReceiptStatusCancelled     ReceiptStatus = "cancelled"
 )
 
 type WarehouseReceipt struct {
@@ -219,14 +220,15 @@ type PrintReceiptResponse struct {
 }
 
 type receiptProductSnapshot struct {
-	ID        string  `gorm:"column:id"`
-	StoreID   string  `gorm:"column:store_id"`
-	Name      string  `gorm:"column:name"`
-	SKU       string  `gorm:"column:sku"`
-	Barcode   string  `gorm:"column:barcode"`
-	UnitName  string  `gorm:"column:unit_name"`
-	IsActive  bool    `gorm:"column:is_active"`
-	CostPrice float64 `gorm:"column:cost_price"`
+	ID                string  `gorm:"column:id"`
+	StoreID           string  `gorm:"column:store_id"`
+	Name              string  `gorm:"column:name"`
+	SKU               string  `gorm:"column:sku"`
+	Barcode           string  `gorm:"column:barcode"`
+	UnitName          string  `gorm:"column:unit_name"`
+	IsActive          bool    `gorm:"column:is_active"`
+	CostPrice         float64 `gorm:"column:cost_price"`
+	DefaultLocationID string  `gorm:"column:default_location_id"`
 }
 
 type locationSnapshot struct {
