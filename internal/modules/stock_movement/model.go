@@ -25,6 +25,9 @@ type StockMovement struct {
 	QuantityChange        int       `json:"quantity_change" gorm:"column:quantity_change"`
 	Type                  string    `json:"type" gorm:"column:type"`
 	ReferenceID           *string   `json:"reference_id,omitempty" gorm:"column:reference_id"`
+	Reason                string    `json:"reason,omitempty" gorm:"column:reason"`
+	IdempotencyKey        *string   `json:"-" gorm:"column:idempotency_key"`
+	RequestFingerprint    string    `json:"-" gorm:"column:request_fingerprint"`
 	Note                  string    `json:"note" gorm:"column:note"`
 	CreatedBy             string    `json:"created_by" gorm:"column:created_by"`
 	CreatedAt             time.Time `json:"created_at" gorm:"column:created_at"`
@@ -42,10 +45,12 @@ func (StockMovement) TableName() string {
 }
 
 type AddStockItemRequest struct {
-	ProductID  string `json:"product_id"`
-	LocationID string `json:"location_id"`
-	Quantity   int    `json:"quantity"`
-	Note       string `json:"note"`
+	ProductID      string `json:"product_id"`
+	LocationID     string `json:"location_id"`
+	Quantity       int    `json:"quantity"`
+	Reason         string `json:"reason"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Note           string `json:"note"`
 }
 
 type AddStockRequest struct {
@@ -53,10 +58,12 @@ type AddStockRequest struct {
 }
 
 type RemoveStockRequest struct {
-	ProductID  string `json:"product_id"`
-	LocationID string `json:"location_id"`
-	Quantity   int    `json:"quantity"`
-	Note       string `json:"note"`
+	ProductID      string `json:"product_id"`
+	LocationID     string `json:"location_id"`
+	Quantity       int    `json:"quantity"`
+	Reason         string `json:"reason"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Note           string `json:"note"`
 }
 
 type TransferStockRequest struct {
@@ -68,12 +75,14 @@ type TransferStockRequest struct {
 }
 
 type AdjustStockRequest struct {
-	ProductID    string `json:"product_id"`
-	LocationID   string `json:"location_id"`
-	PhysicalQty  int    `json:"physical_quantity"`
-	ReferenceID  string `json:"reference_id"`
-	MovementType string `json:"movement_type"`
-	Note         string `json:"note"`
+	ProductID      string `json:"product_id"`
+	LocationID     string `json:"location_id"`
+	PhysicalQty    int    `json:"physical_quantity"`
+	ReferenceID    string `json:"reference_id"`
+	MovementType   string `json:"movement_type"`
+	Reason         string `json:"reason"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Note           string `json:"note"`
 }
 
 type ListMovementsQuery struct {
@@ -95,10 +104,21 @@ type AdditionResult struct {
 }
 
 var (
-	ErrStockForbidden    = errors.New("user cannot operate this store")
-	ErrStockNoItems      = errors.New("at least one item is required")
-	ErrStockBadQty       = errors.New("quantity must be greater than zero")
-	ErrProductNotFound   = errors.New("product not found")
-	ErrInsufficientStock = errors.New("insufficient stock quantity")
-	ErrLocationMismatch  = errors.New("source and destination locations must be different")
+	ErrStockForbidden        = errors.New("user cannot operate this store")
+	ErrStockNoItems          = errors.New("at least one item is required")
+	ErrStockBadQty           = errors.New("quantity must be greater than zero")
+	ErrProductNotFound       = errors.New("product not found")
+	ErrInsufficientStock     = errors.New("insufficient stock quantity")
+	ErrLocationMismatch      = errors.New("source and destination locations must be different")
+	ErrStockLocationRequired = errors.New("a valid stock location is required")
+	// Phase W2 — adjustment reason + result guards. Messages are the user-facing Thai
+	// copy (the drawer surfaces backend messages directly).
+	ErrStockReasonRequired     = errors.New("กรุณาเลือกเหตุผลในการปรับสต็อก")
+	ErrStockReasonInvalid      = errors.New("เหตุผลในการปรับสต็อกไม่ถูกต้องสำหรับการดำเนินการนี้")
+	ErrStockReasonNoteRequired = errors.New("กรุณาระบุรายละเอียดเมื่อเลือกเหตุผล \"อื่น ๆ\"")
+	ErrStockExceedsAvailable   = errors.New("จำนวนที่ต้องการลดมากกว่าสต็อกคงเหลือในตำแหน่งนี้")
+	ErrStockNoChange           = errors.New("ยอดจริงเท่ากับยอดปัจจุบัน ไม่มีการเปลี่ยนแปลงสต็อก")
+	// ErrStockIdempotencyConflict: the same idempotency key was reused with a DIFFERENT
+	// request (product/location/quantity/type) — reject rather than return the original.
+	ErrStockIdempotencyConflict = errors.New("รหัสคำขอนี้ถูกใช้ไปแล้วกับรายการที่ไม่ตรงกัน")
 )

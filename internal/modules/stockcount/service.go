@@ -134,12 +134,16 @@ func (s Service) Apply(ctx context.Context, actor auth.Claims, storeID, sessionI
 			if _, err := mv.AdjustStock(ctx, actor, storeID, stock_movement.AdjustStockRequest{
 				ProductID:    it.ProductID,
 				PhysicalQty:  it.CountedQty,
+				Reason:       "DATA_CORRECTION", // count correction reason (W2 SET_ACTUAL set)
 				Note:         it.Note,
 				ReferenceID:  sessionID,
 				MovementType: stock_movement.MovementTypeCountCorrection,
-			}); err != nil {
+			}); err != nil && !errors.Is(err, stock_movement.ErrStockNoChange) {
 				return err
 			}
+			// ErrStockNoChange (counted == system) is fine: no movement is needed, but the
+			// item is still "applied" — stamp it so the session completes as before. W2
+			// only changed that a no-variance line no longer writes a zero-delta movement.
 			productIDs = append(productIDs, it.ProductID)
 		}
 

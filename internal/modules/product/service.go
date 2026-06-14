@@ -7,16 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/modules/stock_movement"
 )
 
 type Service struct {
 	repo    Repository
 	storage ImageStorage
+	db      *gorm.DB
 }
 
-func NewService(repo Repository, storage ImageStorage) Service {
-	return Service{repo: repo, storage: storage}
+func NewService(repo Repository, storage ImageStorage, db *gorm.DB) Service {
+	return Service{repo: repo, storage: storage, db: db}
 }
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, input CreateProductRequest) (Product, error) {
@@ -54,15 +58,28 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Product{}, ErrInvalidBrandID
 	}
 
+	// Phase W2 §4: every product gets a deterministic default location. An explicitly
+	// chosen location must be operational (active + active warehouse, sale-point allowed);
+	// otherwise resolve the store's authoritative default sale location (หน้าร้าน). If the
+	// store has none, reject rather than create a locationless product.
 	defaultLocationID := strings.TrimSpace(input.DefaultLocationID)
 	if defaultLocationID != "" {
-		ok, err = s.repo.LocationBelongsToStore(ctx, storeID, defaultLocationID)
+		ok, err = s.repo.ValidateOperationalLocation(ctx, storeID, defaultLocationID)
 		if err != nil {
 			return Product{}, err
 		}
 		if !ok {
 			return Product{}, ErrInvalidDefaultLocation
 		}
+	} else {
+		resolved, err := s.repo.GetStoreDefaultSaleLocationID(ctx, storeID)
+		if err != nil {
+			return Product{}, err
+		}
+		if resolved == "" {
+			return Product{}, ErrNoStoreDefaultSaleLocation
+		}
+		defaultLocationID = resolved
 	}
 
 	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
@@ -120,8 +137,34 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		product.Barcode = barcode
 	}
 
-	created, err := s.repo.Create(ctx, product)
-	if err != nil {
+	// Create the product and (if requested) post its opening-balance stock in ONE
+	// transaction (W2 §19): a positive initial_stock becomes an ADD movement at the
+	// resolved default location with reason OPENING_BALANCE. If the stock post fails the
+	// whole creation rolls back — the product is never left in an inconsistent partial
+	// state, and stock is never written to an arbitrary first sale point.
+	var created Product
+	txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		c, err := NewPostgresRepository(tx).Create(ctx, product)
+		if err != nil {
+			return err
+		}
+		if input.InitialStock > 0 {
+			stockSvc := stock_movement.NewService(stock_movement.NewPostgresRepository(tx), tx)
+			if _, err := stockSvc.AddStock(ctx, actor, storeID, stock_movement.AddStockRequest{
+				Items: []stock_movement.AddStockItemRequest{{
+					ProductID:  c.ID,
+					LocationID: defaultLocationID,
+					Quantity:   input.InitialStock,
+					Reason:     "OPENING_BALANCE",
+				}},
+			}); err != nil {
+				return err
+			}
+		}
+		created = c
+		return nil
+	})
+	if txErr != nil {
 		if imageURL != "" {
 			if deleteErr := s.storage.DeleteProductImage(imageURL); deleteErr != nil {
 				slog.WarnContext(ctx, "failed to delete newly saved product image after database create failure",
@@ -129,11 +172,17 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 					"product_id", product.ID,
 					"image_url", imageURL,
 					"delete_error", deleteErr.Error(),
-					"create_error", err.Error(),
+					"create_error", txErr.Error(),
 				)
 			}
 		}
-		return Product{}, err
+		return Product{}, txErr
+	}
+	// Re-fetch post-commit so the response reflects the opening-balance stock totals.
+	if input.InitialStock > 0 {
+		if refreshed, err := s.repo.GetByID(ctx, storeID, created.ID); err == nil {
+			created = refreshed
+		}
 	}
 	return created, nil
 }
@@ -232,7 +281,9 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, product
 	if input.DefaultLocationID != nil {
 		loc := strings.TrimSpace(*input.DefaultLocationID)
 		if loc != "" {
-			belongs, lerr := s.repo.LocationBelongsToStore(ctx, storeID, loc)
+			// §6: changing the default validates the new location the same way as create
+			// (operational); existing stock is never moved (this only updates the pointer).
+			belongs, lerr := s.repo.ValidateOperationalLocation(ctx, storeID, loc)
 			if lerr != nil {
 				return Product{}, lerr
 			}

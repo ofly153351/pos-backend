@@ -18,7 +18,7 @@ func newProductHandler(cfg config.Config, db *gorm.DB) product.Handler {
 		cfg.MinIOUseSSL,
 		cfg.MinIOPublicURL,
 	)
-	service := product.NewService(repo, storage)
+	service := product.NewService(repo, storage, db)
 	return product.NewHandler(service)
 }
 

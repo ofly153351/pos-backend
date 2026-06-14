@@ -64,6 +64,12 @@ func (r *fakeProductRepo) BrandExists(ctx context.Context, storeID, brandID stri
 func (r *fakeProductRepo) LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error) {
 	return true, nil
 }
+func (r *fakeProductRepo) ValidateOperationalLocation(ctx context.Context, storeID, locationID string) (bool, error) {
+	return true, nil
+}
+func (r *fakeProductRepo) GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error) {
+	return "loc-test", nil
+}
 func (r *fakeProductRepo) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	return true, nil
 }
@@ -89,7 +95,7 @@ func baseProduct() productmodule.Product {
 func TestUpdateProductImageDeletesOldImageAfterSuccessfulDBUpdate(t *testing.T) {
 	repo := &fakeProductRepo{product: baseProduct()}
 	storage := &fakeImageStorage{saveURL: "/uploads/products/new.png"}
-	svc := productmodule.NewService(repo, storage)
+	svc := productmodule.NewService(repo, storage, nil)
 
 	updated, err := svc.Update(context.Background(), auth.Claims{UserID: "user-1", Role: "owner"}, "store-1", "product-1", productmodule.UpdateProductRequest{ImageFile: &multipart.FileHeader{Filename: "new.png"}})
 	if err != nil {
@@ -107,7 +113,7 @@ func TestUpdateProductImageDeletesNewImageWhenDBUpdateFails(t *testing.T) {
 	dbErr := errors.New("db failed")
 	repo := &fakeProductRepo{product: baseProduct(), updateErr: dbErr}
 	storage := &fakeImageStorage{saveURL: "/uploads/products/new.png"}
-	svc := productmodule.NewService(repo, storage)
+	svc := productmodule.NewService(repo, storage, nil)
 
 	_, err := svc.Update(context.Background(), auth.Claims{UserID: "user-1", Role: "owner"}, "store-1", "product-1", productmodule.UpdateProductRequest{ImageFile: &multipart.FileHeader{Filename: "new.png"}})
 	if !errors.Is(err, dbErr) {
@@ -121,7 +127,7 @@ func TestUpdateProductImageDeletesNewImageWhenDBUpdateFails(t *testing.T) {
 func TestUpdateProductImageOldDeleteFailureDoesNotBlockResponse(t *testing.T) {
 	repo := &fakeProductRepo{product: baseProduct()}
 	storage := &fakeImageStorage{saveURL: "/uploads/products/new.png", deleteErr: errors.New("delete failed")}
-	svc := productmodule.NewService(repo, storage)
+	svc := productmodule.NewService(repo, storage, nil)
 
 	updated, err := svc.Update(context.Background(), auth.Claims{UserID: "user-1", Role: "owner"}, "store-1", "product-1", productmodule.UpdateProductRequest{ImageFile: &multipart.FileHeader{Filename: "new.png"}})
 	if err != nil {

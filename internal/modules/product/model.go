@@ -32,6 +32,7 @@ type Product struct {
 	StorageLocation     string     `json:"storage_location,omitempty" gorm:"column:storage_location"`
 	DefaultLocationID   *string    `json:"default_location_id" gorm:"column:default_location_id"`
 	TotalStock          int        `json:"total_stock" gorm:"column:total_stock"`
+	WarehouseStock      int        `json:"warehouse_stock" gorm:"column:warehouse_stock"`
 	IsActive            bool       `json:"is_active" gorm:"column:is_active"`
 	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt           time.Time  `json:"updated_at" gorm:"column:updated_at"`
@@ -54,6 +55,7 @@ type CreateProductRequest struct {
 	ProductUnitID       string
 	MinStock            *int
 	MaxStock            *int
+	InitialStock        int
 	BasePrice           float64
 	CostPrice           float64
 	SpecialPrice        *float64
@@ -64,32 +66,32 @@ type CreateProductRequest struct {
 }
 
 type UpdateProductRequest struct {
-	Name                *string
-	BrandID             *string
-	SKU                 *string
-	Barcode             *string
-	ProductCode         *string
-	Description         *string
-	StorageLocation     *string
-	DefaultLocationID   *string
-	ClearBarcode        bool
-	ClearSKU            bool
-	ClearProductCode    bool
+	Name                 *string
+	BrandID              *string
+	SKU                  *string
+	Barcode              *string
+	ProductCode          *string
+	Description          *string
+	StorageLocation      *string
+	DefaultLocationID    *string
+	ClearBarcode         bool
+	ClearSKU             bool
+	ClearProductCode     bool
 	ClearDefaultLocation bool
-	ProductTypeID       *string
-	ProductUnitID       *string
-	MinStock            *int
-	MaxStock            *int
-	ClearMaxStock       bool
-	BasePrice           *float64
-	CostPrice           *float64
-	SpecialPrice        *float64
-	ClearSpecialPrice   bool
-	SpecialPriceStartAt *time.Time
-	SpecialPriceEndAt   *time.Time
-	ClearSpecialWindow  bool
-	IsActive            *bool
-	ImageFile           *multipart.FileHeader
+	ProductTypeID        *string
+	ProductUnitID        *string
+	MinStock             *int
+	MaxStock             *int
+	ClearMaxStock        bool
+	BasePrice            *float64
+	CostPrice            *float64
+	SpecialPrice         *float64
+	ClearSpecialPrice    bool
+	SpecialPriceStartAt  *time.Time
+	SpecialPriceEndAt    *time.Time
+	ClearSpecialWindow   bool
+	IsActive             *bool
+	ImageFile            *multipart.FileHeader
 }
 
 type ListProductsQuery struct {

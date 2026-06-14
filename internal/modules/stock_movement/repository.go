@@ -35,6 +35,15 @@ func (r PostgresRepository) Create(ctx context.Context, m StockMovement) (StockM
 		"created_at":      m.CreatedAt,
 		"updated_at":      m.CreatedAt,
 	}
+	if m.Reason != "" {
+		payload["reason"] = m.Reason
+	}
+	if m.IdempotencyKey != nil {
+		payload["idempotency_key"] = *m.IdempotencyKey
+	}
+	if m.RequestFingerprint != "" {
+		payload["request_fingerprint"] = m.RequestFingerprint
+	}
 	if m.ReferenceID != nil {
 		payload["reference_id"] = *m.ReferenceID
 	}

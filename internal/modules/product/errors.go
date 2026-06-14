@@ -13,10 +13,14 @@ var (
 	ErrInvalidProductUnitID    = errors.New("product unit does not belong to this store")
 	ErrInvalidBrandID          = errors.New("brand does not belong to this store")
 	ErrInvalidDefaultLocation  = errors.New("default storage location does not belong to this store")
-	ErrInvalidPagination       = errors.New("invalid pagination query")
-	ErrInvalidStockStatus      = errors.New("invalid stock_status filter")
-	ErrForbiddenStoreAccess    = errors.New("user cannot manage this store")
-	ErrProductNotFound         = errors.New("product not found")
-	ErrGenerateSKUFailed       = errors.New("unable to generate unique barcode")
-	ErrProductInUse            = errors.New("cannot delete product: it is referenced by active purchase orders or other records")
+	// Phase W2 §4: a product needs a deterministic default location. When none is given
+	// and the store has no valid default sale location, creation is rejected with this
+	// user-facing Thai message rather than silently leaving the product locationless.
+	ErrNoStoreDefaultSaleLocation = errors.New("ไม่พบตำแหน่งขายเริ่มต้นของร้าน กรุณาตั้งค่าคลังสินค้าและตำแหน่งหน้าร้านก่อนสร้างสินค้า")
+	ErrInvalidPagination          = errors.New("invalid pagination query")
+	ErrInvalidStockStatus         = errors.New("invalid stock_status filter")
+	ErrForbiddenStoreAccess       = errors.New("user cannot manage this store")
+	ErrProductNotFound            = errors.New("product not found")
+	ErrGenerateSKUFailed          = errors.New("unable to generate unique barcode")
+	ErrProductInUse               = errors.New("cannot delete product: it is referenced by active purchase orders or other records")
 )

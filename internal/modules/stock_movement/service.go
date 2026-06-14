@@ -2,8 +2,11 @@ package stock_movement
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,28 +45,35 @@ func (s Service) productExistsInStore(ctx context.Context, storeID, productID st
 	return count > 0, err
 }
 
-// findDefaultStockLocation returns the first active sale-point location for the store.
-// Falls back to any active location so stock is always recorded in the stocks table.
-func (s Service) findDefaultStockLocation(ctx context.Context, storeID string) (string, error) {
+// resolveStockLocation picks the location a stock operation targets, WITHOUT ever
+// guessing by row order (Phase W2 §15/§19). Precedence: an explicit location wins;
+// else the product's own default_location_id (only if it is still an active location);
+// else the store's authoritative default sale location (is_default_sale + active +
+// sale point). An empty result means the caller must reject with ErrStockLocationRequired
+// rather than silently pick an arbitrary first row.
+func (s Service) resolveStockLocation(ctx context.Context, storeID, productID, explicit string) (string, error) {
+	if e := strings.TrimSpace(explicit); e != "" {
+		return e, nil
+	}
+	// Product default, only if it points at an active location in this store.
 	var locID string
 	err := s.db.WithContext(ctx).
-		Table("locations").
-		Select("id").
-		Where("store_id = ? AND is_sale_point = TRUE AND is_active = TRUE", storeID).
-		Order("created_at ASC").
+		Table("products p").
+		Select("p.default_location_id").
+		Joins("JOIN locations l ON l.id = p.default_location_id AND l.is_active = TRUE").
+		Where("p.id = ? AND p.store_id = ?", productID, storeID).
 		Take(&locID).Error
-	if err == nil {
+	if err == nil && strings.TrimSpace(locID) != "" {
 		return locID, nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", err
 	}
-	// Fallback: any active location in the store
+	// Store authoritative default sale location (W1 flag).
 	err = s.db.WithContext(ctx).
 		Table("locations").
 		Select("id").
-		Where("store_id = ? AND is_active = TRUE", storeID).
-		Order("created_at ASC").
+		Where("store_id = ? AND is_default_sale = TRUE AND is_active = TRUE AND is_sale_point = TRUE", storeID).
 		Take(&locID).Error
 	if err == nil {
 		return locID, nil
@@ -72,6 +82,64 @@ func (s Service) findDefaultStockLocation(ctx context.Context, storeID string) (
 		return "", nil
 	}
 	return "", err
+}
+
+// findByIdempotencyKey returns a prior movement for this (store, key), or nil if none.
+// Used to make a retried adjustment submit a no-op that returns the original result.
+func (s Service) findByIdempotencyKey(ctx context.Context, storeID, key string) (*StockMovement, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, nil
+	}
+	var m StockMovement
+	err := s.db.WithContext(ctx).Table("stock_movements").
+		Where("store_id = ? AND idempotency_key = ?", storeID, key).
+		Take(&m).Error
+	if err == nil {
+		return &m, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return nil, err
+}
+
+// isUniqueViolation reports whether err is a Postgres unique_violation (SQLSTATE 23505) —
+// the idempotency-key index firing when two identical submits race past the pre-check.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "SQLSTATE 23505")
+}
+
+// normalizeNote is the documented note-normalization rule for the idempotency
+// fingerprint: surrounding whitespace is trimmed and meaningful internal text is
+// preserved; an empty note and an absent/null note are EQUIVALENT (both → "").
+func normalizeNote(note string) string {
+	return strings.TrimSpace(note)
+}
+
+// requestFingerprint is a deterministic hash of a stock-adjustment request's
+// business-significant fields, representing the ORIGINAL user intent. A reused
+// idempotency key whose fingerprint matches is a safe retry; a different fingerprint is
+// a conflict. For SET_ACTUAL, requestedQty is the REQUESTED physical quantity — never the
+// live-stock-dependent computed delta — so a SET 10 vs SET 20 (same key) is a mismatch.
+//
+// Fields (in fixed order): store_id, product_id, location_id, mode (ADD/SUBTRACT/
+// SET_ACTUAL), requested_quantity, reason code, normalized note, user_id. They are joined
+// with the ASCII Unit Separator (0x1f, which cannot appear in normal input) and SHA-256
+// hashed — a stable, order-independent, locale-independent serialization (no JSON map
+// ordering).
+func requestFingerprint(storeID, productID, locationID, mode string, requestedQty int, reason, note, userID string) string {
+	parts := []string{
+		storeID,
+		productID,
+		locationID,
+		mode,
+		strconv.Itoa(requestedQty),
+		strings.TrimSpace(reason),
+		normalizeNote(note),
+		userID,
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+	return hex.EncodeToString(sum[:])
 }
 
 // AddStock creates IN movements and adds stock to locations
@@ -96,6 +164,10 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 		if item.Quantity <= 0 {
 			return AdditionResult{}, ErrStockBadQty
 		}
+		// A reason is mandatory for an ADD (§13); OTHER requires a free-text note.
+		if err := validateReason(opAdd, item.Reason, item.Note); err != nil {
+			return AdditionResult{}, err
+		}
 	}
 
 	now := time.Now().UTC()
@@ -114,20 +186,35 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 				return ErrProductNotFound
 			}
 
-			// Resolve the target location: use the provided one, or auto-find the
-			// store's first active sale-point location so the stocks table is always updated.
-			resolvedLocID := item.LocationID
-			if resolvedLocID == "" {
-				defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
-				if err != nil {
-					return err
-				}
-				resolvedLocID = defaultLoc
+			// Deterministic location (explicit → product default → store default sale).
+			resolvedLocID, err := s.resolveStockLocation(ctx, storeID, item.ProductID, item.LocationID)
+			if err != nil {
+				return err
 			}
+			if resolvedLocID == "" {
+				return ErrStockLocationRequired
+			}
+			locPtr := &resolvedLocID
 
-			var locPtr *string
-			if resolvedLocID != "" {
-				locPtr = &resolvedLocID
+			// Idempotency: a retried submit with the same key + SAME fingerprint returns the
+			// original movement (no second stock change); the same key with a DIFFERENT
+			// fingerprint (intent) is rejected as a conflict.
+			key := strings.TrimSpace(item.IdempotencyKey)
+			fp := requestFingerprint(storeID, item.ProductID, resolvedLocID, opAdd, item.Quantity, item.Reason, item.Note, actor.UserID)
+			if key != "" {
+				var existing StockMovement
+				e := tx.WithContext(ctx).Table("stock_movements").
+					Where("store_id = ? AND idempotency_key = ?", storeID, key).Take(&existing).Error
+				if e == nil {
+					if existing.RequestFingerprint == fp {
+						movements = append(movements, existing)
+						continue
+					}
+					return ErrStockIdempotencyConflict
+				}
+				if !errors.Is(e, gorm.ErrRecordNotFound) {
+					return e
+				}
 			}
 
 			mg := StockMovement{
@@ -137,28 +224,42 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 				LocationID:     locPtr,
 				QuantityChange: item.Quantity,
 				Type:           MovementTypeIn,
+				Reason:         strings.TrimSpace(item.Reason),
 				Note:           strings.TrimSpace(item.Note),
 				CreatedBy:      actor.UserID,
 				CreatedAt:      now,
+			}
+			if key != "" {
+				mg.IdempotencyKey = &key
+				mg.RequestFingerprint = fp
 			}
 
 			created, err := txRepo.Create(ctx, mg)
 			if err != nil {
 				return err
 			}
-
-			// Update stock in the locations table
-			if resolvedLocID != "" {
-				if err := txRepo.UpsertStock(ctx, storeID, item.ProductID, resolvedLocID, item.Quantity); err != nil {
-					return err
-				}
+			if err := txRepo.UpsertStock(ctx, storeID, item.ProductID, resolvedLocID, item.Quantity); err != nil {
+				return err
 			}
-
 			movements = append(movements, created)
 		}
 		return nil
 	})
 	if err != nil {
+		// A true simultaneous-race duplicate (both submits passed the pre-check) is
+		// caught by the idempotency-key index; resolve a single-item add to the winner
+		// only when the payload matches, else surface the conflict.
+		if isUniqueViolation(err) && len(input.Items) == 1 {
+			it := input.Items[0]
+			if existing, e := s.findByIdempotencyKey(ctx, storeID, strings.TrimSpace(it.IdempotencyKey)); e == nil && existing != nil {
+				loc, _ := s.resolveStockLocation(ctx, storeID, it.ProductID, it.LocationID)
+				fp := requestFingerprint(storeID, it.ProductID, loc, opAdd, it.Quantity, it.Reason, it.Note, actor.UserID)
+				if existing.RequestFingerprint == fp {
+					return AdditionResult{Movements: []StockMovement{*existing}}, nil
+				}
+				return AdditionResult{}, ErrStockIdempotencyConflict
+			}
+		}
 		return AdditionResult{}, err
 	}
 
@@ -180,6 +281,10 @@ func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID str
 	if req.Quantity <= 0 {
 		return StockMovement{}, ErrStockBadQty
 	}
+	// A reason is mandatory for a SUBTRACT (§13); OTHER requires a free-text note.
+	if err := validateReason(opSubtract, req.Reason, req.Note); err != nil {
+		return StockMovement{}, err
+	}
 
 	exists, err := s.productExistsInStore(ctx, storeID, req.ProductID)
 	if err != nil {
@@ -188,12 +293,30 @@ func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID str
 	if !exists {
 		return StockMovement{}, ErrProductNotFound
 	}
+	// Removing stock requires knowing the source location — no guessing.
+	if strings.TrimSpace(req.LocationID) == "" {
+		return StockMovement{}, ErrStockLocationRequired
+	}
+
+	// Idempotency: same key + same fingerprint returns the original (no double
+	// deduction); same key + different fingerprint is a conflict.
+	key := strings.TrimSpace(req.IdempotencyKey)
+	fp := requestFingerprint(storeID, req.ProductID, req.LocationID, opSubtract, req.Quantity, req.Reason, req.Note, actor.UserID)
+	if key != "" {
+		existing, err := s.findByIdempotencyKey(ctx, storeID, key)
+		if err != nil {
+			return StockMovement{}, err
+		}
+		if existing != nil {
+			if existing.RequestFingerprint == fp {
+				return *existing, nil
+			}
+			return StockMovement{}, ErrStockIdempotencyConflict
+		}
+	}
 
 	now := time.Now().UTC()
-	var locID *string
-	if req.LocationID != "" {
-		locID = &req.LocationID
-	}
+	locID := &req.LocationID
 
 	mg := StockMovement{
 		ID:             newID(),
@@ -202,9 +325,14 @@ func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID str
 		LocationID:     locID,
 		QuantityChange: -req.Quantity,
 		Type:           MovementTypeOut,
+		Reason:         strings.TrimSpace(req.Reason),
 		Note:           strings.TrimSpace(req.Note),
 		CreatedBy:      actor.UserID,
 		CreatedAt:      now,
+	}
+	if key != "" {
+		mg.IdempotencyKey = &key
+		mg.RequestFingerprint = fp
 	}
 
 	// Movement + stock deduction in one transaction: if the guarded UpsertStock
@@ -217,14 +345,21 @@ func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID str
 		if err != nil {
 			return err
 		}
-		if req.LocationID != "" {
-			if err := txRepo.UpsertStock(ctx, storeID, req.ProductID, req.LocationID, -req.Quantity); err != nil {
-				return err
-			}
-		}
-		return nil
+		return txRepo.UpsertStock(ctx, storeID, req.ProductID, req.LocationID, -req.Quantity)
 	})
 	if err != nil {
+		if isUniqueViolation(err) && key != "" {
+			if existing, e := s.findByIdempotencyKey(ctx, storeID, key); e == nil && existing != nil {
+				if existing.RequestFingerprint == fp {
+					return *existing, nil
+				}
+				return StockMovement{}, ErrStockIdempotencyConflict
+			}
+		}
+		// Surface a clear "you asked to remove more than is on hand here" message.
+		if errors.Is(err, ErrInsufficientStock) {
+			return StockMovement{}, ErrStockExceedsAvailable
+		}
 		return StockMovement{}, err
 	}
 
@@ -312,6 +447,14 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		return StockMovement{}, ErrStockForbidden
 	}
 
+	if req.PhysicalQty < 0 {
+		return StockMovement{}, ErrStockBadQty
+	}
+	// A reason is mandatory for SET_ACTUAL (§13); OTHER requires a free-text note.
+	if err := validateReason(opSetActual, req.Reason, req.Note); err != nil {
+		return StockMovement{}, err
+	}
+
 	exists, err := s.productExistsInStore(ctx, storeID, req.ProductID)
 	if err != nil {
 		return StockMovement{}, err
@@ -320,27 +463,41 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		return StockMovement{}, ErrProductNotFound
 	}
 
-	// Resolve location — use provided one or fall back to store's default sale-point location
-	resolvedLocID := req.LocationID
+	// Deterministic location (explicit → product default → store default sale).
+	resolvedLocID, err := s.resolveStockLocation(ctx, storeID, req.ProductID, req.LocationID)
+	if err != nil {
+		return StockMovement{}, err
+	}
 	if resolvedLocID == "" {
-		defaultLoc, err := s.findDefaultStockLocation(ctx, storeID)
-		if err != nil {
-			return StockMovement{}, err
-		}
-		resolvedLocID = defaultLoc
+		return StockMovement{}, ErrStockLocationRequired
 	}
-
-	var locPtr *string
-	if resolvedLocID != "" {
-		locPtr = &resolvedLocID
-	}
+	locPtr := &resolvedLocID
 
 	now := time.Now().UTC()
 	movementType := strings.TrimSpace(req.MovementType)
 	if movementType == "" {
-		movementType = MovementTypeAdjust
+		movementType = MovementTypeCountCorrection
 	}
 	var refPtr *string
+
+	// Idempotency: same key + same fingerprint returns the original (never re-sets
+	// stock); same key + different fingerprint is a conflict. The fingerprint hashes the
+	// REQUESTED physical quantity (req.PhysicalQty) — not the live-stock-dependent delta —
+	// so SET 10 vs SET 20 under one key is a mismatch.
+	key := strings.TrimSpace(req.IdempotencyKey)
+	fp := requestFingerprint(storeID, req.ProductID, resolvedLocID, opSetActual, req.PhysicalQty, req.Reason, req.Note, actor.UserID)
+	if key != "" {
+		existing, ferr := s.findByIdempotencyKey(ctx, storeID, key)
+		if ferr != nil {
+			return StockMovement{}, ferr
+		}
+		if existing != nil {
+			if existing.RequestFingerprint == fp {
+				return *existing, nil
+			}
+			return StockMovement{}, ErrStockIdempotencyConflict
+		}
+	}
 	if ref := strings.TrimSpace(req.ReferenceID); ref != "" {
 		refPtr = &ref
 	}
@@ -351,19 +508,21 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 	// recorded without the matching stock change.
 	var created StockMovement
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if resolvedLocID != "" {
-			// Row lock (no-op if the row doesn't exist yet; SetStockQuantity creates it).
-			if err := tx.Exec(
-				"SELECT 1 FROM stocks WHERE store_id = ? AND product_id = ? AND location_id = ? FOR UPDATE",
-				storeID, req.ProductID, resolvedLocID,
-			).Error; err != nil {
-				return err
-			}
+		// Row lock (no-op if the row doesn't exist yet; SetStockQuantity creates it).
+		if err := tx.Exec(
+			"SELECT 1 FROM stocks WHERE store_id = ? AND product_id = ? AND location_id = ? FOR UPDATE",
+			storeID, req.ProductID, resolvedLocID,
+		).Error; err != nil {
+			return err
 		}
 		txRepo := NewPostgresRepository(tx)
 		currentQty, err := txRepo.GetCurrentStockQty(ctx, storeID, req.ProductID, resolvedLocID)
 		if err != nil {
 			return err
+		}
+		// SET_ACTUAL equal to current → no DB mutation, no zero-delta movement (§8).
+		if req.PhysicalQty == currentQty {
+			return ErrStockNoChange
 		}
 		mg := StockMovement{
 			ID:             newID(),
@@ -373,9 +532,14 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 			QuantityChange: req.PhysicalQty - currentQty,
 			Type:           movementType,
 			ReferenceID:    refPtr,
+			Reason:         strings.TrimSpace(req.Reason),
 			Note:           fmt.Sprintf("adjusted from %d to %d. %s", currentQty, req.PhysicalQty, strings.TrimSpace(req.Note)),
 			CreatedBy:      actor.UserID,
 			CreatedAt:      now,
+		}
+		if key != "" {
+			mg.IdempotencyKey = &key
+			mg.RequestFingerprint = fp
 		}
 		c, err := txRepo.Create(ctx, mg)
 		if err != nil {
@@ -385,6 +549,14 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		return txRepo.SetStockQuantity(ctx, storeID, req.ProductID, resolvedLocID, req.PhysicalQty)
 	})
 	if err != nil {
+		if isUniqueViolation(err) && key != "" {
+			if existing, e := s.findByIdempotencyKey(ctx, storeID, key); e == nil && existing != nil {
+				if existing.RequestFingerprint == fp {
+					return *existing, nil
+				}
+				return StockMovement{}, ErrStockIdempotencyConflict
+			}
+		}
 		return StockMovement{}, err
 	}
 

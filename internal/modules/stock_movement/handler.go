@@ -26,10 +26,13 @@ func (h Handler) AddStock(c *fiber.Ctx) error {
 	result, err := h.service.AddStock(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		switch err {
-		case ErrStockNoItems, ErrStockBadQty:
+		case ErrStockNoItems, ErrStockBadQty, ErrStockLocationRequired,
+			ErrStockReasonRequired, ErrStockReasonInvalid, ErrStockReasonNoteRequired:
 			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		case ErrProductNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		case ErrStockIdempotencyConflict:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		case ErrStockForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 		default:
@@ -48,12 +51,13 @@ func (h Handler) RemoveStock(c *fiber.Ctx) error {
 	result, err := h.service.RemoveStock(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		switch err {
-		case ErrStockBadQty:
+		case ErrStockBadQty, ErrStockLocationRequired,
+			ErrStockReasonRequired, ErrStockReasonInvalid, ErrStockReasonNoteRequired:
 			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		case ErrProductNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-		case ErrInsufficientStock:
-			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+		case ErrInsufficientStock, ErrStockExceedsAvailable, ErrStockIdempotencyConflict:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		case ErrStockForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 		default:
@@ -96,8 +100,13 @@ func (h Handler) AdjustStock(c *fiber.Ctx) error {
 	result, err := h.service.AdjustStock(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		switch err {
+		case ErrStockBadQty, ErrStockLocationRequired,
+			ErrStockReasonRequired, ErrStockReasonInvalid, ErrStockReasonNoteRequired:
+			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		case ErrProductNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+		case ErrStockNoChange, ErrStockIdempotencyConflict:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		case ErrStockForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 		default:

@@ -25,6 +25,8 @@ type Repository interface {
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
 	BrandExists(ctx context.Context, storeID, brandID string) (bool, error)
 	LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error)
+	ValidateOperationalLocation(ctx context.Context, storeID, locationID string) (bool, error)
+	GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
@@ -57,6 +59,7 @@ type productQueryRow struct {
 	SpecialPriceStartAt *time.Time `gorm:"column:special_price_start_at"`
 	SpecialPriceEndAt   *time.Time `gorm:"column:special_price_end_at"`
 	TotalStock          int        `gorm:"column:total_stock"`
+	WarehouseStock      int        `gorm:"column:warehouse_stock"`
 	StockStatus         string     `gorm:"column:stock_status"`
 	IsActive            bool       `gorm:"column:is_active"`
 	CreatedAt           time.Time  `gorm:"column:created_at"`
@@ -164,7 +167,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := baseQuery.
 		Select(`
-			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock,
+			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -173,7 +176,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location, pv.default_location_id
 		`).
 		Order(func() string {
-			if sortBy == "updated_at" { return "pv.updated_at DESC" }
+			if sortBy == "updated_at" {
+				return "pv.updated_at DESC"
+			}
 			return "pv.created_at DESC"
 		}()).
 		Limit(limit).
@@ -198,7 +203,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
 		Select(`
-			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock,
+			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -465,6 +470,45 @@ func (r PostgresRepository) LocationBelongsToStore(ctx context.Context, storeID,
 	return count > 0, nil
 }
 
+// ValidateOperationalLocation reports whether a location is usable as a product's
+// default receiving/stock location (Phase W2 §4): it exists in this store, is active,
+// and belongs to an active warehouse. A sale-point location is allowed (the W1 store
+// default is the sale point หน้าร้าน).
+func (r PostgresRepository) ValidateOperationalLocation(ctx context.Context, storeID, locationID string) (bool, error) {
+	if strings.TrimSpace(locationID) == "" {
+		return false, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("locations l").
+		Joins("JOIN warehouses w ON w.id = l.warehouse_id").
+		Where("l.id = ? AND l.store_id = ? AND l.is_active = TRUE AND w.is_active = TRUE", locationID, storeID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// GetStoreDefaultSaleLocationID returns the store's authoritative default sale location
+// (W1 flag) when it is valid (active sale point), or "" when the store has none. Never
+// guesses by row order.
+func (r PostgresRepository) GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error) {
+	var id string
+	err := r.db.WithContext(ctx).
+		Table("locations").
+		Select("id").
+		Where("store_id = ? AND is_default_sale = TRUE AND is_active = TRUE AND is_sale_point = TRUE", storeID).
+		Take(&id).Error
+	if err == nil {
+		return id, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	return "", err
+}
+
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	if role == "platform_admin" {
 		return true, nil
@@ -496,6 +540,7 @@ func (row productQueryRow) toProduct() Product {
 		UpdatedAt:           row.UpdatedAt,
 		CostPrice:           row.CostPrice,
 		TotalStock:          row.TotalStock,
+		WarehouseStock:      row.WarehouseStock,
 		StockStatus:         row.StockStatus,
 	}
 	if row.BrandID != nil {

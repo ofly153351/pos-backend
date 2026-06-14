@@ -351,3 +351,47 @@ func BackfillAllStores(ctx context.Context, db *gorm.DB) {
 	}
 	log.Printf("provisioning backfill: provisioned %d/%d store(s)", provisioned, len(storeIDs))
 }
+
+// BackfillProductDefaultLocations assigns the store's default sale location to products
+// that still have a NULL default_location_id (Phase W2 §5). Metadata-only: it never
+// moves stock, creates stock rows or movements, and never touches a product that already
+// has a default_location_id — including an invalid/cross-store one (those are reported,
+// not silently overwritten). Best-effort, idempotent, store-isolated; safe on every boot.
+// Runs after BackfillAllStores so every store already has a valid default sale location.
+func BackfillProductDefaultLocations(ctx context.Context, db *gorm.DB) {
+	var storeIDs []string
+	if err := db.WithContext(ctx).Raw(
+		`SELECT DISTINCT store_id FROM products WHERE default_location_id IS NULL ORDER BY store_id`,
+	).Scan(&storeIDs).Error; err != nil {
+		log.Printf("product-default backfill: failed to list stores: %v", err)
+		return
+	}
+	if len(storeIDs) == 0 {
+		return
+	}
+	assigned := 0
+	for _, storeID := range storeIDs {
+		var locID string
+		err := db.WithContext(ctx).Table("locations").Select("id").
+			Where("store_id = ? AND is_default_sale = TRUE AND is_active = TRUE AND is_sale_point = TRUE", storeID).
+			Take(&locID).Error
+		if err != nil {
+			// No valid default sale location → skip (do not guess); the store's W1
+			// provisioning should have created one. Logged for follow-up.
+			log.Printf("product-default backfill: store %s has no valid default sale location, skipped: %v", storeID, err)
+			continue
+		}
+		res := db.WithContext(ctx).Exec(
+			`UPDATE products SET default_location_id = ?, updated_at = NOW() WHERE store_id = ? AND default_location_id IS NULL`,
+			locID, storeID,
+		)
+		if res.Error != nil {
+			log.Printf("product-default backfill: store %s update failed: %v", storeID, res.Error)
+			continue
+		}
+		assigned += int(res.RowsAffected)
+	}
+	if assigned > 0 {
+		log.Printf("product-default backfill: assigned default location to %d product(s)", assigned)
+	}
+}

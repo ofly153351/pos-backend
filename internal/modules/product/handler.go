@@ -107,6 +107,8 @@ func writeProductError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "brand_id", err.Error())
 	case errors.Is(err, ErrInvalidDefaultLocation):
 		return httpx.Err422(c, "default_location_id", err.Error())
+	case errors.Is(err, ErrNoStoreDefaultSaleLocation):
+		return httpx.Err422(c, "default_location_id", err.Error())
 	case errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrInvalidStockStatus):
 		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
@@ -125,11 +127,11 @@ func writeProductError(c *fiber.Ctx, err error) error {
 
 func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 	req := CreateProductRequest{
-		Name:            c.FormValue("name"),
-		BrandID:         c.FormValue("brand_id"),
-		SKU:             c.FormValue("sku"),
-		Barcode:         c.FormValue("barcode"),
-		ProductCode:     strings.TrimSpace(c.FormValue("product_code")),
+		Name:              c.FormValue("name"),
+		BrandID:           c.FormValue("brand_id"),
+		SKU:               c.FormValue("sku"),
+		Barcode:           c.FormValue("barcode"),
+		ProductCode:       strings.TrimSpace(c.FormValue("product_code")),
 		Description:       strings.TrimSpace(c.FormValue("description")),
 		StorageLocation:   strings.TrimSpace(c.FormValue("storage_location")),
 		DefaultLocationID: strings.TrimSpace(c.FormValue("default_location_id")),
@@ -149,6 +151,13 @@ func parseCreateRequest(c *fiber.Ctx) (CreateProductRequest, error) {
 			return CreateProductRequest{}, err
 		}
 		req.MaxStock = &parsed
+	}
+	if value := strings.TrimSpace(c.FormValue("initial_stock")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return CreateProductRequest{}, err
+		}
+		req.InitialStock = parsed
 	}
 	basePrice, err := parseRequiredFloat(c.FormValue("base_price"))
 	if err != nil {
