@@ -2,11 +2,15 @@ package warehouse_receipt
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -333,13 +337,29 @@ func (s Service) DeleteItem(ctx context.Context, actor auth.Claims, receiptID, i
 	return s.repo.GetByID(ctx, receiptID)
 }
 
-func (s Service) Confirm(ctx context.Context, actor auth.Claims, receiptID string) (WarehouseReceipt, error) {
+func (s Service) Confirm(ctx context.Context, actor auth.Claims, receiptID, idempotencyKey string) (WarehouseReceipt, error) {
 	current, err := s.repo.GetByID(ctx, receiptID)
 	if err != nil {
 		return WarehouseReceipt{}, err
 	}
 	if err := s.ensureManageAccess(ctx, actor, current.StoreID, true); err != nil {
 		return WarehouseReceipt{}, err
+	}
+	key := strings.TrimSpace(idempotencyKey)
+	// Resolve each positive line's EFFECTIVE receiving location once; it feeds the
+	// fingerprint AND (via ConfirmDraft) the persisted item location + stock/movement writes.
+	effective, err := s.resolveEffectiveLocations(ctx, current)
+	if err != nil {
+		return WarehouseReceipt{}, err
+	}
+	fingerprint := confirmFingerprint(current, actor.UserID, effective)
+	// Idempotency pre-check: an already-confirmed receipt returns its original result for
+	// an identical retry (same key + fingerprint); otherwise it is "already confirmed".
+	if current.Status == ReceiptStatusConfirmed {
+		if key != "" && current.ConfirmIdempotencyKey == key && current.ConfirmRequestFingerprint == fingerprint {
+			return current, nil
+		}
+		return WarehouseReceipt{}, ErrReceiptAlreadyConfirmed
 	}
 	pendingAttachments, err := s.repo.ListPendingAttachments(ctx, receiptID)
 	if err != nil {
@@ -348,10 +368,95 @@ func (s Service) Confirm(ctx context.Context, actor auth.Claims, receiptID strin
 	if err := s.flushPendingAttachments(ctx, receiptID, actor.UserID, pendingAttachments); err != nil {
 		return WarehouseReceipt{}, err
 	}
-	if err := s.repo.ConfirmDraft(ctx, receiptID, actor.UserID); err != nil {
+	if err := s.repo.ConfirmDraft(ctx, receiptID, actor.UserID, key, fingerprint, effective); err != nil {
+		// Concurrent loser: another confirm committed between our read and the lock. If it
+		// was the same logical request (same key + fingerprint) return the original result;
+		// otherwise surface "already confirmed".
+		if errors.Is(err, ErrReceiptConfirmInvalidStatus) {
+			if refreshed, ferr := s.repo.GetByID(ctx, receiptID); ferr == nil && refreshed.Status == ReceiptStatusConfirmed {
+				if key != "" && refreshed.ConfirmIdempotencyKey == key && refreshed.ConfirmRequestFingerprint == fingerprint {
+					return refreshed, nil
+				}
+				return WarehouseReceipt{}, ErrReceiptAlreadyConfirmed
+			}
+		}
 		return WarehouseReceipt{}, err
 	}
 	return s.repo.GetByID(ctx, receiptID)
+}
+
+// confirmFingerprint is a deterministic hash of a confirm request's business-significant
+// fields: store, receipt, confirming user, and — per positive line, sorted by line id —
+// the receipt-item id, product id, EFFECTIVE receiving location, received quantity, and net
+// received unit cost (unit_price − per-unit discount). The effective location (eff[itemID])
+// is the location the confirm actually receives into: an explicit valid location as-is, or
+// the product default resolved by the canonical policy. Using the EFFECTIVE (not the raw
+// draft) location keeps the destination business-significant — a blank-draft line that
+// resolves to a concrete location yields the same hash on a post-confirm retry (its
+// location is persisted), while the SAME key against a DIFFERENT effective destination is a
+// genuine conflict. The live status is deliberately omitted so a post-confirm retry still
+// matches. Joined with control separators and SHA-256 hashed (stable, locale-independent).
+func confirmFingerprint(r WarehouseReceipt, userID string, eff map[string]string) string {
+	type line struct {
+		id, product, loc string
+		qty              int
+		cost             float64
+	}
+	lines := make([]line, 0, len(r.Items))
+	for _, it := range r.Items {
+		if it.Quantity <= 0 {
+			continue
+		}
+		lines = append(lines, line{id: it.ID, product: it.ProductID, loc: eff[it.ID], qty: it.Quantity, cost: it.UnitPrice - it.DiscountAmount})
+	}
+	sort.Slice(lines, func(i, j int) bool { return lines[i].id < lines[j].id })
+	var b strings.Builder
+	b.WriteString(r.StoreID)
+	b.WriteByte(0x1f)
+	b.WriteString(r.ID)
+	b.WriteByte(0x1f)
+	b.WriteString(userID)
+	for _, l := range lines {
+		b.WriteByte(0x1f)
+		b.WriteString(l.id)
+		b.WriteByte(0x1e)
+		b.WriteString(l.product)
+		b.WriteByte(0x1e)
+		b.WriteString(l.loc)
+		b.WriteByte(0x1e)
+		b.WriteString(strconv.Itoa(l.qty))
+		b.WriteByte(0x1e)
+		b.WriteString(strconv.FormatFloat(l.cost, 'f', 2, 64))
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+// resolveEffectiveLocations computes each positive line's EFFECTIVE receiving location —
+// an explicit valid location as-is, otherwise the product default resolved by the canonical
+// policy (store, warehouse, active location, active warehouse; sale point allowed). The same
+// effective location is used for the confirm fingerprint, the persisted item location, and
+// the stock/movement writes (resolved once, used everywhere). For an already-confirmed
+// receipt the persisted location IS the effective location (frozen history), so it is used
+// directly without re-resolution.
+func (s Service) resolveEffectiveLocations(ctx context.Context, r WarehouseReceipt) (map[string]string, error) {
+	eff := make(map[string]string, len(r.Items))
+	confirmed := r.Status == ReceiptStatusConfirmed
+	for _, it := range r.Items {
+		if it.Quantity <= 0 {
+			continue
+		}
+		if confirmed {
+			eff[it.ID] = it.LocationID
+			continue
+		}
+		loc, err := s.repo.ResolveLineReceivingLocation(ctx, r.StoreID, r.WarehouseID, it.ProductID, it.LocationID)
+		if err != nil {
+			return nil, err
+		}
+		eff[it.ID] = loc.ID
+	}
+	return eff, nil
 }
 
 func (s Service) Submit(ctx context.Context, actor auth.Claims, receiptID string) (WarehouseReceipt, error) {
@@ -368,14 +473,14 @@ func (s Service) Submit(ctx context.Context, actor auth.Claims, receiptID string
 	if len(current.Items) == 0 {
 		return WarehouseReceipt{}, ErrReceiptItemsRequired
 	}
-	// A receipt cannot move to pending_review while any positive-quantity item lacks
-	// a valid resolved location. Re-resolve each from the product's current default
-	// (exists/active/same-store/same-warehouse/not a sale point).
+	// A receipt cannot move to pending_review while any positive-quantity item lacks a
+	// valid receiving location. Honour the per-line location: validate an explicit one,
+	// or fall back to the product default (sale points allowed; §3C/§3D errors surfaced).
 	for _, item := range current.Items {
 		if item.Quantity <= 0 {
 			continue
 		}
-		if _, err := s.repo.ResolveValidReceivingLocation(ctx, current.StoreID, current.WarehouseID, item.ProductID); err != nil {
+		if _, err := s.repo.ResolveLineReceivingLocation(ctx, current.StoreID, current.WarehouseID, item.ProductID, item.LocationID); err != nil {
 			return WarehouseReceipt{}, err
 		}
 	}
@@ -713,23 +818,29 @@ func (s Service) materializeItem(ctx context.Context, repo Repository, receipt W
 	if !product.IsActive {
 		return WarehouseReceiptItem{}, ErrReceiptProductInactive
 	}
-	// The receiving location is resolved from the product's AUTHORITATIVE default
-	// location, never from the client. A product with no default location yet may
-	// be added to a draft with an empty location (nullable column); submit/confirm
-	// enforce a valid location. Any client-supplied location_id is ignored.
+	// Phase W3 §3: each line gets one authoritative receiving location.
+	//   A) an explicit per-line location → validated against the receipt warehouse
+	//      (active, same store, same warehouse; a SALE POINT is allowed). Invalid → error.
+	//   B) otherwise the product's default location, when valid for the receipt warehouse
+	//      (sale point allowed). A missing/dangling/other-warehouse default leaves the
+	//      draft line unresolved (NULL) for correction; submit/confirm enforce a location.
 	var locationID, locationName, zoneName, floorName string
-	if def := strings.TrimSpace(product.DefaultLocationID); def != "" {
-		location, err := repo.GetLocationSnapshot(ctx, receipt.StoreID, def)
+	if explicit := strings.TrimSpace(input.LocationID); explicit != "" {
+		loc, err := repo.ValidateExplicitReceivingLocation(ctx, receipt.StoreID, receipt.WarehouseID, explicit)
+		if err != nil {
+			return WarehouseReceiptItem{}, err
+		}
+		locationID, locationName, zoneName, floorName = loc.ID, loc.Name, loc.ZoneName, loc.FloorName
+	} else if strings.TrimSpace(product.DefaultLocationID) != "" {
+		loc, err := repo.ResolveValidReceivingLocation(ctx, receipt.StoreID, receipt.WarehouseID, product.ID)
 		switch {
 		case err == nil:
-			locationID = location.ID
-			locationName = location.Name
-			zoneName = location.ZoneName
-			floorName = location.FloorName
-		case errors.Is(err, ErrReceiptLocationNotFound):
-			// A dangling/cross-store default resolves to "not found" — leave the
-			// item's location unresolved (NULL draft) for correction rather than
-			// failing the whole add. Submit/confirm still block on it.
+			locationID, locationName, zoneName, floorName = loc.ID, loc.Name, loc.ZoneName, loc.FloorName
+		case errors.Is(err, ErrReceiptLocationWrongWarehouse),
+			errors.Is(err, ErrReceiptLocationNotFound),
+			errors.Is(err, ErrReceiptItemLocationMissing),
+			errors.Is(err, ErrReceiptLocationInactive):
+			// Unresolved default → leave the draft line without a location.
 		default:
 			return WarehouseReceiptItem{}, err
 		}

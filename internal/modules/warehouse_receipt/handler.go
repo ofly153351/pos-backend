@@ -107,7 +107,10 @@ func (h Handler) DeleteItem(c *fiber.Ctx) error {
 }
 
 func (h Handler) Confirm(c *fiber.Ctx) error {
-	result, err := h.service.Confirm(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("id"))
+	// Confirm idempotency key (Phase W3 §12): a network-retried confirm with the same key
+	// returns the original result; the same key on a different receipt is a conflict.
+	idempotencyKey := strings.TrimSpace(c.Get("Idempotency-Key"))
+	result, err := h.service.Confirm(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("id"), idempotencyKey)
 	if err != nil {
 		return writeReceiptError(c, err)
 	}
@@ -192,13 +195,13 @@ func (h Handler) GenerateDocumentNo(c *fiber.Ctx) error {
 
 func writeReceiptError(c *fiber.Ctx, err error) error {
 	switch {
-	case errors.Is(err, ErrReceiptStoreIDRequired), errors.Is(err, ErrReceiptStoreContextRequired), errors.Is(err, ErrReceiptWarehouseRequired), errors.Is(err, ErrReceiptDocumentNoRequired), errors.Is(err, ErrReceiptInvalidVATPercent), errors.Is(err, ErrReceiptItemsRequired), errors.Is(err, ErrReceiptItemNotFound), errors.Is(err, ErrReceiptItemQuantityRequired), errors.Is(err, ErrReceiptItemUnitPriceInvalid), errors.Is(err, ErrReceiptItemLocationRequired), errors.Is(err, ErrReceiptItemLocationMissing), errors.Is(err, ErrReceiptItemProductRequired), errors.Is(err, ErrReceiptDuplicateItem), errors.Is(err, ErrReceiptLocationInactive), errors.Is(err, ErrReceiptLocationWrongStore), errors.Is(err, ErrReceiptLocationWrongWarehouse), errors.Is(err, ErrReceiptLocationSalePoint), errors.Is(err, ErrReceiptProductInactive), errors.Is(err, ErrReceiptAttachmentRequired), errors.Is(err, ErrReceiptAttachmentType), errors.Is(err, ErrReceiptAttachmentSize), errors.Is(err, ErrReceiptAttachmentStorage), errors.Is(err, ErrReceiptConfirmOnlyDraft), errors.Is(err, ErrReceiptConfirmInvalidStatus), errors.Is(err, ErrReceiptSubmitOnlyDraft), errors.Is(err, ErrReceiptReopenInvalidStatus), errors.Is(err, ErrReceiptCancelOnlyDraft), errors.Is(err, ErrReceiptPOQuantityExceeded), errors.Is(err, ErrReceiptImmutable), errors.Is(err, ErrReceiptInvalidStatus), errors.Is(err, ErrInvalidPagination):
+	case errors.Is(err, ErrReceiptStoreIDRequired), errors.Is(err, ErrReceiptStoreContextRequired), errors.Is(err, ErrReceiptWarehouseRequired), errors.Is(err, ErrReceiptDocumentNoRequired), errors.Is(err, ErrReceiptInvalidVATPercent), errors.Is(err, ErrReceiptItemsRequired), errors.Is(err, ErrReceiptItemNotFound), errors.Is(err, ErrReceiptItemQuantityRequired), errors.Is(err, ErrReceiptItemUnitPriceInvalid), errors.Is(err, ErrReceiptItemLocationRequired), errors.Is(err, ErrReceiptItemLocationMissing), errors.Is(err, ErrReceiptItemProductRequired), errors.Is(err, ErrReceiptDuplicateItem), errors.Is(err, ErrReceiptLocationInactive), errors.Is(err, ErrReceiptLocationWrongStore), errors.Is(err, ErrReceiptLocationWrongWarehouse), errors.Is(err, ErrReceiptLocationSalePoint), errors.Is(err, ErrReceiptProductInactive), errors.Is(err, ErrReceiptAttachmentRequired), errors.Is(err, ErrReceiptAttachmentType), errors.Is(err, ErrReceiptAttachmentSize), errors.Is(err, ErrReceiptAttachmentStorage), errors.Is(err, ErrReceiptConfirmOnlyDraft), errors.Is(err, ErrReceiptConfirmInvalidStatus), errors.Is(err, ErrReceiptSubmitOnlyDraft), errors.Is(err, ErrReceiptReopenInvalidStatus), errors.Is(err, ErrReceiptCancelOnlyDraft), errors.Is(err, ErrReceiptPOQuantityExceeded), errors.Is(err, ErrReceiptImmutable), errors.Is(err, ErrReceiptInvalidStatus), errors.Is(err, ErrInvalidPagination), errors.Is(err, ErrReceiptDefaultWrongWarehouse), errors.Is(err, ErrReceiptLocationUnresolved), errors.Is(err, ErrReceiptCostNegative):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	case errors.Is(err, ErrReceiptForbidden), errors.Is(err, ErrReceiptConfirmForbidden), errors.Is(err, ErrReceiptCancelForbidden), errors.Is(err, ErrReceiptReopenForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrReceiptNotFound), errors.Is(err, ErrReceiptWarehouseNotFound), errors.Is(err, ErrReceiptSupplierNotFound), errors.Is(err, ErrReceiptPurchaseOrderNotFound), errors.Is(err, ErrReceiptProductNotFound), errors.Is(err, ErrReceiptLocationNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-	case errors.Is(err, ErrReceiptDuplicateDocumentNo):
+	case errors.Is(err, ErrReceiptDuplicateDocumentNo), errors.Is(err, ErrReceiptAlreadyConfirmed), errors.Is(err, ErrReceiptConfirmIdempotencyConflict):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrReceiptAttachmentStorageUnavailable):
 		return httpx.Error(c, fiber.StatusServiceUnavailable, err.Error(), nil)

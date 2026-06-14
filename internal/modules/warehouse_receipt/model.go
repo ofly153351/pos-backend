@@ -15,35 +15,37 @@ const (
 )
 
 type WarehouseReceipt struct {
-	ID                 string        `json:"id" gorm:"column:id;primaryKey"`
-	StoreID            string        `json:"store_id" gorm:"column:store_id"`
-	WarehouseID        string        `json:"warehouse_id" gorm:"column:warehouse_id"`
-	SupplierID         string        `json:"supplier_id,omitempty" gorm:"column:supplier_id"`
-	PurchaseOrderID    string        `json:"purchase_order_id,omitempty" gorm:"column:purchase_order_id"`
-	DocumentNo         string        `json:"document_no" gorm:"column:document_no"`
-	Status             ReceiptStatus `json:"status" gorm:"column:status"`
-	ReceivedAt         time.Time     `json:"received_at" gorm:"column:received_at"`
-	ReferenceNo        string        `json:"reference_no,omitempty" gorm:"column:reference_no"`
-	Note               string        `json:"note,omitempty" gorm:"column:note"`
-	VATIncluded        bool          `json:"vat_included" gorm:"column:vat_included"`
-	VATPercent         float64       `json:"vat_percent" gorm:"column:vat_percent"`
-	TotalItems         int           `json:"total_items" gorm:"column:total_items"`
-	SubtotalAmount     float64       `json:"subtotal_amount" gorm:"column:subtotal_amount"`
-	DiscountAmount     float64       `json:"discount_amount" gorm:"column:discount_amount"`
-	NetAmount          float64       `json:"net_amount" gorm:"column:net_amount"`
-	VATAmount          float64       `json:"vat_amount" gorm:"column:vat_amount"`
-	TotalAmount        float64       `json:"total_amount" gorm:"column:total_amount"`
-	AttachmentURL      string        `json:"attachment_url,omitempty" gorm:"column:attachment_url"`
-	AttachmentMimeType string        `json:"attachment_mime_type,omitempty" gorm:"column:attachment_mime_type"`
-	AttachmentName     string        `json:"attachment_name,omitempty" gorm:"column:attachment_name"`
-	AttachmentSize     int64         `json:"attachment_size,omitempty" gorm:"column:attachment_size"`
-	CreatedBy          string        `json:"created_by" gorm:"column:created_by"`
-	ConfirmedBy        string        `json:"confirmed_by,omitempty" gorm:"column:confirmed_by"`
-	CancelledBy        string        `json:"cancelled_by,omitempty" gorm:"column:cancelled_by"`
-	ConfirmedAt        *time.Time    `json:"confirmed_at,omitempty" gorm:"column:confirmed_at"`
-	CancelledAt        *time.Time    `json:"cancelled_at,omitempty" gorm:"column:cancelled_at"`
-	CreatedAt          time.Time     `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt          time.Time     `json:"updated_at" gorm:"column:updated_at"`
+	ID                        string        `json:"id" gorm:"column:id;primaryKey"`
+	StoreID                   string        `json:"store_id" gorm:"column:store_id"`
+	WarehouseID               string        `json:"warehouse_id" gorm:"column:warehouse_id"`
+	SupplierID                string        `json:"supplier_id,omitempty" gorm:"column:supplier_id"`
+	PurchaseOrderID           string        `json:"purchase_order_id,omitempty" gorm:"column:purchase_order_id"`
+	DocumentNo                string        `json:"document_no" gorm:"column:document_no"`
+	Status                    ReceiptStatus `json:"status" gorm:"column:status"`
+	ReceivedAt                time.Time     `json:"received_at" gorm:"column:received_at"`
+	ReferenceNo               string        `json:"reference_no,omitempty" gorm:"column:reference_no"`
+	Note                      string        `json:"note,omitempty" gorm:"column:note"`
+	VATIncluded               bool          `json:"vat_included" gorm:"column:vat_included"`
+	VATPercent                float64       `json:"vat_percent" gorm:"column:vat_percent"`
+	TotalItems                int           `json:"total_items" gorm:"column:total_items"`
+	SubtotalAmount            float64       `json:"subtotal_amount" gorm:"column:subtotal_amount"`
+	DiscountAmount            float64       `json:"discount_amount" gorm:"column:discount_amount"`
+	NetAmount                 float64       `json:"net_amount" gorm:"column:net_amount"`
+	VATAmount                 float64       `json:"vat_amount" gorm:"column:vat_amount"`
+	TotalAmount               float64       `json:"total_amount" gorm:"column:total_amount"`
+	AttachmentURL             string        `json:"attachment_url,omitempty" gorm:"column:attachment_url"`
+	AttachmentMimeType        string        `json:"attachment_mime_type,omitempty" gorm:"column:attachment_mime_type"`
+	AttachmentName            string        `json:"attachment_name,omitempty" gorm:"column:attachment_name"`
+	AttachmentSize            int64         `json:"attachment_size,omitempty" gorm:"column:attachment_size"`
+	CreatedBy                 string        `json:"created_by" gorm:"column:created_by"`
+	ConfirmedBy               string        `json:"confirmed_by,omitempty" gorm:"column:confirmed_by"`
+	CancelledBy               string        `json:"cancelled_by,omitempty" gorm:"column:cancelled_by"`
+	ConfirmIdempotencyKey     string        `json:"-" gorm:"column:confirm_idempotency_key"`
+	ConfirmRequestFingerprint string        `json:"-" gorm:"column:confirm_request_fingerprint"`
+	ConfirmedAt               *time.Time    `json:"confirmed_at,omitempty" gorm:"column:confirmed_at"`
+	CancelledAt               *time.Time    `json:"cancelled_at,omitempty" gorm:"column:cancelled_at"`
+	CreatedAt                 time.Time     `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt                 time.Time     `json:"updated_at" gorm:"column:updated_at"`
 
 	WarehouseName      string                              `json:"warehouse_name,omitempty" gorm:"-"`
 	SupplierName       string                              `json:"supplier_name,omitempty" gorm:"-"`

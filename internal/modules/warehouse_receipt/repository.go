@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,8 @@ type Repository interface {
 	GetProductSnapshot(ctx context.Context, storeID, productID string) (receiptProductSnapshot, error)
 	GetLocationSnapshot(ctx context.Context, storeID, locationID string) (locationSnapshot, error)
 	ResolveValidReceivingLocation(ctx context.Context, storeID, warehouseID, productID string) (locationSnapshot, error)
+	ValidateExplicitReceivingLocation(ctx context.Context, storeID, warehouseID, locationID string) (locationSnapshot, error)
+	ResolveLineReceivingLocation(ctx context.Context, storeID, warehouseID, productID, persistedLocationID string) (locationSnapshot, error)
 	WarehouseExists(ctx context.Context, storeID, warehouseID string) (bool, error)
 	SupplierExists(ctx context.Context, storeID, supplierID string) (bool, error)
 	GetPurchaseOrder(ctx context.Context, storeID, purchaseOrderID string) (purchaseOrderSnapshot, error)
@@ -41,7 +44,7 @@ type Repository interface {
 	UpdateAttachment(ctx context.Context, receiptID, url, mimeType, name string, size int64, updatedBy string) error
 	AppendAudit(ctx context.Context, audit WarehouseReceiptAudit) error
 	ComputePreview(ctx context.Context, receiptID string) ([]StockImpactPreview, error)
-	ConfirmDraft(ctx context.Context, receiptID, actorID string) error
+	ConfirmDraft(ctx context.Context, receiptID, actorID, idempotencyKey, fingerprint string, effectiveLoc map[string]string) error
 	CancelDraft(ctx context.Context, receiptID, actorID string) error
 	SubmitForReview(ctx context.Context, receiptID, actorID string) error
 	ReopenToDraft(ctx context.Context, receiptID, actorID string) error
@@ -136,6 +139,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, sta
 		COALESCE(wr.attachment_mime_type, '') AS attachment_mime_type, COALESCE(wr.attachment_name, '') AS attachment_name,
 		COALESCE(wr.attachment_size, 0) AS attachment_size, wr.created_by, COALESCE(wr.confirmed_by, '') AS confirmed_by,
 		COALESCE(wr.cancelled_by, '') AS cancelled_by, wr.confirmed_at, wr.cancelled_at, wr.created_at, wr.updated_at,
+			COALESCE(wr.confirm_idempotency_key, '') AS confirm_idempotency_key, COALESCE(wr.confirm_request_fingerprint, '') AS confirm_request_fingerprint,
 		COALESCE(wh.name, '') AS warehouse_name, COALESCE(sp.name, '') AS supplier_name,
 		COALESCE(cu.full_name, '') AS created_by_name, COALESCE(cf.full_name, '') AS confirmed_by_name,
 		COALESCE(cc.full_name, '') AS cancelled_by_name, COALESCE(po.order_number, '') AS purchase_order_no
@@ -199,6 +203,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, receiptID string) (Ware
 		COALESCE(wr.attachment_mime_type, '') AS attachment_mime_type, COALESCE(wr.attachment_name, '') AS attachment_name,
 		COALESCE(wr.attachment_size, 0) AS attachment_size, wr.created_by, COALESCE(wr.confirmed_by, '') AS confirmed_by,
 		COALESCE(wr.cancelled_by, '') AS cancelled_by, wr.confirmed_at, wr.cancelled_at, wr.created_at, wr.updated_at,
+			COALESCE(wr.confirm_idempotency_key, '') AS confirm_idempotency_key, COALESCE(wr.confirm_request_fingerprint, '') AS confirm_request_fingerprint,
 		COALESCE(wh.name, '') AS warehouse_name, COALESCE(sp.name, '') AS supplier_name,
 		COALESCE(cu.full_name, '') AS created_by_name, COALESCE(cf.full_name, '') AS confirmed_by_name,
 		COALESCE(cc.full_name, '') AS cancelled_by_name, COALESCE(po.order_number, '') AS purchase_order_no
@@ -453,10 +458,11 @@ type ResolvedReceivingLocation struct {
 // location (products.default_location_id) and validates it as a receiving
 // destination. It is the SINGLE source of truth shared by warehouse receipts and
 // purchasing Quick Receive, so the rules stay identical. Validations: the product
-// exists, has a default location, the location exists in the same store, is active,
-// and is not a sale point. Pass a non-empty warehouseID to additionally require the
-// location to belong to it; pass "" to skip the warehouse check (Quick Receive has
-// no document warehouse). Works against r.db OR a transaction's *gorm.DB.
+// exists, has a default location, the location exists in the same store and is active.
+// A SALE POINT is a valid receiving destination (Phase W3 §4) — is_sale_point is not
+// rejected. Pass a non-empty warehouseID to additionally require the location to belong
+// to it; pass "" to skip the warehouse check (Quick Receive has no document warehouse).
+// Works against r.db OR a transaction's *gorm.DB.
 func ResolveValidReceivingLocation(ctx context.Context, db *gorm.DB, storeID, warehouseID, productID string) (ResolvedReceivingLocation, error) {
 	var def struct {
 		DefaultLocationID *string `gorm:"column:default_location_id"`
@@ -485,13 +491,46 @@ func ResolveValidReceivingLocation(ctx context.Context, db *gorm.DB, storeID, wa
 	if !loc.IsActive {
 		return ResolvedReceivingLocation{}, ErrReceiptLocationInactive
 	}
-	if loc.IsSalePoint {
-		return ResolvedReceivingLocation{}, ErrReceiptLocationSalePoint
-	}
+	// Phase W3 §4: a sale-point location (e.g. หน้าร้าน) IS a valid receiving
+	// destination — is_sale_point means "ready for sale here", not "cannot receive here".
+	// The former ErrReceiptLocationSalePoint rejection is removed.
 	if warehouseID != "" && loc.WarehouseID != warehouseID {
 		return ResolvedReceivingLocation{}, ErrReceiptLocationWrongWarehouse
 	}
 	return loc, nil
+}
+
+// ValidateExplicitReceivingLocation validates a user-chosen receiving location for a
+// line (Phase W3 §3A): it must exist in this store, belong to the receipt's warehouse,
+// be active, and sit in an active warehouse. A sale point IS allowed. Returns the
+// validated snapshot. warehouseID must be non-empty (a receipt always has a warehouse).
+func ValidateExplicitReceivingLocation(ctx context.Context, db *gorm.DB, storeID, warehouseID, locationID string) (ResolvedReceivingLocation, error) {
+	locationID = strings.TrimSpace(locationID)
+	if locationID == "" {
+		return ResolvedReceivingLocation{}, ErrReceiptItemLocationRequired
+	}
+	var row struct {
+		ResolvedReceivingLocation
+		WarehouseActive bool `gorm:"column:warehouse_active"`
+	}
+	err := db.WithContext(ctx).Table("locations l").
+		Select("l.id, l.warehouse_id, l.name, COALESCE(l.zone_name, '') AS zone_name, COALESCE(l.floor_name, '') AS floor_name, l.is_active, l.is_sale_point, w.is_active AS warehouse_active").
+		Joins("JOIN warehouses w ON w.id = l.warehouse_id").
+		Where("l.id = ? AND l.store_id = ?", locationID, storeID).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ResolvedReceivingLocation{}, ErrReceiptLocationNotFound
+		}
+		return ResolvedReceivingLocation{}, err
+	}
+	if !row.IsActive || !row.WarehouseActive {
+		return ResolvedReceivingLocation{}, ErrReceiptLocationInactive
+	}
+	if row.WarehouseID != warehouseID {
+		return ResolvedReceivingLocation{}, ErrReceiptLocationWrongWarehouse
+	}
+	return row.ResolvedReceivingLocation, nil
 }
 
 // ResolveValidReceivingLocation (method) delegates to the package-level resolver,
@@ -512,6 +551,45 @@ func (r PostgresRepository) ResolveValidReceivingLocation(ctx context.Context, s
 		IsActive:    loc.IsActive,
 		IsSalePoint: loc.IsSalePoint,
 	}, nil
+}
+
+// ValidateExplicitReceivingLocation validates a user-chosen line location (Phase W3 §3A).
+func (r PostgresRepository) ValidateExplicitReceivingLocation(ctx context.Context, storeID, warehouseID, locationID string) (locationSnapshot, error) {
+	loc, err := ValidateExplicitReceivingLocation(ctx, r.db, storeID, warehouseID, locationID)
+	if err != nil {
+		return locationSnapshot{}, err
+	}
+	return locationSnapshot{
+		ID:          loc.ID,
+		StoreID:     storeID,
+		WarehouseID: loc.WarehouseID,
+		Name:        loc.Name,
+		ZoneName:    loc.ZoneName,
+		FloorName:   loc.FloorName,
+		IsActive:    loc.IsActive,
+		IsSalePoint: loc.IsSalePoint,
+	}, nil
+}
+
+// ResolveLineReceivingLocation returns the authoritative receiving location for one line
+// (Phase W3 §3): an explicit persisted location is validated against the receipt
+// warehouse; otherwise the product default is used, with the missing/other-warehouse
+// cases mapped to the user-facing §3C/§3D errors. Sale points are allowed throughout.
+func (r PostgresRepository) ResolveLineReceivingLocation(ctx context.Context, storeID, warehouseID, productID, persistedLocationID string) (locationSnapshot, error) {
+	if strings.TrimSpace(persistedLocationID) != "" {
+		return r.ValidateExplicitReceivingLocation(ctx, storeID, warehouseID, persistedLocationID)
+	}
+	loc, err := r.ResolveValidReceivingLocation(ctx, storeID, warehouseID, productID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrReceiptLocationWrongWarehouse):
+			return locationSnapshot{}, ErrReceiptDefaultWrongWarehouse
+		case errors.Is(err, ErrReceiptItemLocationMissing), errors.Is(err, ErrReceiptLocationNotFound), errors.Is(err, ErrReceiptLocationInactive):
+			return locationSnapshot{}, ErrReceiptLocationUnresolved
+		}
+		return locationSnapshot{}, err
+	}
+	return loc, nil
 }
 
 func (r PostgresRepository) WarehouseExists(ctx context.Context, storeID, warehouseID string) (bool, error) {
@@ -691,9 +769,14 @@ func (r PostgresRepository) ComputePreview(ctx context.Context, receiptID string
 	return preview, nil
 }
 
-func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID string) error {
+func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID, idempotencyKey, fingerprint string, effectiveLoc map[string]string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		repo := PostgresRepository{db: tx}
+		// Lock the receipt row so two concurrent confirmations serialize: the second
+		// waits, then sees status=confirmed and is rejected (handled idempotently above).
+		if err := tx.Exec("SELECT 1 FROM warehouse_receipts WHERE id = ? FOR UPDATE", receiptID).Error; err != nil {
+			return err
+		}
 		var receipt WarehouseReceipt
 		if err := tx.Table("warehouse_receipts").Where("id = ?", receiptID).Take(&receipt).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -711,6 +794,44 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 		if len(items) == 0 {
 			return ErrReceiptItemsRequired
 		}
+
+		// Phase W3 §9/§10: group received quantity + net value by product (a product may
+		// appear on several lines), validating each line's net unit cost. received_unit_cost
+		// = unit_price − per-unit discount (as-entered, no VAT adjustment); reject negative.
+		recvQty := map[string]int{}
+		recvValue := map[string]float64{}
+		productIDs := make([]string, 0)
+		for _, item := range items {
+			if item.Quantity <= 0 {
+				continue
+			}
+			if item.UnitPrice-item.DiscountAmount < 0 {
+				return ErrReceiptCostNegative
+			}
+			if _, seen := recvQty[item.ProductID]; !seen {
+				productIDs = append(productIDs, item.ProductID)
+			}
+			recvQty[item.ProductID] += item.Quantity
+			recvValue[item.ProductID] += item.LineNet
+		}
+		sort.Strings(productIDs)
+
+		// Capture each product's pre-receipt total quantity (across ALL locations) while
+		// locking the product row FOR UPDATE in deterministic (sorted) order — deadlock-safe
+		// and races-safe for the moving-average cost applied after stock is written.
+		oldQty := map[string]int{}
+		for _, pid := range productIDs {
+			if err := tx.Exec("SELECT 1 FROM products WHERE id = ? FOR UPDATE", pid).Error; err != nil {
+				return err
+			}
+			var q int
+			if err := tx.Table("stocks").Select("COALESCE(SUM(quantity), 0)").
+				Where("store_id = ? AND product_id = ?", receipt.StoreID, pid).Scan(&q).Error; err != nil {
+				return err
+			}
+			oldQty[pid] = q
+		}
+
 		if strings.TrimSpace(receipt.PurchaseOrderID) != "" {
 			poItems, err := repo.GetPurchaseOrderItems(ctx, receipt.PurchaseOrderID)
 			if err != nil {
@@ -748,16 +869,25 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 		}
 		now := time.Now().UTC()
 		for _, item := range items {
-			// Re-resolve the product's CURRENT authoritative default location inside
-			// the transaction and validate it (exists/active/same-store/same-warehouse/
-			// not a sale point). Any invalid item rolls back the entire confirmation.
-			location, err := repo.ResolveValidReceivingLocation(ctx, receipt.StoreID, receipt.WarehouseID, item.ProductID)
+			if item.Quantity <= 0 {
+				continue
+			}
+			// Phase W3: receive into the EFFECTIVE location the service resolved for this line
+			// (the exact value used in the confirm fingerprint) — explicit override or resolved
+			// product default. It is re-validated under this transaction (active, same store,
+			// same warehouse; sale point allowed) so a concurrently deactivated/moved location
+			// rolls the whole confirm back. A missing effective location is unresolved.
+			chosen := strings.TrimSpace(effectiveLoc[item.ID])
+			if chosen == "" {
+				return ErrReceiptLocationUnresolved
+			}
+			location, err := repo.ValidateExplicitReceivingLocation(ctx, receipt.StoreID, receipt.WarehouseID, chosen)
 			if err != nil {
 				return err
 			}
 			locationID := location.ID
-			// Persist the exact resolved location onto the item so confirmed history
-			// records where stock actually landed, independent of later product edits.
+			// Persist the exact location onto the item so confirmed history records where
+			// stock actually landed, independent of later product edits.
 			if err := tx.Table("warehouse_receipt_items").Where("id = ?", item.ID).Updates(map[string]any{
 				"location_id":   locationID,
 				"warehouse_id":  receipt.WarehouseID,
@@ -768,6 +898,8 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 			}).Error; err != nil {
 				return err
 			}
+			// Compatibility-only (Phase W3 §15): warehouse_inventory is NOT authoritative
+			// current stock; this legacy ledger write is kept to avoid breaking old readers.
 			if err := tx.Exec(`
 				INSERT INTO warehouse_inventory (id, store_id, warehouse_id, product_id, quantity, transferred_at, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())
@@ -776,6 +908,7 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 			`, newID(), receipt.StoreID, receipt.WarehouseID, item.ProductID, item.Quantity).Error; err != nil {
 				return err
 			}
+			// Authoritative stock.
 			if err := tx.Exec(`
 				INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
@@ -784,7 +917,13 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 			`, newID(), receipt.StoreID, item.ProductID, locationID, item.Quantity).Error; err != nil {
 				return err
 			}
-			referenceID := receipt.ID
+			note := fmt.Sprintf("warehouse receipt %s", receipt.DocumentNo)
+			if strings.TrimSpace(receipt.PurchaseOrderID) != "" {
+				note += " · PO " + receipt.PurchaseOrderID
+			}
+			if strings.TrimSpace(receipt.SupplierID) != "" {
+				note += " · supplier " + receipt.SupplierID
+			}
 			if err := tx.Table("stock_movements").Create(map[string]any{
 				"id":              newStockMovementID(),
 				"store_id":        receipt.StoreID,
@@ -792,8 +931,8 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 				"location_id":     locationID,
 				"quantity_change": item.Quantity,
 				"type":            "IN",
-				"reference_id":    referenceID,
-				"note":            fmt.Sprintf("warehouse receipt %s", receipt.DocumentNo),
+				"reference_id":    receipt.ID,
+				"note":            note,
 				"created_by":      actorID,
 				"created_at":      now,
 				"updated_at":      now,
@@ -801,12 +940,40 @@ func (r PostgresRepository) ConfirmDraft(ctx context.Context, receiptID, actorID
 				return err
 			}
 		}
-		if err := tx.Table("warehouse_receipts").Where("id = ?", receiptID).Updates(map[string]any{
+
+		// Phase W3 §9/§10: moving weighted-average cost per product, computed decimal-safe
+		// in NUMERIC: new_cost = ROUND((old_qty*cost_price + Σ received_net) / (old_qty +
+		// Σ received_qty), 2), using the PRE-receipt quantity captured above. cost_price in
+		// the row is still the old cost (only this statement changes it). Zero total skips.
+		for _, pid := range productIDs {
+			total := oldQty[pid] + recvQty[pid]
+			if total <= 0 {
+				continue
+			}
+			if err := tx.Exec(
+				"UPDATE products SET cost_price = ROUND((?::numeric * cost_price + ?::numeric) / ?::numeric, 2), updated_at = NOW() WHERE id = ?",
+				oldQty[pid], recvValue[pid], total, pid,
+			).Error; err != nil {
+				return err
+			}
+		}
+
+		// Confirm the receipt and (when provided) store the idempotency key + fingerprint.
+		// A key reused on a DIFFERENT receipt trips the partial unique index → conflict.
+		updates := map[string]any{
 			"status":       string(ReceiptStatusConfirmed),
 			"confirmed_by": actorID,
 			"confirmed_at": now,
 			"updated_at":   now,
-		}).Error; err != nil {
+		}
+		if strings.TrimSpace(idempotencyKey) != "" {
+			updates["confirm_idempotency_key"] = idempotencyKey
+			updates["confirm_request_fingerprint"] = fingerprint
+		}
+		if err := tx.Table("warehouse_receipts").Where("id = ?", receiptID).Updates(updates).Error; err != nil {
+			if strings.Contains(err.Error(), "SQLSTATE 23505") {
+				return ErrReceiptConfirmIdempotencyConflict
+			}
 			return err
 		}
 		return repo.AppendAudit(ctx, WarehouseReceiptAudit{ID: newAuditID(), ReceiptID: receiptID, Action: "confirm", Description: "receipt confirmed", ActorID: actorID, CreatedAt: now})
