@@ -2,6 +2,7 @@ package stock_movement
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -73,16 +74,23 @@ func (h Handler) TransferStock(c *fiber.Ctx) error {
 	if err := httpx.DecodeJSON(c, &req); err != nil {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
+	// Idempotency key (Phase W4A §9): header takes precedence; a network-retried transfer
+	// with the same key returns the original result instead of moving stock twice.
+	if hk := strings.TrimSpace(c.Get("Idempotency-Key")); hk != "" {
+		req.IdempotencyKey = hk
+	}
 	result, err := h.service.TransferStock(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		switch err {
-		case ErrStockBadQty, ErrLocationMismatch:
+		case ErrStockBadQty, ErrTransferSourceRequired, ErrTransferDestRequired,
+			ErrTransferSameLocation, ErrTransferCrossStore, ErrTransferLocationNotInStore, ErrTransferLocationInactive,
+			ErrStockReasonRequired, ErrStockReasonInvalid, ErrStockReasonNoteRequired:
 			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		case ErrProductNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-		case ErrInsufficientStock:
-			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-		case ErrStockForbidden:
+		case ErrTransferInsufficient, ErrTransferIdempotencyConflict:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+		case ErrStockForbidden, ErrTransferForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 		default:
 			return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)

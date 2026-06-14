@@ -10,6 +10,8 @@ const (
 	MovementTypeIn              = "IN"
 	MovementTypeOut             = "OUT"
 	MovementTypeTransfer        = "TRANSFER"
+	MovementTypeTransferOut     = "TRANSFER_OUT" // Phase W4A — source leg of a paired transfer
+	MovementTypeTransferIn      = "TRANSFER_IN"  // Phase W4A — destination leg of a paired transfer
 	MovementTypeSale            = "SALE"
 	MovementTypeAdjust          = "ADJUST"
 	MovementTypeReturn          = "RETURN"
@@ -71,7 +73,34 @@ type TransferStockRequest struct {
 	SourceLocationID string `json:"source_location_id"`
 	DestLocationID   string `json:"dest_location_id"`
 	Quantity         int    `json:"quantity"`
+	Reason           string `json:"reason"`
 	Note             string `json:"note"`
+	IdempotencyKey   string `json:"idempotency_key"`
+}
+
+// StockTransfer is the canonical header/audit row for one location→location transfer
+// (Phase W4A). The paired TRANSFER_OUT/TRANSFER_IN movements reference it by id.
+type StockTransfer struct {
+	ID                 string    `json:"id" gorm:"column:id;primaryKey"`
+	StoreID            string    `json:"store_id" gorm:"column:store_id"`
+	ProductID          string    `json:"product_id" gorm:"column:product_id"`
+	SourceLocationID   string    `json:"source_location_id" gorm:"column:source_location_id"`
+	DestLocationID     string    `json:"dest_location_id" gorm:"column:dest_location_id"`
+	Quantity           int       `json:"quantity" gorm:"column:quantity"`
+	Reason             string    `json:"reason" gorm:"column:reason"`
+	Note               string    `json:"note" gorm:"column:note"`
+	CreatedBy          string    `json:"created_by" gorm:"column:created_by"`
+	IdempotencyKey     *string   `json:"-" gorm:"column:idempotency_key"`
+	RequestFingerprint string    `json:"-" gorm:"column:request_fingerprint"`
+	CreatedAt          time.Time `json:"created_at" gorm:"column:created_at"`
+}
+
+func (StockTransfer) TableName() string { return "stock_transfers" }
+
+// TransferResult is the canonical transfer response: the header plus its paired movements.
+type TransferResult struct {
+	Transfer  StockTransfer   `json:"transfer"`
+	Movements []StockMovement `json:"movements"`
 }
 
 type AdjustStockRequest struct {
@@ -121,4 +150,14 @@ var (
 	// ErrStockIdempotencyConflict: the same idempotency key was reused with a DIFFERENT
 	// request (product/location/quantity/type) — reject rather than return the original.
 	ErrStockIdempotencyConflict = errors.New("รหัสคำขอนี้ถูกใช้ไปแล้วกับรายการที่ไม่ตรงกัน")
+	// Phase W4A — canonical location-aware transfer guards (Thai user-facing copy).
+	ErrTransferSourceRequired      = errors.New("กรุณาเลือกตำแหน่งต้นทาง")
+	ErrTransferDestRequired        = errors.New("กรุณาเลือกตำแหน่งปลายทาง")
+	ErrTransferSameLocation        = errors.New("ตำแหน่งต้นทางและปลายทางต้องไม่ใช่ตำแหน่งเดียวกัน")
+	ErrTransferInsufficient        = errors.New("จำนวนที่ต้องการโอนมากกว่าสต็อกคงเหลือในตำแหน่งต้นทาง")
+	ErrTransferLocationNotInStore  = errors.New("ตำแหน่งที่เลือกไม่อยู่ในร้านเดียวกัน")
+	ErrTransferLocationInactive    = errors.New("ตำแหน่งที่เลือกไม่สามารถใช้งานได้")
+	ErrTransferCrossStore          = errors.New("ยังไม่รองรับการโอนสินค้าข้ามร้าน กรุณาเลือกตำแหน่งภายในร้านเดียวกัน")
+	ErrTransferForbidden           = errors.New("คุณไม่มีสิทธิ์โอนย้ายสต็อกสินค้า")
+	ErrTransferIdempotencyConflict = errors.New("รหัสคำขอนี้ถูกใช้ไปแล้วกับรายการโอนย้ายที่ไม่ตรงกัน")
 )

@@ -9,6 +9,7 @@ const (
 	opAdd       = "ADD"        // เพิ่มสต็อก  → IN movement
 	opSubtract  = "SUBTRACT"   // ลดสต็อก    → OUT movement
 	opSetActual = "SET_ACTUAL" // กำหนดยอดจริง → ADJUST movement
+	opTransfer  = "TRANSFER"   // โอนย้าย    → paired TRANSFER_OUT/TRANSFER_IN (Phase W4A)
 )
 
 // reasonCodes is the stable, language-independent set of valid reason codes per
@@ -36,6 +37,14 @@ var reasonCodes = map[string]map[string]struct{}{
 		"SYSTEM_MISMATCH": {},
 		"DATA_CORRECTION": {},
 		"OTHER":           {},
+	},
+	// Phase W4A — transfer reason codes (note required when OTHER).
+	opTransfer: {
+		"REPLENISH_SALE_POINT":    {},
+		"RETURN_TO_STORAGE":       {},
+		"WAREHOUSE_REBALANCE":     {},
+		"LOCATION_REORGANIZATION": {},
+		"OTHER":                   {},
 	},
 }
 

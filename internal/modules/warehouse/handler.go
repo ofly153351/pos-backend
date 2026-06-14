@@ -9,6 +9,7 @@ import (
 	"pos-backend/internal/middleware"
 	"pos-backend/internal/platform/httpx"
 )
+
 type Handler struct{ service Service }
 
 func NewHandler(service Service) Handler { return Handler{service: service} }
@@ -72,7 +73,7 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	case errors.Is(err, ErrTransferInvalidDestination), errors.Is(err, ErrTransferSameWarehouse), errors.Is(err, ErrTransferZeroQty):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-	case errors.Is(err, ErrInsufficientStock):
+	case errors.Is(err, ErrInsufficientStock), errors.Is(err, ErrTransferLegacyDisabled):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrInventoryNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
