@@ -24,6 +24,7 @@ type Repository interface {
 	UpdateProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) error
 	RemoveProduct(ctx context.Context, storeID, warehouseID, productID string) error
 	ProductExistsInWarehouse(ctx context.Context, warehouseID, productID string) (bool, error)
+	ProductTotalQtyInWarehouse(ctx context.Context, warehouseID, productID string) (int, error)
 	ProductBelongsToStore(ctx context.Context, storeID, productID string) (bool, error)
 
 	// TransferStock transfers stock between warehouses or to a sale_point location.
@@ -110,6 +111,16 @@ func (r PostgresRepository) Update(ctx context.Context, item Warehouse) (Warehou
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
+	// Phase W0 safety: never let a delete cascade away locations/stock/history.
+	// stocks.location_id and locations.warehouse_id are ON DELETE CASCADE, so a raw
+	// delete would silently destroy stock. Reject if anything still references it.
+	inUse, err := r.warehouseHasReferences(ctx, id)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return ErrWarehouseInUse
+	}
 	result := r.db.WithContext(ctx).
 		Where("store_id = ? AND id = ?", storeID, id).
 		Delete(&Warehouse{})
@@ -120,6 +131,42 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) erro
 		return ErrWarehouseNotFound
 	}
 	return nil
+}
+
+// warehouseHasReferences reports whether a warehouse still has dependent data that
+// a delete would destroy or orphan. A single location is enough to block: stocks,
+// movements and product default-location references all hang off locations.
+func (r PostgresRepository) warehouseHasReferences(ctx context.Context, warehouseID string) (bool, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Table("locations").Where("warehouse_id = ?", warehouseID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := r.db.WithContext(ctx).Table("warehouse_inventory").Where("warehouse_id = ?", warehouseID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	if err := r.db.WithContext(ctx).Table("warehouse_receipts").Where("warehouse_id = ?", warehouseID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// ProductTotalQtyInWarehouse sums a product's stock across ALL locations of the
+// warehouse (sale-point and storage alike) — used to block destructive removal.
+func (r PostgresRepository) ProductTotalQtyInWarehouse(ctx context.Context, warehouseID, productID string) (int, error) {
+	var total int
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select("COALESCE(SUM(stocks.quantity), 0)").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("locations.warehouse_id = ? AND stocks.product_id = ?", warehouseID, productID).
+		Scan(&total).Error
+	return total, err
 }
 
 func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
@@ -274,8 +321,12 @@ func (r PostgresRepository) UpdateProduct(ctx context.Context, storeID, warehous
 }
 
 func (r PostgresRepository) RemoveProduct(ctx context.Context, storeID, warehouseID, productID string) error {
+	// Self-guarding: only ever delete EMPTY stock rows. Even if a positive-qty row
+	// arrives concurrently (in the window between the service's zero-on-hand check
+	// and this delete), it survives — closing the silent stock-loss race rather than
+	// relying solely on the non-atomic service-layer check.
 	result := r.db.WithContext(ctx).
-		Exec(`DELETE FROM stocks WHERE product_id = ? AND location_id IN (
+		Exec(`DELETE FROM stocks WHERE product_id = ? AND quantity = 0 AND location_id IN (
 			SELECT id FROM locations WHERE warehouse_id = ?
 		)`, productID, warehouseID)
 	if result.Error != nil {

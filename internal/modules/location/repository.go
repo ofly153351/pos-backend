@@ -250,6 +250,16 @@ func (r PostgresRepository) Update(ctx context.Context, loc Location) (Location,
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, locationID string) error {
+	// Phase W0 safety: stocks.location_id is ON DELETE CASCADE, so a raw delete
+	// silently destroys stock rows (and stock_movements.location_id would be nulled).
+	// Explicitly reject when the location is referenced or in use.
+	inUse, err := r.locationInUse(ctx, locationID)
+	if err != nil {
+		return err
+	}
+	if inUse {
+		return ErrLocationInUse
+	}
 	result := r.db.WithContext(ctx).
 		Where("store_id = ? AND id = ?", storeID, locationID).
 		Delete(&Location{})
@@ -263,6 +273,47 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, locationID stri
 		return ErrLocationNotFound
 	}
 	return nil
+}
+
+// locationInUse reports whether a location still holds stock or is referenced by
+// operational data — any of which a delete would destroy or orphan.
+func (r PostgresRepository) locationInUse(ctx context.Context, locationID string) (bool, error) {
+	var n int64
+	// Any stock row (even zero quantity — the slot still maps stock here).
+	if err := r.db.WithContext(ctx).Table("stocks").Where("location_id = ?", locationID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	// Any movement history (as source or transfer destination).
+	if err := r.db.WithContext(ctx).Table("stock_movements").
+		Where("location_id = ? OR destination_location_id = ?", locationID, locationID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	// Referenced as a product's default receiving location.
+	if err := r.db.WithContext(ctx).Table("products").Where("default_location_id = ?", locationID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	// Still configured as a sale point (POS depends on it).
+	if err := r.db.WithContext(ctx).Table("locations").
+		Where("id = ? AND is_sale_point = ?", locationID, true).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n > 0 {
+		return true, nil
+	}
+	// Referenced by a goods-receipt line.
+	if err := r.db.WithContext(ctx).Table("warehouse_receipt_items").Where("location_id = ?", locationID).Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 type treeRow struct {

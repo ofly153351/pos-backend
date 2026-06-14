@@ -326,28 +326,21 @@ func (r PostgresRepository) ExistsByID(ctx context.Context, storeID, productID s
 }
 
 func (r PostgresRepository) SoftDelete(ctx context.Context, storeID, productID string) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. Zero all stock quantities
-		if err := tx.Exec(`UPDATE stocks SET quantity = 0, updated_at = NOW() WHERE product_id = ?`, productID).Error; err != nil {
-			return err
-		}
-		// 2. Delete warehouse inventory
-		if err := tx.Exec(`DELETE FROM warehouse_inventory WHERE product_id = ?`, productID).Error; err != nil {
-			return err
-		}
-		// 3. Delete stock movements for this product
-		if err := tx.Exec(`DELETE FROM stock_movements WHERE product_id = ?`, productID).Error; err != nil {
-			return err
-		}
-		// 4. Set product inactive (soft delete)
-		if err := tx.Model(&Product{}).
-			Where("store_id = ? AND id = ?", storeID, productID).
-			Update("is_active", false).
-			Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	// Phase W0 safety: deactivation must NEVER destroy operational data. It only
+	// flips is_active. Stock quantities, stock_movements (audit), warehouse_inventory
+	// and all receiving/sale/transfer/stock-count references are preserved. An
+	// inactive product may still hold stock and history.
+	result := r.db.WithContext(ctx).
+		Model(&Product{}).
+		Where("store_id = ? AND id = ?", storeID, productID).
+		Update("is_active", false)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrProductNotFound
+	}
+	return nil
 }
 
 func (r PostgresRepository) UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error {

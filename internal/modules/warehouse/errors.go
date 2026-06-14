@@ -16,4 +16,8 @@ var (
 	ErrInventoryInsufficientQty     = errors.New("insufficient inventory quantity for allocation")
 	ErrAllocateZeroQty              = errors.New("allocation quantity must be greater than zero")
 	ErrAllocateExceedsQty           = errors.New("allocation quantity exceeds available inventory")
+	// Phase W0 safety guards.
+	ErrWarehouseInUse               = errors.New("cannot delete warehouse: it still has locations, stock, or related records")
+	ErrProductHasStock              = errors.New("cannot remove product from warehouse while stock remains")
+	ErrWarehouseDirectStockDisabled = errors.New("direct warehouse stock changes are disabled; use goods receiving or the inventory stock adjustment")
 )

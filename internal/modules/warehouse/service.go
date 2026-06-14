@@ -123,18 +123,10 @@ func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, war
 	if !allowed {
 		return WarehouseProduct{}, ErrForbiddenStoreAccess
 	}
-
-	// Verify warehouse belongs to store
-	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
-		return WarehouseProduct{}, err
-	}
-
-	// Verify product belongs to store
-	if _, err := s.repo.ProductBelongsToStore(ctx, storeID, req.ProductID); err != nil {
-		return WarehouseProduct{}, err
-	}
-
-	return s.repo.AddProduct(ctx, storeID, warehouseID, req.ProductID, req.Quantity)
+	// Phase W0: the legacy direct add changed stocks without a movement and could
+	// silently auto-create locations. It is disabled — receiving now goes through
+	// the canonical Goods Receipt workflow.
+	return WarehouseProduct{}, ErrWarehouseDirectStockDisabled
 }
 
 func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]WarehouseProduct, error) {
@@ -162,22 +154,10 @@ func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, 
 	if !allowed {
 		return ErrForbiddenStoreAccess
 	}
-
-	// Verify warehouse belongs to store
-	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
-		return err
-	}
-
-	// Verify product exists in warehouse
-	exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, productID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return ErrProductNotInWarehouse
-	}
-
-	return s.repo.UpdateProduct(ctx, storeID, warehouseID, productID, quantity)
+	// Phase W0: the destructive absolute-quantity update deleted stock rows at other
+	// locations and wrote no movement. It is disabled — use the inventory stock
+	// adjustment (which posts an auditable IN/OUT movement) instead.
+	return ErrWarehouseDirectStockDisabled
 }
 
 func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string) error {
@@ -194,13 +174,15 @@ func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, 
 		return err
 	}
 
-	// Verify product exists in warehouse
-	exists, err := s.repo.ProductExistsInWarehouse(ctx, warehouseID, productID)
+	// Phase W0 safety: refuse to delete stock rows that still hold quantity — that
+	// was silent stock loss with no movement. Removal is only allowed once the
+	// product has zero on-hand in this warehouse (transfer/adjust to zero first).
+	total, err := s.repo.ProductTotalQtyInWarehouse(ctx, warehouseID, productID)
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return ErrProductNotInWarehouse
+	if total > 0 {
+		return ErrProductHasStock
 	}
 
 	return s.repo.RemoveProduct(ctx, storeID, warehouseID, productID)
