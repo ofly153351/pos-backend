@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"pos-backend/internal/modules/provisioning"
 )
 
 type Repository interface {
@@ -126,6 +128,14 @@ func (r PostgresRepository) CreateWithOwner(ctx context.Context, storeModel Stor
 		CurrentPeriodStart: storeModel.CreatedAt,
 		CurrentPeriodEnd:   periodEnd,
 	}).Error; err != nil {
+		return Store{}, err
+	}
+
+	// Phase W1: provision the store's default warehouse ("คลังหลัก") and default sale
+	// location ("หน้าร้าน") inside this same transaction, so a new store is never left
+	// half-configured. A failure here rolls the whole store creation back (deferred
+	// tx.Rollback) rather than hiding it.
+	if _, err := provisioning.EnsureDefaultsTx(ctx, tx, storeModel.ID); err != nil {
 		return Store{}, err
 	}
 

@@ -80,7 +80,7 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrAllocateZeroQty):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
-	case errors.Is(err, ErrWarehouseInUse), errors.Is(err, ErrProductHasStock), errors.Is(err, ErrWarehouseDirectStockDisabled):
+	case errors.Is(err, ErrWarehouseInUse), errors.Is(err, ErrProductHasStock), errors.Is(err, ErrWarehouseDirectStockDisabled), errors.Is(err, ErrDefaultWarehouseDelete), errors.Is(err, ErrDefaultWarehouseDeactivate):
 		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)

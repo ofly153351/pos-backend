@@ -94,6 +94,11 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 		item.ContactName = strings.TrimSpace(*req.ContactName)
 	}
 	if req.IsActive != nil {
+		// Phase W1 invariant: the store's default warehouse must stay active. Disabling
+		// it would orphan the default structure, so require choosing a new default first.
+		if item.IsDefault && item.IsActive && !*req.IsActive {
+			return Warehouse{}, ErrDefaultWarehouseDeactivate
+		}
 		item.IsActive = *req.IsActive
 	}
 	item.UpdatedAt = time.Now().UTC()

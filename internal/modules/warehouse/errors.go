@@ -20,4 +20,11 @@ var (
 	ErrWarehouseInUse               = errors.New("cannot delete warehouse: it still has locations, stock, or related records")
 	ErrProductHasStock              = errors.New("cannot remove product from warehouse while stock remains")
 	ErrWarehouseDirectStockDisabled = errors.New("direct warehouse stock changes are disabled; use goods receiving or the inventory stock adjustment")
+	// Phase W1 default-protection guard. The message is the user-facing Thai copy: W1
+	// is backend-only (the warehouse UI/locale files are owned by a concurrent session),
+	// so returning the Thai string here guarantees the correct message reaches the user
+	// without touching those files.
+	ErrDefaultWarehouseDelete = errors.New("ไม่สามารถลบคลังสินค้าเริ่มต้นของร้านได้ กรุณากำหนดคลังเริ่มต้นใหม่ก่อน")
+	// Phase W1 invariant: the store's default warehouse must stay active.
+	ErrDefaultWarehouseDeactivate = errors.New("ไม่สามารถปิดใช้งานคลังสินค้าเริ่มต้นของร้านได้ กรุณากำหนดคลังเริ่มต้นใหม่ก่อน")
 )

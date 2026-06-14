@@ -197,9 +197,21 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, locatio
 		current.FloorName = strings.TrimSpace(*input.FloorName)
 	}
 	if input.IsSalePoint != nil {
+		// Phase W1 guard: the default sale location must stay a sale point. Turning it
+		// off silently would leave the store without a default POS location, so require
+		// choosing a replacement default first.
+		if current.IsDefaultSale && !*input.IsSalePoint {
+			return Location{}, ErrDefaultSaleLocationDeactivate
+		}
 		current.IsSalePoint = *input.IsSalePoint
 	}
 	if input.IsActive != nil {
+		// Phase W1 invariant: the default sale location must stay active. Disabling it
+		// would leave the store with no usable default POS location, so require choosing
+		// a replacement default first.
+		if current.IsDefaultSale && current.IsActive && !*input.IsActive {
+			return Location{}, ErrDefaultSaleLocationDisable
+		}
 		current.IsActive = *input.IsActive
 	}
 	current.UpdatedAt = time.Now().UTC()

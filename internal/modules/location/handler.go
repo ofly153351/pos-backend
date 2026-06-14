@@ -126,6 +126,8 @@ func (h Handler) Update(c *fiber.Ctx) error {
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 		case ErrLocationExists:
 			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+		case ErrDefaultSaleLocationDeactivate, ErrDefaultSaleLocationDisable:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		default:
 			return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 		}
@@ -144,6 +146,8 @@ func (h Handler) Delete(c *fiber.Ctx) error {
 		case ErrLocationNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 		case ErrLocationInUse:
+			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
+		case ErrDefaultSaleLocationDelete:
 			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		default:
 			return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)

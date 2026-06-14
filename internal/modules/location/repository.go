@@ -40,6 +40,7 @@ type locationQueryRow struct {
 	ZoneName      *string   `gorm:"column:zone_name"`
 	FloorName     *string   `gorm:"column:floor_name"`
 	IsSalePoint   bool      `gorm:"column:is_sale_point"`
+	IsDefaultSale bool      `gorm:"column:is_default_sale"`
 	IsActive      bool      `gorm:"column:is_active"`
 	CreatedAt     time.Time `gorm:"column:created_at"`
 	UpdatedAt     time.Time `gorm:"column:updated_at"`
@@ -53,6 +54,7 @@ func (r *locationQueryRow) toLocation() Location {
 		WarehouseID:   r.WarehouseID,
 		Name:          r.Name,
 		IsSalePoint:   r.IsSalePoint,
+		IsDefaultSale: r.IsDefaultSale,
 		IsActive:      r.IsActive,
 		CreatedAt:     r.CreatedAt,
 		UpdatedAt:     r.UpdatedAt,
@@ -75,7 +77,7 @@ func (r PostgresRepository) locationBaseQuery() *gorm.DB {
 		Select(`
 			locations.id, locations.store_id, locations.warehouse_id,
 			locations.name, locations.code, locations.zone_name, locations.floor_name,
-			locations.is_sale_point, locations.is_active,
+			locations.is_sale_point, locations.is_default_sale, locations.is_active,
 			locations.created_at, locations.updated_at,
 			COALESCE(warehouses.name, '') AS warehouse_name
 		`).
@@ -250,9 +252,23 @@ func (r PostgresRepository) Update(ctx context.Context, loc Location) (Location,
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, locationID string) error {
-	// Phase W0 safety: stocks.location_id is ON DELETE CASCADE, so a raw delete
-	// silently destroys stock rows (and stock_movements.location_id would be nulled).
-	// Explicitly reject when the location is referenced or in use.
+	// Phase W1 guard: never delete the store's active default sale location — a new
+	// default must be chosen first. Checked before the in-use guard so the user gets the
+	// specific "set a new default first" message.
+	var isDefaultSale bool
+	if err := r.db.WithContext(ctx).Table("locations").
+		Select("is_default_sale").
+		Where("store_id = ? AND id = ?", storeID, locationID).
+		Scan(&isDefaultSale).Error; err != nil {
+		return err
+	}
+	if isDefaultSale {
+		return ErrDefaultSaleLocationDelete
+	}
+	// Phase W0 guard (friendly first line of defense): reject up-front when the location
+	// is referenced or in use. Since Phase W0.5, stocks.location_id is ON DELETE RESTRICT,
+	// so the database is the final backstop (the 23503 mapping below) — a raw delete of a
+	// location that still holds stock is rejected by the FK instead of cascading it away.
 	inUse, err := r.locationInUse(ctx, locationID)
 	if err != nil {
 		return err

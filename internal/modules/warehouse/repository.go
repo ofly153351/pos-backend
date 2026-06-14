@@ -112,6 +112,19 @@ func (r PostgresRepository) Update(ctx context.Context, item Warehouse) (Warehou
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
+	// Phase W1 guard: never delete the store's active default warehouse — a new default
+	// must be chosen first. Checked before the reference guard so the user gets the
+	// specific "set a new default first" message rather than the generic in-use one.
+	var isDefault bool
+	if err := r.db.WithContext(ctx).Table("warehouses").
+		Select("is_default").
+		Where("store_id = ? AND id = ?", storeID, id).
+		Scan(&isDefault).Error; err != nil {
+		return err
+	}
+	if isDefault {
+		return ErrDefaultWarehouseDelete
+	}
 	// Phase W0 guard (friendly first line of defense): reject up-front if anything
 	// still references the warehouse. Since Phase W0.5, locations.warehouse_id (and
 	// stocks.location_id) are ON DELETE RESTRICT, so the database is the final
