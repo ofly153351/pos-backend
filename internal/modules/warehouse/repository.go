@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -111,9 +112,11 @@ func (r PostgresRepository) Update(ctx context.Context, item Warehouse) (Warehou
 }
 
 func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) error {
-	// Phase W0 safety: never let a delete cascade away locations/stock/history.
-	// stocks.location_id and locations.warehouse_id are ON DELETE CASCADE, so a raw
-	// delete would silently destroy stock. Reject if anything still references it.
+	// Phase W0 guard (friendly first line of defense): reject up-front if anything
+	// still references the warehouse. Since Phase W0.5, locations.warehouse_id (and
+	// stocks.location_id) are ON DELETE RESTRICT, so the database is the final
+	// backstop — a raw delete of a warehouse that still has locations is rejected by
+	// the FK instead of cascading stock away.
 	inUse, err := r.warehouseHasReferences(ctx, id)
 	if err != nil {
 		return err
@@ -125,6 +128,13 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) erro
 		Where("store_id = ? AND id = ?", storeID, id).
 		Delete(&Warehouse{})
 	if result.Error != nil {
+		// Residual-race backstop (W0.5): the RESTRICT foreign key rejects a delete
+		// whose dependent locations were inserted concurrently after the in-use
+		// check. Map that database violation to the same friendly domain error
+		// (HTTP 409) instead of leaking raw SQL.
+		if strings.Contains(result.Error.Error(), "SQLSTATE 23503") {
+			return ErrWarehouseInUse
+		}
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
