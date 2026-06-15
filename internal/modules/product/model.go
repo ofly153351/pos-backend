@@ -31,11 +31,17 @@ type Product struct {
 	Description         string     `json:"description,omitempty" gorm:"column:description"`
 	StorageLocation     string     `json:"storage_location,omitempty" gorm:"column:storage_location"`
 	DefaultLocationID   *string    `json:"default_location_id" gorm:"column:default_location_id"`
-	TotalStock          int        `json:"total_stock" gorm:"column:total_stock"`
-	WarehouseStock      int        `json:"warehouse_stock" gorm:"column:warehouse_stock"`
-	IsActive            bool       `json:"is_active" gorm:"column:is_active"`
-	CreatedAt           time.Time  `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt           time.Time  `json:"updated_at" gorm:"column:updated_at"`
+	// Phase W5 stock aggregate contract. total_stock/warehouse_stock are DEPRECATED
+	// (historically mislabeled): total_stock == ready_stock (sale-point), warehouse_stock
+	// == the grand total. Prefer the explicit fields below. ready_stock + storage_stock
+	// == warehouse_stock (grand total). All include inactive-location stock.
+	TotalStock     int       `json:"total_stock" gorm:"column:total_stock"`         // DEPRECATED: == ready_stock (sale-point sum)
+	WarehouseStock int       `json:"warehouse_stock" gorm:"column:warehouse_stock"` // DEPRECATED: grand total across all locations
+	ReadyStock     int       `json:"ready_stock" gorm:"column:ready_stock"`         // W5: SUM where is_sale_point (POS-sellable)
+	StorageStock   int       `json:"storage_stock" gorm:"column:storage_stock"`     // W5: SUM where NOT is_sale_point (storage)
+	IsActive       bool      `json:"is_active" gorm:"column:is_active"`
+	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (Product) TableName() string {

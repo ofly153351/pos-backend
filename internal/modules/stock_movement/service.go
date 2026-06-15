@@ -31,7 +31,7 @@ func (s Service) canManage(ctx context.Context, storeID, userID, role string) (b
 	var count int64
 	err := s.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
 		Count(&count).Error
 	return count > 0, err
 }

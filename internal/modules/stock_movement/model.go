@@ -16,6 +16,10 @@ const (
 	MovementTypeAdjust          = "ADJUST"
 	MovementTypeReturn          = "RETURN"
 	MovementTypeCountCorrection = "COUNT_CORRECTION"
+	MovementTypeAllocate        = "ALLOCATE" // Phase W5 — warehouse_inventory → stocks allocation
+	// NOTE: "OPENING_BALANCE" is a REASON code (see reasons.go opAdd), NOT a movement
+	// type. Initial/seed stock is written as type=IN with reason="OPENING_BALANCE", so it
+	// is intentionally absent from the type taxonomy.
 )
 
 type StockMovement struct {

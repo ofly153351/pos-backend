@@ -414,7 +414,7 @@ func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
 	}
 	var count int64
 	if err := s.db.Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, actor.UserID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, actor.UserID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error; err != nil {
 		return err
 	}

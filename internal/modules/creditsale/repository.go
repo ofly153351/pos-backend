@@ -39,7 +39,7 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -208,15 +208,21 @@ func (r PostgresRepository) AddPayment(ctx context.Context, storeID string, p Cr
 	}
 	defer tx.Rollback()
 
+	// Phase W5 — lock the receivable header FOR UPDATE so AddPayment serializes against
+	// Cancel (and other payments) on the same row: a payment can never be recorded after
+	// a cancellation commits, and concurrent payments can't both read a stale balance.
 	var header CreditSale
-	if err := tx.Table("credit_sales").Where("store_id = ? AND id = ?", storeID, p.CreditSaleID).Take(&header).Error; err != nil {
+	if err := tx.Table("credit_sales").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("store_id = ? AND id = ?", storeID, p.CreditSaleID).
+		Take(&header).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return CreditSale{}, ErrNotFound
 		}
 		return CreditSale{}, err
 	}
 	if header.Status == StatusCancelled {
-		return CreditSale{}, ErrAlreadyCancelled
+		return CreditSale{}, ErrPaymentAfterCancel
 	}
 
 	newPaid := roundMoney(header.PaidAmount + p.Amount)
@@ -277,6 +283,13 @@ func (r PostgresRepository) Cancel(ctx context.Context, storeID, creditSaleID, a
 	}
 	if header.Status == StatusCancelled {
 		return CreditSale{}, ErrAlreadyCancelled
+	}
+	// Phase W5 — a receivable that has already collected money cannot be cancelled: the
+	// system has NO payment-reversal/refund workflow, so cancelling would silently strand
+	// recorded payments on a voided sale (a financial inconsistency). Block it explicitly.
+	// Checked under the FOR UPDATE lock so it is consistent with concurrent AddPayment.
+	if roundMoney(header.PaidAmount) > 0 {
+		return CreditSale{}, ErrCannotCancelPaid
 	}
 
 	now := time.Now().UTC()

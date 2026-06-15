@@ -72,7 +72,7 @@ func (h Handler) userCanOperate(ctx context.Context, storeID, userID, role strin
 	var count int64
 	h.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count)
 	return count > 0
 }

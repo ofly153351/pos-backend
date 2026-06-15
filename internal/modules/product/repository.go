@@ -60,6 +60,8 @@ type productQueryRow struct {
 	SpecialPriceEndAt   *time.Time `gorm:"column:special_price_end_at"`
 	TotalStock          int        `gorm:"column:total_stock"`
 	WarehouseStock      int        `gorm:"column:warehouse_stock"`
+	ReadyStock          int        `gorm:"column:ready_stock"`
+	StorageStock        int        `gorm:"column:storage_stock"`
 	StockStatus         string     `gorm:"column:stock_status"`
 	IsActive            bool       `gorm:"column:is_active"`
 	CreatedAt           time.Time  `gorm:"column:created_at"`
@@ -167,7 +169,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	var rows []productQueryRow
 	err := baseQuery.
 		Select(`
-			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock,
+			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -203,7 +205,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
 		Select(`
-			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock,
+			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -516,7 +518,7 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -541,6 +543,8 @@ func (row productQueryRow) toProduct() Product {
 		CostPrice:           row.CostPrice,
 		TotalStock:          row.TotalStock,
 		WarehouseStock:      row.WarehouseStock,
+		ReadyStock:          row.ReadyStock,
+		StorageStock:        row.StorageStock,
 		StockStatus:         row.StockStatus,
 	}
 	if row.BrandID != nil {

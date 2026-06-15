@@ -113,7 +113,7 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "type", err.Error())
 	case errors.Is(err, ErrInvalidDownPayment), errors.Is(err, ErrInvalidAmount), errors.Is(err, ErrOverpayment):
 		return httpx.Err422(c, "amount", err.Error())
-	case errors.Is(err, ErrAlreadyCancelled):
+	case errors.Is(err, ErrAlreadyCancelled), errors.Is(err, ErrPaymentAfterCancel), errors.Is(err, ErrCannotCancelPaid):
 		return httpx.ErrConflict(c, err.Error())
 	// Errors bubbling up from the underlying sale create (client-fixable):
 	case errors.Is(err, sale.ErrInsufficientStock):
