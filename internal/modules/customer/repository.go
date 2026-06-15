@@ -236,9 +236,11 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 		return true, nil
 	}
 	var count int64
+	// status <> 'suspended' mirrors the canonical operate check (sale/member modules) so a
+	// suspended store member cannot read operational customer/tier-discount data.
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err

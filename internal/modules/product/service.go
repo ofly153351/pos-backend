@@ -188,7 +188,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string, query ListProductsQuery) (ProductListResult, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	// POS cashiers must be able to READ the product catalog (names/prices/sku/barcode/
+	// category) in order to sell, so listing is gated at operate level. Product writes
+	// (Create/Update/Delete) remain manage-gated in their own methods.
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
 		return ProductListResult{}, err
 	}

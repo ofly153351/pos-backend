@@ -139,7 +139,10 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, custome
 }
 
 func (s Service) ListLevelDiscounts(ctx context.Context, actor auth.Claims, storeID string) ([]LevelDiscount, error) {
-	if err := s.ensureDiscountAccess(ctx, actor, storeID); err != nil {
+	// POS pricing needs member-tier discounts at operate level so cashiers price member
+	// sales identically to owner/manager. Discount writes (Upsert/Delete) remain
+	// manage-gated via ensureDiscountAccess.
+	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
 		return nil, err
 	}
 	return s.repo.ListLevelDiscounts(ctx, storeID)

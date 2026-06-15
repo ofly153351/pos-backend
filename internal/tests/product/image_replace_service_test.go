@@ -74,6 +74,10 @@ func (r *fakeProductRepo) UserCanManageStore(ctx context.Context, storeID, userI
 	return true, nil
 }
 
+func (r *fakeProductRepo) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
+	return true, nil
+}
+
 type fakeImageStorage struct {
 	saveURL   string
 	deleted   []string
