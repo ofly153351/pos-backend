@@ -24,6 +24,8 @@ func (h Handler) Create(c *fiber.Ctx) error {
 	if err := httpx.DecodeJSON(c, &req); err != nil {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
+	// Phase W4B — request idempotency travels in the header, never the JSON body.
+	req.IdempotencyKey = c.Get("Idempotency-Key")
 
 	result, err := h.service.Create(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), req)
 	if err != nil {
@@ -90,6 +92,13 @@ func writeSaleError(c *fiber.Ctx, err error) error {
 	case errors.Is(err, ErrProductInactive):
 		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrInsufficientStock):
+		// Includes InsufficientSaleStockError (unwraps to ErrInsufficientStock); its
+		// Error() already carries the Thai shortfall message with the on-hand count.
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrNoSaleLocation), errors.Is(err, ErrSaleLocationInvalid),
+		errors.Is(err, ErrSaleLocationCrossStore):
+		return httpx.Err422(c, "location_id", err.Error())
+	case errors.Is(err, ErrSaleIdempotencyConflict):
 		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.ErrForbidden(c, err.Error())

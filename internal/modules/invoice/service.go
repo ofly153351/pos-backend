@@ -38,60 +38,12 @@ func NewService(repo Repository, resolver CustomerBenefitResolver, storage Payme
 }
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateInvoiceRequest) (Invoice, error) {
-	if err := validateCreateRequest(req); err != nil {
-		return Invoice{}, err
-	}
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Invoice{}, err
-	}
-	if !allowed {
-		return Invoice{}, ErrForbiddenStoreAccess
-	}
-	if s.resolver == nil {
-		return Invoice{}, ErrCustomerNotFound
-	}
-
-	customerID := strings.TrimSpace(req.CustomerID)
-	level, networkDiscountPercent, err := s.resolver.Resolve(ctx, storeID, customerID)
-	if err != nil {
-		return Invoice{}, ErrCustomerNotFound
-	}
-
-	now := time.Now().UTC()
-	invoice := Invoice{
-		ID:                     newID(),
-		StoreID:                storeID,
-		InvoiceNumber:          newInvoiceNumber(now),
-		CustomerID:             customerID,
-		CashierUserID:          actor.UserID,
-		Status:                 StatusUnpaid,
-		Note:                   strings.TrimSpace(req.Note),
-		DueAt:                  req.DueAt,
-		VATIncluded:            true,
-		VATPercent:             7,
-		CustomerLevel:          &level,
-		NetworkDiscountPercent: networkDiscountPercent,
-		CreatedAt:              now,
-		UpdatedAt:              now,
-	}
-	if req.VATIncluded != nil {
-		invoice.VATIncluded = *req.VATIncluded
-	}
-	if req.VATPercent != nil {
-		invoice.VATPercent = *req.VATPercent
-	}
-
-	for _, item := range req.Items {
-		invoice.Items = append(invoice.Items, InvoiceItem{
-			ProductID:     strings.TrimSpace(item.ProductID),
-			Quantity:      item.Quantity,
-			DiscountType:  item.DiscountType,
-			DiscountValue: item.DiscountValue,
-		})
-		invoice.TotalItems += item.Quantity
-	}
-	return s.repo.Create(ctx, invoice)
+	// Phase W4B follow-up — the legacy stock-deducting invoice-create path is disabled
+	// (it used the non-location-aware "first sale point by created_at" heuristic and has
+	// no active write consumer). Reject BEFORE any validation or stock mutation so the
+	// endpoint can never deduct from an arbitrary location. Invoice reads/payments/PDF
+	// stay live. New sales must go through the location-aware POS /sales flow.
+	return Invoice{}, ErrInvoiceCreateDisabled
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Invoice, error) {

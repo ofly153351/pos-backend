@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -13,6 +15,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, sale Sale, discount DiscountInput) (Sale, error)
+	FindByIdempotencyKey(ctx context.Context, storeID, key string) (*Sale, error)
 	ListByStore(ctx context.Context, storeID string) ([]Sale, error)
 	GetByID(ctx context.Context, storeID, saleID string) (Sale, error)
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
@@ -34,20 +37,45 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	}
 	defer tx.Rollback()
 
-	for index, item := range sale.Items {
-		product, err := r.lockProductForSale(ctx, tx, sale.StoreID, item.ProductID)
+	// Phase W4B: resolve + validate + LOCK the single effective sale-point location inside the
+	// tx (authoritative): the explicit request location, else the store default sale location.
+	saleLocationID, err := r.resolveAndLockSaleLocation(ctx, tx, sale.StoreID, sale.LocationID, discount.IsElevated)
+	if err != nil {
+		return Sale{}, err
+	}
+	sale.LocationID = saleLocationID
+
+	// Group cart quantities by product (duplicate lines → one deduction) and deduct ONLY from
+	// the sale location, in deterministic product-id order (deadlock-safe). Stock is taken from
+	// the one sale point — never aggregated across locations, never from storage, never a fallback.
+	grouped := map[string]int{}
+	productOrder := make([]string, 0)
+	for _, item := range sale.Items {
+		pid := strings.TrimSpace(item.ProductID)
+		if _, ok := grouped[pid]; !ok {
+			productOrder = append(productOrder, pid)
+		}
+		grouped[pid] += item.Quantity
+	}
+	sort.Strings(productOrder)
+	snapshots := map[string]productSnapshot{}
+	for _, pid := range productOrder {
+		product, err := r.lockProductForSale(ctx, tx, sale.StoreID, pid)
 		if err != nil {
 			return Sale{}, err
 		}
 		if !product.IsActive {
 			return Sale{}, ErrProductInactive
 		}
-
-		// Check stock availability from sale-point locations
-		if err := r.checkAndDeductSaleStock(ctx, tx, sale.StoreID, item.ProductID, item.Quantity, sale.ID, sale.CashierUserID); err != nil {
+		snapshots[pid] = product
+		if err := r.checkAndDeductAtLocation(ctx, tx, sale.StoreID, pid, grouped[pid], sale.ID, sale.CashierUserID, saleLocationID); err != nil {
 			return Sale{}, err
 		}
+	}
 
+	// Pricing per request line (sale_items stay per-line) reusing the locked product snapshots.
+	for index, item := range sale.Items {
+		product := snapshots[strings.TrimSpace(item.ProductID)]
 		unitPrice := resolveEffectivePrice(product, sale.SoldAt)
 		manualDiscountPerUnit, err := calculateDiscount(item.DiscountType, item.DiscountValue, unitPrice)
 		if err != nil {
@@ -122,6 +150,7 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	salePayload := map[string]any{
 		"id":                       sale.ID,
 		"store_id":                 sale.StoreID,
+		"location_id":              sale.LocationID,
 		"sale_number":              sale.SaleNumber,
 		"cashier_user_id":          sale.CashierUserID,
 		"status":                   sale.Status,
@@ -155,7 +184,21 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 		salePayload["customer_id"] = nil
 		salePayload["customer_level"] = nil
 	}
+	if sale.IdempotencyKey == "" {
+		salePayload["idempotency_key"] = nil
+		salePayload["request_fingerprint"] = nil
+	} else {
+		salePayload["idempotency_key"] = sale.IdempotencyKey
+		salePayload["request_fingerprint"] = sale.RequestFingerprint
+	}
 	if err := tx.Table("sales").Create(salePayload).Error; err != nil {
+		// A concurrent request carrying the same Idempotency-Key won the race to the
+		// unique index. Surface it as an idempotency conflict; the SERVICE then re-reads
+		// the committed winner and, when the intent matches, returns that original sale
+		// (this tx is rolled back by defer, so its second deduction never persists).
+		if isIdempotencyKeyViolation(err) {
+			return Sale{}, ErrSaleIdempotencyConflict
+		}
 		return Sale{}, err
 	}
 
@@ -206,100 +249,180 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	return sale, nil
 }
 
-// checkAndDeductSaleStock checks stock availability in sale-point locations
-// and deducts proportionally from them, creating stock_movement records.
-func (r PostgresRepository) checkAndDeductSaleStock(ctx context.Context, tx *gorm.DB, storeID, productID string, qty int, saleID, cashierUserID string) error {
-	// Lock and check total available stock in sale-point locations
-	var totalAvailable int
-	// Lock individual rows first (FOR UPDATE can't be used with aggregate functions)
-	type lockedStock struct {
-		Quantity int
+// FindByIdempotencyKey returns the sale previously persisted under the given store +
+// Idempotency-Key, or (nil, nil) when the key is empty or no such sale exists. The
+// service uses it to short-circuit a retried sale-create before opening a transaction.
+func (r PostgresRepository) FindByIdempotencyKey(ctx context.Context, storeID, key string) (*Sale, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, nil
 	}
-	var lockedRows []lockedStock
+	var sale Sale
+	err := r.db.WithContext(ctx).
+		Table("sales").
+		Where("store_id = ? AND idempotency_key = ?", storeID, key).
+		Take(&sale).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &sale, nil
+}
+
+// resolveAndLockSaleLocation determines, validates, and LOCKS the single effective
+// sale-point location for this sale inside the transaction (authoritative). Resolution
+// policy (Phase W4B): an explicit request location, otherwise the store's default sale
+// location. The chosen location row is locked FOR UPDATE and re-checked under the lock
+// (same store, active, is_sale_point, parent warehouse active) so a concurrent
+// deactivation cannot slip a sale through after a stale pre-check. There is NO fallback
+// to another location and NO aggregation across locations.
+func (r PostgresRepository) resolveAndLockSaleLocation(ctx context.Context, tx *gorm.DB, storeID, requested string, isElevated bool) (string, error) {
+	requested = strings.TrimSpace(requested)
+	// The store default sale location is needed when no explicit location was given, and
+	// also to authorize a non-elevated actor's explicit pick (§17: cashiers sell only at
+	// the store default; owner/manager may select any active sale point).
+	if requested == "" || !isElevated {
+		var def struct {
+			ID string `gorm:"column:id"`
+		}
+		err := tx.WithContext(ctx).
+			Table("locations").
+			Select("id").
+			Where("store_id = ? AND is_default_sale = true AND is_active = true AND is_sale_point = true", storeID).
+			Order("id").
+			Take(&def).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return "", ErrNoSaleLocation
+			}
+			return "", err
+		}
+		if requested == "" {
+			requested = def.ID
+		} else if !isElevated && requested != def.ID {
+			// A cashier may not sell from a non-default sale point.
+			return "", ErrSaleLocationInvalid
+		}
+	}
+
+	var loc struct {
+		StoreID     string `gorm:"column:store_id"`
+		IsActive    bool   `gorm:"column:is_active"`
+		IsSalePoint bool   `gorm:"column:is_sale_point"`
+		WarehouseID string `gorm:"column:warehouse_id"`
+	}
+	err := tx.WithContext(ctx).
+		Table("locations").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("store_id, is_active, is_sale_point, COALESCE(warehouse_id, '') AS warehouse_id").
+		Where("id = ?", requested).
+		Take(&loc).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrSaleLocationInvalid
+		}
+		return "", err
+	}
+	if loc.StoreID != storeID {
+		return "", ErrSaleLocationCrossStore
+	}
+	if !loc.IsActive || !loc.IsSalePoint {
+		return "", ErrSaleLocationInvalid
+	}
+	// The parent warehouse must also be active — a deactivated warehouse takes its
+	// locations offline for selling. Lock it FOR UPDATE to close the same TOCTOU window.
+	if loc.WarehouseID != "" {
+		var wh struct {
+			IsActive bool `gorm:"column:is_active"`
+		}
+		err := tx.WithContext(ctx).
+			Table("warehouses").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("is_active").
+			Where("id = ?", loc.WarehouseID).
+			Take(&wh).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return "", ErrSaleLocationInvalid
+			}
+			return "", err
+		}
+		if !wh.IsActive {
+			return "", ErrSaleLocationInvalid
+		}
+	}
+	return requested, nil
+}
+
+// checkAndDeductAtLocation locks the product's stock row at the resolved sale location
+// FOR UPDATE, rejects the whole sale when that single location lacks enough on hand
+// (no aggregation, no fallback, no negative stock), then deducts exactly qty with a
+// quantity-guarded UPDATE and records one paired SALE movement at that location.
+func (r PostgresRepository) checkAndDeductAtLocation(ctx context.Context, tx *gorm.DB, storeID, productID string, qty int, saleID, cashierUserID, locationID string) error {
+	var locked struct {
+		Quantity int `gorm:"column:quantity"`
+	}
 	err := tx.WithContext(ctx).
 		Table("stocks").
-		Select("stocks.quantity").
-		Joins("JOIN locations ON locations.id = stocks.location_id").
-		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true AND stocks.quantity > 0", productID, storeID).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Find(&lockedRows).Error
+		Select("COALESCE(quantity, 0) AS quantity").
+		Where("product_id = ? AND location_id = ?", productID, locationID).
+		Take(&locked).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// No stock row at the sale point at all → nothing available to sell here.
+			return InsufficientSaleStockError{ProductID: productID, Available: 0}
+		}
 		return err
 	}
-	for _, row := range lockedRows {
-		totalAvailable += row.Quantity
-	}
-	if totalAvailable < qty {
-		return fmt.Errorf("%w for product %s", ErrInsufficientStock, productID)
+	if locked.Quantity < qty {
+		return InsufficientSaleStockError{ProductID: productID, Available: locked.Quantity}
 	}
 
-	// Get all sale-point locations with stock for this product, ordered
-	type locationStock struct {
-		LocationID string
-		Quantity   int
+	// Guarded decrement: the WHERE quantity >= qty makes a negative result impossible
+	// even if the lock were somehow bypassed; RowsAffected==0 means it would go negative.
+	result := tx.WithContext(ctx).Exec(`
+			UPDATE stocks
+			SET quantity = quantity - ?, updated_at = NOW()
+			WHERE product_id = ? AND location_id = ? AND quantity >= ?
+		`, qty, productID, locationID, qty)
+	if result.Error != nil {
+		return result.Error
 	}
-	var locationStocks []locationStock
-	err = tx.WithContext(ctx).
-		Table("stocks").
-		Select("stocks.location_id, stocks.quantity").
-		Joins("JOIN locations ON locations.id = stocks.location_id").
-		Where("stocks.product_id = ? AND locations.store_id = ? AND locations.is_sale_point = true AND stocks.quantity > 0", productID, storeID).
-		Order("stocks.quantity DESC").
-		Find(&locationStocks).Error
-	if err != nil {
-		return err
+	if result.RowsAffected == 0 {
+		return InsufficientSaleStockError{ProductID: productID, Available: locked.Quantity}
 	}
 
-	remaining := qty
-	movementID := newStockMovementID()
 	now := gorm.Expr("NOW()")
-
-	for _, ls := range locationStocks {
-		if remaining <= 0 {
-			break
-		}
-		deduct := ls.Quantity
-		if deduct > remaining {
-			deduct = remaining
-		}
-
-		// Update stock quantity
-		result := tx.WithContext(ctx).
-			Exec(`
-				UPDATE stocks
-				SET quantity = quantity - ?, updated_at = NOW()
-				WHERE product_id = ? AND location_id = ? AND quantity >= ?
-			`, deduct, productID, ls.LocationID, deduct)
-		if result.Error != nil {
-			return result.Error
-		}
-
-		// Create stock movement record
-		if err := tx.Table("stock_movements").Create(map[string]any{
-			"id":              newStockMovementID(),
-			"store_id":        storeID,
-			"product_id":      productID,
-			"location_id":     ls.LocationID,
-			"quantity_change": -deduct,
-			"type":            "SALE",
-			"reference_id":    saleID,
-			"note":            "sale deduction",
-			"created_by":      cashierUserID,
-			"created_at":      now,
-			"updated_at":      now,
-		}).Error; err != nil {
-			return err
-		}
-
-		remaining -= deduct
-		_ = movementID
+	if err := tx.Table("stock_movements").Create(map[string]any{
+		"id":              newStockMovementID(),
+		"store_id":        storeID,
+		"product_id":      productID,
+		"location_id":     locationID,
+		"quantity_change": -qty,
+		"type":            "SALE",
+		"reference_id":    saleID,
+		"note":            "sale deduction",
+		"created_by":      cashierUserID,
+		"created_at":      now,
+		"updated_at":      now,
+	}).Error; err != nil {
+		return err
 	}
-
-	if remaining > 0 {
-		return fmt.Errorf("%w for product %s", ErrInsufficientStock, productID)
-	}
-
 	return nil
+}
+
+// isIdempotencyKeyViolation reports a unique-constraint error (SQLSTATE 23505) raised
+// specifically by the per-store idempotency-key index. Scoping to the index NAME means an
+// unrelated unique collision (primary key, sale_number) is NOT mis-mapped to an
+// idempotency conflict — it surfaces as a real 500 instead.
+func isIdempotencyKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "23505") && strings.Contains(msg, "sales_store_idempotency_key")
 }
 
 func (r PostgresRepository) buildStoreExtraSelect(ctx context.Context) string {
@@ -322,7 +445,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var sales []Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
+		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -338,7 +461,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string)
 	var sale Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
+		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -365,9 +488,11 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 		return true, nil
 	}
 	var count int64
+	// status <> 'suspended' mirrors the member module's canonical access check
+	// (member/repository.go) so a suspended store member cannot operate the POS.
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -384,7 +509,7 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
 		Count(&count).Error
 	return count > 0, err
 }

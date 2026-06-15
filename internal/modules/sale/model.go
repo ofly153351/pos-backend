@@ -5,6 +5,7 @@ import "time"
 type Sale struct {
 	ID                     string     `json:"id" gorm:"column:id;primaryKey"`
 	StoreID                string     `json:"store_id" gorm:"column:store_id"`
+	LocationID             string     `json:"location_id,omitempty" gorm:"column:location_id"` // Phase W4B — effective sale-point location deducted from
 	SaleNumber             string     `json:"sale_number" gorm:"column:sale_number"`
 	CashierUserID          string     `json:"cashier_user_id" gorm:"column:cashier_user_id"`
 	CashierName            string     `json:"cashier_name,omitempty" gorm:"column:cashier_name"`
@@ -34,6 +35,8 @@ type Sale struct {
 	ChangeAmount           float64    `json:"change_amount" gorm:"column:change_amount"`
 	SoldAt                 time.Time  `json:"sold_at" gorm:"column:sold_at"`
 	CreatedAt              time.Time  `json:"created_at" gorm:"column:created_at"`
+	IdempotencyKey         string     `json:"-" gorm:"column:idempotency_key"`     // Phase W4B
+	RequestFingerprint     string     `json:"-" gorm:"column:request_fingerprint"` // Phase W4B
 	Items                  []SaleItem `json:"items,omitempty" gorm:"foreignKey:SaleID;references:ID"`
 }
 
@@ -61,6 +64,8 @@ func (SaleItem) TableName() string { return "sale_items" }
 
 type CreateSaleRequest struct {
 	PaymentMethod  string                  `json:"payment_method"`
+	LocationID     string                  `json:"location_id,omitempty"` // Phase W4B — explicit POS sale-point location (else store default)
+	IdempotencyKey string                  `json:"-"`                     // Phase W4B — set from the Idempotency-Key header
 	PaidAmount     float64                 `json:"paid_amount"`
 	DiscountBill   float64                 `json:"discount_bill,omitempty"`   // deprecated fallback (treated as manual)
 	ManualDiscount *float64                `json:"manual_discount,omitempty"` // explicit cashier bill discount

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"pos-backend/internal/idgen"
 	"pos-backend/internal/modules/sale"
@@ -260,8 +261,15 @@ func (r PostgresRepository) Cancel(ctx context.Context, storeID, creditSaleID, a
 	}
 	defer tx.Rollback()
 
+	// Lock the receivable row FOR UPDATE before the status check so two concurrent
+	// cancellations serialize: the first flips status to cancelled and restocks; the
+	// second blocks on the lock, then re-reads 'cancelled' under the lock and is rejected
+	// — stock can never be restored twice (idempotent cancellation via locked transition).
 	var header CreditSale
-	if err := tx.Table("credit_sales").Where("store_id = ? AND id = ?", storeID, creditSaleID).Take(&header).Error; err != nil {
+	if err := tx.Table("credit_sales").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("store_id = ? AND id = ?", storeID, creditSaleID).
+		Take(&header).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return CreditSale{}, ErrNotFound
 		}
@@ -284,6 +292,10 @@ func (r PostgresRepository) Cancel(ctx context.Context, storeID, creditSaleID, a
 	if err := tx.Table("stock_movements").
 		Select("product_id, location_id, quantity_change").
 		Where("reference_id = ? AND type = ?", header.SaleID, "SALE").
+		// Deterministic lock order (product_id, location_id) so the restock loop acquires
+		// `stocks` row locks in the SAME order as sale.Create's sorted product-id loop —
+		// closes the cross-cancel and cancel-vs-sale deadlock window (no behavior change).
+		Order("product_id, location_id").
 		Find(&movements).Error; err != nil {
 		return CreditSale{}, err
 	}

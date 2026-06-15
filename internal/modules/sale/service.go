@@ -2,6 +2,11 @@ package sale
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,10 +40,31 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Sale{}, ErrForbiddenStoreAccess
 	}
 
+	// Phase W4B — request idempotency. A retried sale-create carrying the same
+	// Idempotency-Key must NOT create a second sale / second payment / second stock
+	// deduction. Fingerprint the business intent; if a sale already exists under this
+	// key, return it when the intent matches, or reject the conflict when it differs.
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	fingerprint := saleFingerprint(storeID, actor.UserID, req)
+	if idempotencyKey != "" {
+		existing, err := s.repo.FindByIdempotencyKey(ctx, storeID, idempotencyKey)
+		if err != nil {
+			return Sale{}, err
+		}
+		if existing != nil {
+			if existing.RequestFingerprint != fingerprint {
+				return Sale{}, ErrSaleIdempotencyConflict
+			}
+			// Same key + same intent → the original sale, fully hydrated.
+			return s.repo.GetByID(ctx, storeID, existing.ID)
+		}
+	}
+
 	now := time.Now().UTC()
 	sale := Sale{
 		ID:                 newID(),
 		StoreID:            storeID,
+		LocationID:         strings.TrimSpace(req.LocationID),
 		SaleNumber:         newSaleNumber(now),
 		CashierUserID:      actor.UserID,
 		Status:             saleStatusCompleted,
@@ -46,6 +72,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		PaidAmount:         req.PaidAmount,
 		Note:               strings.TrimSpace(req.Note),
 		CustomerID:         strings.TrimSpace(req.CustomerID),
+		IdempotencyKey:     idempotencyKey,
+		RequestFingerprint: fingerprint,
 		VATIncluded:        true,
 		VATPercent:         7,
 		SoldAt:             now,
@@ -87,13 +115,30 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Sale{}, err
 	}
 
-	return s.repo.Create(ctx, sale, DiscountInput{
+	created, err := s.repo.Create(ctx, sale, DiscountInput{
 		ManualDiscount: req.ManualDiscount,
 		PromoDiscount:  req.PromoDiscount,
 		PromotionIDs:   req.PromotionIDs,
 		LegacyBill:     req.DiscountBill,
 		IsElevated:     isElevated,
 	})
+	if err != nil {
+		// Concurrent idempotency race: a sibling request carrying the same key committed
+		// first (our pre-check ran before it landed). Re-resolve the now-persisted winner;
+		// if its intent matches ours, honor the idempotency contract and return THAT sale
+		// instead of surfacing a conflict. Only a genuine fingerprint mismatch conflicts.
+		if errors.Is(err, ErrSaleIdempotencyConflict) && idempotencyKey != "" {
+			existing, ferr := s.repo.FindByIdempotencyKey(ctx, storeID, idempotencyKey)
+			if ferr != nil {
+				return Sale{}, ferr
+			}
+			if existing != nil && existing.RequestFingerprint == fingerprint {
+				return s.repo.GetByID(ctx, storeID, existing.ID)
+			}
+		}
+		return Sale{}, err
+	}
+	return created, nil
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Sale, error) {
@@ -116,6 +161,71 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, saleID
 		return Sale{}, ErrForbiddenStoreAccess
 	}
 	return s.repo.GetByID(ctx, storeID, saleID)
+}
+
+// saleFingerprint is a stable SHA-256 over the business-meaningful fields of a sale
+// request (store, sale location, payment, discounts, customer, VAT, promotions, and the
+// item set). Two requests with the same fingerprint represent the same sale intent; a
+// retry under the same Idempotency-Key with a different fingerprint is a conflict. Item
+// tuples and promotion ids are sorted so a re-ordered-but-equivalent cart is treated as
+// the same intent. Fields are joined with the Unit/Record separators to avoid collisions.
+func saleFingerprint(storeID, actorUserID string, req CreateSaleRequest) string {
+	const fieldSep = "\x1f" // unit separator
+	const partSep = "\x1e"  // record separator (within an item tuple)
+	var b strings.Builder
+	write := func(parts ...string) {
+		for _, p := range parts {
+			b.WriteString(p)
+			b.WriteString(fieldSep)
+		}
+	}
+	write(storeID)
+	write(strings.TrimSpace(actorUserID))
+	write(strings.TrimSpace(req.LocationID))
+	write(normalizePaymentMethod(req.PaymentMethod))
+	write(strconv.FormatFloat(req.PaidAmount, 'f', 2, 64))
+	write(strconv.FormatFloat(req.DiscountBill, 'f', 2, 64))
+	write(strings.TrimSpace(req.CustomerID))
+	write(strings.TrimSpace(req.Note))
+	write(ptrFloatStr(req.ManualDiscount), ptrFloatStr(req.PromoDiscount))
+	write(ptrBoolStr(req.VATIncluded), ptrFloatStr(req.VATPercent))
+
+	promoIDs := append([]string(nil), req.PromotionIDs...)
+	sort.Strings(promoIDs)
+	for _, id := range promoIDs {
+		write("promo", strings.TrimSpace(id))
+	}
+
+	lines := make([]string, 0, len(req.Items))
+	for _, it := range req.Items {
+		lines = append(lines, strings.Join([]string{
+			strings.TrimSpace(it.ProductID),
+			strconv.Itoa(it.Quantity),
+			normalizeDiscountType(it.DiscountType),
+			ptrFloatStr(it.DiscountValue),
+		}, partSep))
+	}
+	sort.Strings(lines)
+	for _, l := range lines {
+		write("item", l)
+	}
+
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+func ptrFloatStr(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', 4, 64)
+}
+
+func ptrBoolStr(v *bool) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatBool(*v)
 }
 
 func validateCreateRequest(req CreateSaleRequest) error {

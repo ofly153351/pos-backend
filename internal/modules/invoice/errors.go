@@ -26,4 +26,11 @@ var (
 	ErrPaymentProofNotFound    = errors.New("payment proof not found")
 	ErrInvalidUnpayReason      = errors.New("reason is required to mark invoice unpaid")
 	ErrCustomerNotFound        = errors.New("customer not found")
+	// Phase W4B follow-up — the legacy invoice-create path deducted stock from the first
+	// sale-point Location by created_at (not location-aware, no validation/idempotency).
+	// It has no active write consumer (the frontend createInvoice() is orphaned; live
+	// invoice creation goes through the documents module, which does not deduct stock).
+	// The unsafe create path is disabled so it can never silently deduct again; all
+	// invoice READS, payments, and PDF export remain available.
+	ErrInvoiceCreateDisabled = errors.New("การสร้างใบขายรูปแบบเดิมถูกปิดใช้งาน กรุณาสร้างรายการขายผ่านระบบ POS")
 )

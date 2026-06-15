@@ -2,8 +2,8 @@ package invoice
 
 import (
 	"errors"
-	"log"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 
@@ -116,6 +116,9 @@ func writeInvoiceError(c *fiber.Ctx, err error) error {
 	case errors.Is(err, ErrDiscountValueRequired), errors.Is(err, ErrInvalidDiscountValue),
 		errors.Is(err, ErrInvalidPercentDiscount), errors.Is(err, ErrAmountDiscountExceeds):
 		return httpx.Err422(c, "discount_value", err.Error())
+	case errors.Is(err, ErrInvoiceCreateDisabled):
+		// Legacy stock-deducting invoice-create path is disabled (Phase W4B follow-up).
+		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrInvoiceAlreadyPaid), errors.Is(err, ErrInvoiceAlreadyUnpaid):
 		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrProductInactive), errors.Is(err, ErrInsufficientStock):
