@@ -25,7 +25,7 @@ type Repository interface {
 	GetPaymentBreakdown(ctx context.Context, storeID string, from, to time.Time) ([]PaymentMethodStat, error)
 
 	GetInventorySnapshot(ctx context.Context, storeID string) (InventorySnapshot, error)
-	GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) (int64, float64, error)
+	GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) ([]DeadStockItem, int64, float64, error)
 	GetTopProducts(ctx context.Context, storeID string, from, to time.Time, limit int) ([]TopProduct, error)
 	GetSalesTrend(ctx context.Context, storeID string, from, to time.Time) ([]TrendPoint, int64, error)
 	GetSalesCounters(ctx context.Context, storeID string, from, to time.Time) (int64, int64, error)
@@ -176,14 +176,11 @@ func (r PostgresRepository) GetInventorySnapshot(ctx context.Context, storeID st
 	return snap, err
 }
 
-// GetDeadStock counts in-stock active products whose last sale predates
-// soldBefore (or that have never sold) and sums their tied capital at cost.
-// One LEFT JOIN against a per-product last-sold aggregate — no N+1.
-func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) (int64, float64, error) {
-	var row struct {
-		Count int64   `gorm:"column:dead_count"`
-		Value float64 `gorm:"column:dead_value"`
-	}
+// GetDeadStock returns the in-stock active products whose last sale predates
+// soldBefore (or that have never sold), ordered by tied capital at cost. The count
+// and total tied value are derived from the same list so they always agree. One
+// LEFT JOIN against a per-product last-sold aggregate — no N+1.
+func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) ([]DeadStockItem, int64, float64, error) {
 	lastSold := r.db.WithContext(ctx).
 		Table("sale_items si").
 		Select("si.product_id AS product_id, MAX(s.sold_at) AS last_sold").
@@ -193,18 +190,36 @@ func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, so
 
 	inner := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.cost_price AS cost_price, pv.total_stock AS total_stock, (ls.last_sold IS NULL OR ls.last_sold < ?) AS dead", soldBefore).
+		Select(`
+			pv.id AS product_id,
+			pv.name AS product_name,
+			pv.total_stock AS remaining,
+			COALESCE(pv.cost_price, 0) * pv.total_stock AS tied_value,
+			ls.last_sold AS last_sold,
+			(ls.last_sold IS NULL OR ls.last_sold < ?) AS dead
+		`, soldBefore).
 		Joins("LEFT JOIN (?) ls ON ls.product_id = pv.id", lastSold).
 		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.total_stock > 0", storeID)
 
+	var items []DeadStockItem
 	err := r.db.WithContext(ctx).
 		Table("(?) AS t", inner).
-		Select(`
-			COUNT(*) FILTER (WHERE dead) AS dead_count,
-			COALESCE(SUM(CASE WHEN dead THEN cost_price * total_stock ELSE 0 END), 0) AS dead_value
-		`).
-		Scan(&row).Error
-	return row.Count, row.Value, err
+		Select("product_id, product_name, remaining, tied_value, last_sold").
+		Where("dead").
+		Order("tied_value DESC, product_name ASC").
+		Find(&items).Error
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	var count int64
+	var value float64
+	for i := range items {
+		count++
+		value += items[i].TiedValue
+		items[i].NeverSold = items[i].LastSold == nil
+	}
+	return items, count, value, nil
 }
 
 // GetTopProducts ranks products by units sold and includes per-product profit

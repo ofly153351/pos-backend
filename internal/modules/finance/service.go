@@ -185,14 +185,14 @@ func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, stor
 	}
 
 	soldBefore := time.Now().UTC().AddDate(0, 0, -deadDays)
-	count, value, err := s.repo.GetDeadStock(ctx, storeID, soldBefore)
+	deadItems, count, value, err := s.repo.GetDeadStock(ctx, storeID, soldBefore)
 	if err != nil {
 		return InventoryReport{}, err
 	}
 
 	return InventoryReport{
 		Snapshot:  snapshot,
-		DeadStock: DeadStockStat{Days: deadDays, Count: count, Value: value},
+		DeadStock: DeadStockStat{Days: deadDays, Count: count, Value: value, Items: deadItems},
 	}, nil
 }
 

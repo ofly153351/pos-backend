@@ -82,13 +82,25 @@ type InventoryHealth struct {
 	DeadStock  int64 `json:"dead_stock"`
 }
 
+// DeadStockItem is one idle product in the dead-stock breakdown: its remaining
+// units, tied capital at cost, and last sale date (LastSold nil → never sold).
+type DeadStockItem struct {
+	ProductID   string     `json:"product_id" gorm:"column:product_id"`
+	ProductName string     `json:"product_name" gorm:"column:product_name"`
+	Remaining   int64      `json:"remaining" gorm:"column:remaining"`
+	TiedValue   float64    `json:"tied_value" gorm:"column:tied_value"`
+	LastSold    *time.Time `json:"last_sold" gorm:"column:last_sold"`
+	NeverSold   bool       `json:"never_sold" gorm:"-"`
+}
+
 // DeadStockStat is the dead-stock count + tied capital (at cost) for products whose
-// last sale predates `days` ago (or that never sold). Computed in SQL from full sale
-// history — never from a capped client-side movement scan.
+// last sale predates `days` ago (or that never sold), plus the per-product breakdown.
+// Computed in SQL from full sale history — never from a capped client-side movement scan.
 type DeadStockStat struct {
-	Days  int     `json:"days"`
-	Count int64   `json:"count"`
-	Value float64 `json:"value"`
+	Days  int             `json:"days"`
+	Count int64           `json:"count"`
+	Value float64         `json:"value"`
+	Items []DeadStockItem `json:"items"`
 }
 
 // InventoryReport backs the Inventory Value & Dead Stock report. Both halves are
