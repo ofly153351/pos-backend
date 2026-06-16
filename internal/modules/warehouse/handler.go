@@ -3,6 +3,7 @@ package warehouse
 import (
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -152,6 +153,37 @@ func (h Handler) TransferStock(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "stock transferred successfully", nil)
+}
+
+// parseInventoryQuery reads + validates the warehouse-inventory query params from the
+// request. Returns a 400-mappable error (its message becomes the 400 detail) on bad input.
+func parseInventoryQuery(c *fiber.Ctx) (WarehouseInventoryQuery, error) {
+	q := WarehouseInventoryQuery{
+		Search:       strings.TrimSpace(c.Query("search")),
+		CategoryID:   strings.TrimSpace(c.Query("category_id")),
+		StockStatus:  strings.TrimSpace(c.Query("stock_status")),
+		LocationType: strings.TrimSpace(c.Query("location_type")),
+		Sort:         strings.TrimSpace(c.Query("sort")),
+		Page:         c.QueryInt("page", 1),
+		PageSize:     c.QueryInt("page_size", defaultInventoryPageSize),
+	}
+	if err := validateInventoryQuery(q); err != nil {
+		return WarehouseInventoryQuery{}, err
+	}
+	return q, nil
+}
+
+// ListInventoryProducts returns warehouse-scoped product inventory (ready/storage/total split).
+func (h Handler) ListInventoryProducts(c *fiber.Ctx) error {
+	q, err := parseInventoryQuery(c)
+	if err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	}
+	result, err := h.service.ListInventoryProducts(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), q)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "warehouse inventory products fetched", result)
 }
 
 // ListInventory lists warehouse inventory items (transferred but not yet allocated).

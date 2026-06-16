@@ -32,6 +32,10 @@ func registerWarehouseRoutes(protected fiber.Router, deps appDependencies) {
 	// Warehouse Transfer
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/transfer", handler.TransferStock)
 
+	// Warehouse-scoped product inventory (read-only; พร้อมขาย/พื้นที่จัดเก็บ/รวมในคลัง split).
+	// Registered before the :productID route below so the static "products" segment is unambiguous.
+	protected.Get("/stores/:storeID/warehouses/:warehouseID/inventory/products", handler.ListInventoryProducts)
+
 	// Warehouse Inventory (cross-store transfers awaiting allocation)
 	protected.Get("/stores/:storeID/warehouses/:warehouseID/inventory", handler.ListInventory)
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/inventory/:productID/allocate", handler.AllocateInventory)

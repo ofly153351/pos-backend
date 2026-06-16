@@ -18,6 +18,13 @@ type Repository interface {
 	Update(ctx context.Context, item Warehouse) (Warehouse, error)
 	Delete(ctx context.Context, storeID, id string) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	// UserCanOperateStore reports whether an active member may READ operational data
+	// (owner/manager/cashier/warehouse, excluding suspended). Used by read-only endpoints.
+	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	// ListWarehouseStockRows returns one row per product that has stock in the warehouse,
+	// with ready/storage already split (SUM split on locations.is_sale_point) and scoped to
+	// locations.warehouse_id. Includes active AND inactive locations. One grouped query.
+	ListWarehouseStockRows(ctx context.Context, warehouseID string) ([]WarehouseStockRow, error)
 
 	// Warehouse-Product association (via stocks + locations)
 	AddProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) (WarehouseProduct, error)
@@ -207,6 +214,61 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	return count > 0, nil
 }
 
+// UserCanOperateStore mirrors UserCanManageStore but uses the broader operate-level role
+// set (read access for operational endpoints). Suspended members and non-members → false.
+func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
+	if role == "platform_admin" {
+		return true, nil
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// ListWarehouseStockRows computes warehouse-scoped ready/storage stock per product in ONE
+// grouped query: ready = SUM(qty) at sale-point locations, storage = SUM(qty) at non-sale
+// locations, both scoped to locations.warehouse_id. ALL locations (active + inactive) are
+// counted in current stock. Product metadata comes from product_view; the deprecated
+// store-wide pv.ready_stock/pv.storage_stock are NOT used. Only products with at least one
+// stock row in the warehouse appear (matches the existing ListProducts convention).
+func (r PostgresRepository) ListWarehouseStockRows(ctx context.Context, warehouseID string) ([]WarehouseStockRow, error) {
+	var rows []WarehouseStockRow
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select(`
+			stocks.product_id AS product_id,
+			COALESCE(pv.name, '') AS product_name,
+			COALESCE(pv.sku, '') AS sku,
+			COALESCE(pv.barcode, '') AS barcode,
+			COALESCE(pv.product_type_id, '') AS category_id,
+			COALESCE(pv.product_type_name, '') AS category_name,
+			COALESCE(pv.product_unit_name, '') AS unit,
+			COALESCE(pv.cost_price, 0) AS cost_price,
+			COALESCE(pv.base_price, 0) AS selling_price,
+			COALESCE(pv.min_stock, 0) AS min_stock,
+			COALESCE(SUM(CASE WHEN locations.is_sale_point THEN stocks.quantity ELSE 0 END), 0) AS ready_stock,
+			COALESCE(SUM(CASE WHEN locations.is_sale_point THEN 0 ELSE stocks.quantity END), 0) AS storage_stock
+		`).
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
+		Where("locations.warehouse_id = ?", warehouseID).
+		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.product_type_id, pv.product_type_name, pv.product_unit_name, pv.cost_price, pv.base_price, pv.min_stock").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []WarehouseStockRow{}
+	}
+	return rows, nil
+}
+
 func nilEmpty(s string) any {
 	if s == "" {
 		return nil
@@ -238,16 +300,16 @@ func (r PostgresRepository) AddProduct(ctx context.Context, storeID, warehouseID
 		// No location exists — create default
 		locationID = newID()
 		now := time.Now().UTC()
-			err = r.db.WithContext(ctx).Table("locations").Create(map[string]any{
-				"id":            locationID,
-				"store_id":      storeID,
-				"warehouse_id":  warehouseID,
-				"name":          "คลังหลัก",
-				"is_sale_point": false,
-				"is_active":     true,
-				"created_at":    now,
-				"updated_at":    now,
-			}).Error
+		err = r.db.WithContext(ctx).Table("locations").Create(map[string]any{
+			"id":            locationID,
+			"store_id":      storeID,
+			"warehouse_id":  warehouseID,
+			"name":          "คลังหลัก",
+			"is_sale_point": false,
+			"is_active":     true,
+			"created_at":    now,
+			"updated_at":    now,
+		}).Error
 		if err != nil {
 			return WarehouseProduct{}, err
 		}
@@ -447,7 +509,9 @@ func (r PostgresRepository) cloneOrFindProductType(ctx context.Context, targetSt
 		Select("name, slug, description").Where("id = ?", sourceTypeID).Take(&src).Error; err != nil {
 		return "", nil // source type gone; skip rather than fail
 	}
-	var existing struct{ ID string `gorm:"column:id"` }
+	var existing struct {
+		ID string `gorm:"column:id"`
+	}
 	err := r.db.WithContext(ctx).Table("product_types").Select("id").
 		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
 		Take(&existing).Error
@@ -459,7 +523,9 @@ func (r PostgresRepository) cloneOrFindProductType(ctx context.Context, targetSt
 	}
 	// Ensure slug is unique in target store
 	slug := src.Slug
-	var conflict struct{ ID string `gorm:"column:id"` }
+	var conflict struct {
+		ID string `gorm:"column:id"`
+	}
 	if r.db.WithContext(ctx).Table("product_types").Select("id").
 		Where("store_id = ? AND slug = ?", targetStoreID, slug).Take(&conflict).Error == nil {
 		slug = slug + "-" + newID()[:6]
@@ -496,7 +562,9 @@ func (r PostgresRepository) cloneOrFindProductUnit(ctx context.Context, targetSt
 		Select("name, description").Where("id = ?", sourceUnitID).Take(&src).Error; err != nil {
 		return "", err
 	}
-	var existingUnit struct{ ID string `gorm:"column:id"` }
+	var existingUnit struct {
+		ID string `gorm:"column:id"`
+	}
 	err := r.db.WithContext(ctx).Table("product_units").Select("id").
 		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, src.Name).
 		Take(&existingUnit).Error
@@ -528,12 +596,16 @@ func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetS
 	if sourceBrandID == "" {
 		return "", nil
 	}
-	var srcBrand struct{ Name string `gorm:"column:name"` }
+	var srcBrand struct {
+		Name string `gorm:"column:name"`
+	}
 	if err := r.db.WithContext(ctx).Table("product_brands").Select("name").
 		Where("id = ?", sourceBrandID).Take(&srcBrand).Error; err != nil {
 		return "", nil
 	}
-	var existingBrand struct{ ID string `gorm:"column:id"` }
+	var existingBrand struct {
+		ID string `gorm:"column:id"`
+	}
 	err := r.db.WithContext(ctx).Table("product_brands").Select("id").
 		Where("store_id = ? AND LOWER(name) = LOWER(?)", targetStoreID, srcBrand.Name).
 		Take(&existingBrand).Error
@@ -560,22 +632,22 @@ func (r PostgresRepository) cloneOrFindProductBrand(ctx context.Context, targetS
 // Returns the product ID in targetStoreID.
 func (r PostgresRepository) cloneOrFindProduct(ctx context.Context, targetStoreID, sourceProductID string) (string, error) {
 	type productRow struct {
-		ID                 string   `gorm:"column:id"`
-		Name               string   `gorm:"column:name"`
-		SKU                *string  `gorm:"column:sku"`
-		Barcode            *string  `gorm:"column:barcode"`
-		BasePrice          float64  `gorm:"column:base_price"`
-		CostPrice          float64  `gorm:"column:cost_price"`
-		SpecialPrice       *float64 `gorm:"column:special_price"`
-		SpecialPriceStart  *string  `gorm:"column:special_price_start_at"`
-		SpecialPriceEnd    *string  `gorm:"column:special_price_end_at"`
-		ProductTypeID      *string  `gorm:"column:product_type_id"`
-		ProductUnitID      *string  `gorm:"column:product_unit_id"`
-		BrandID            *string  `gorm:"column:brand_id"`
-		MinStock           int      `gorm:"column:min_stock"`
-		ProductCode        *string  `gorm:"column:product_code"`
-		Description        *string  `gorm:"column:description"`
-		StorageLocation    *string  `gorm:"column:storage_location"`
+		ID                string   `gorm:"column:id"`
+		Name              string   `gorm:"column:name"`
+		SKU               *string  `gorm:"column:sku"`
+		Barcode           *string  `gorm:"column:barcode"`
+		BasePrice         float64  `gorm:"column:base_price"`
+		CostPrice         float64  `gorm:"column:cost_price"`
+		SpecialPrice      *float64 `gorm:"column:special_price"`
+		SpecialPriceStart *string  `gorm:"column:special_price_start_at"`
+		SpecialPriceEnd   *string  `gorm:"column:special_price_end_at"`
+		ProductTypeID     *string  `gorm:"column:product_type_id"`
+		ProductUnitID     *string  `gorm:"column:product_unit_id"`
+		BrandID           *string  `gorm:"column:brand_id"`
+		MinStock          int      `gorm:"column:min_stock"`
+		ProductCode       *string  `gorm:"column:product_code"`
+		Description       *string  `gorm:"column:description"`
+		StorageLocation   *string  `gorm:"column:storage_location"`
 	}
 
 	var src productRow
@@ -709,7 +781,7 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 		Select("stocks.location_id AS id").
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Where("locations.warehouse_id = ? AND locations.is_active = ? AND stocks.product_id = ? AND stocks.quantity >= ?",
-			sourceWarehouseID, true, productID, qty).
+							sourceWarehouseID, true, productID, qty).
 		Order("locations.is_sale_point ASC"). // prefer warehouse (non-sale-point) first
 		Take(&srcLoc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -769,14 +841,14 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 			now := time.Now().UTC()
 			whName := srcWH.Name + " (จาก " + srcStoreName + ")"
 			if err := r.db.WithContext(ctx).Table("warehouses").Create(map[string]any{
-				"id":                 destWarehouseForInventory,
-				"store_id":           targetStoreID,
-				"name":               whName,
-				"is_active":          true,
-				"source_store_id":    storeID,
+				"id":                  destWarehouseForInventory,
+				"store_id":            targetStoreID,
+				"name":                whName,
+				"is_active":           true,
+				"source_store_id":     storeID,
 				"source_warehouse_id": sourceWarehouseID,
-				"created_at":         now,
-				"updated_at":         now,
+				"created_at":          now,
+				"updated_at":          now,
 			}).Error; err != nil {
 				return err
 			}
@@ -806,7 +878,9 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 			}
 
 			// b. Find or create a non-sale-point storage location in destination warehouse
-			var destLoc struct{ ID string `gorm:"column:id"` }
+			var destLoc struct {
+				ID string `gorm:"column:id"`
+			}
 			if err := tx.Table("locations").Select("id").
 				Where("warehouse_id = ? AND is_sale_point = ? AND is_active = ?", destWarehouseForInventory, false, true).
 				Order("created_at ASC").Take(&destLoc).Error; err != nil {
@@ -974,17 +1048,17 @@ func (r PostgresRepository) TransferStock(ctx context.Context, storeID, sourceWa
 		// c. Create OUT movement record
 		outID := newID()
 		if err := tx.Table("stock_movements").Create(map[string]any{
-			"id":                       outID,
-			"store_id":                 storeID,
-			"product_id":               productID,
-			"location_id":              srcLoc.ID,
-			"destination_location_id":  destLocationID,
-			"quantity_change":          -qty,
-			"type":                     "TRANSFER",
-			"note":                     note,
-			"created_by":               createdBy,
-			"created_at":               now,
-			"updated_at":               now,
+			"id":                      outID,
+			"store_id":                storeID,
+			"product_id":              productID,
+			"location_id":             srcLoc.ID,
+			"destination_location_id": destLocationID,
+			"quantity_change":         -qty,
+			"type":                    "TRANSFER",
+			"note":                    note,
+			"created_by":              createdBy,
+			"created_at":              now,
+			"updated_at":              now,
 		}).Error; err != nil {
 			return err
 		}

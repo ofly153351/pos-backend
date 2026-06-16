@@ -151,6 +151,43 @@ func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, w
 	return s.repo.ListProducts(ctx, warehouseID)
 }
 
+// ListInventoryProducts returns warehouse-scoped product inventory (พร้อมขาย / พื้นที่จัดเก็บ /
+// รวมในคลัง) for the selected warehouse. Read-only and operate-level: any active store member
+// (owner/manager/cashier/warehouse) may read; suspended/non-members get ErrForbiddenStoreAccess
+// (403). The query is assumed already validated/normalized by the handler.
+func (s Service) ListInventoryProducts(ctx context.Context, actor auth.Claims, storeID, warehouseID string, q WarehouseInventoryQuery) (WarehouseInventoryResponse, error) {
+	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return WarehouseInventoryResponse{}, err
+	}
+	if !allowed {
+		return WarehouseInventoryResponse{}, ErrForbiddenStoreAccess
+	}
+
+	// Verify warehouse belongs to store (→ ErrWarehouseNotFound / 404 otherwise).
+	wh, err := s.repo.GetByID(ctx, storeID, warehouseID)
+	if err != nil {
+		return WarehouseInventoryResponse{}, err
+	}
+
+	rows, err := s.repo.ListWarehouseStockRows(ctx, warehouseID)
+	if err != nil {
+		return WarehouseInventoryResponse{}, err
+	}
+
+	summary, items, total := buildWarehouseInventory(rows, q)
+	return WarehouseInventoryResponse{
+		Warehouse: WarehouseRef{ID: wh.ID, Name: wh.Name, Code: wh.Code},
+		Summary:   summary,
+		Items:     items,
+		Pagination: WarehouseInventoryPagination{
+			Page:     q.Page,
+			PageSize: q.PageSize,
+			Total:    total,
+		},
+	}, nil
+}
+
 func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string, quantity int) error {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
