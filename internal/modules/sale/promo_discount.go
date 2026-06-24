@@ -60,7 +60,12 @@ func promoCeiling(promoType, data string, subtotal float64, totalQty int) float6
 			p = 100
 		}
 		return clamp(subtotal * p / 100)
-	case "fixed_amount", "coupon":
+	case "fixed_amount":
+		// fixed_amount applies amountOff per matching cart line (not per unit).
+		// Upper bound: assume all items are in scope (totalQty lines at most).
+		return clamp(d.AmountOff * qty)
+	case "coupon":
+		// coupon is a one-time bill discount — amountOff applied once.
 		return clamp(d.AmountOff)
 	case "spend_x_discount":
 		return clamp(d.DiscountAmount)
