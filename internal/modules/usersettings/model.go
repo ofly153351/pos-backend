@@ -10,17 +10,32 @@ import (
 // Mirrors the frontend CardSettings shape. Implements driver.Valuer + sql.Scanner
 // so it round-trips through the users.card_settings JSONB column.
 type CardSettings struct {
-	NamePos   string `json:"namePos"`   // "bottom" | "top"
-	Fit       string `json:"fit"`       // "cover" | "contain"
-	Aspect    string `json:"aspect"`    // "1/1" | "4/3" | "3/4"
-	Lines     int    `json:"lines"`     // 1 | 2 | 3
-	Size      string `json:"size"`      // "sm" | "md" | "lg"
-	ShowStock bool   `json:"showStock"`
+	NamePos        string `json:"namePos"` // "bottom" | "top"
+	Fit            string `json:"fit"`     // "cover" | "contain"
+	Aspect         string `json:"aspect"`  // "1/1" | "4/3" | "3/4"
+	Lines          int    `json:"lines"`   // 1 | 2 | 3
+	Size           string `json:"size"`    // "sm" | "md" | "lg"
+	ShowStock      bool   `json:"showStock"`
+	ShowPromoBadge bool   `json:"showPromoBadge"`
 }
 
 // Value serialises to JSON for the JSONB column.
 func (c CardSettings) Value() (driver.Value, error) {
 	return json.Marshal(c)
+}
+
+// UnmarshalJSON defaults ShowPromoBadge to true when the key is ABSENT, so rows
+// persisted before this field existed (and older clients) keep the badge visible —
+// while still honouring an explicit "showPromoBadge": false. Other fields keep their
+// zero value when absent (normalize() then backfills the string/int ones).
+func (c *CardSettings) UnmarshalJSON(data []byte) error {
+	type alias CardSettings
+	tmp := alias{ShowPromoBadge: true}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*c = CardSettings(tmp)
+	return nil
 }
 
 // Scan deserialises a JSONB value ([]byte or string) into the struct.
@@ -47,12 +62,13 @@ func (c *CardSettings) Scan(value any) error {
 // DefaultCardSettings matches the frontend DEFAULT_CARD_SETTINGS.
 func DefaultCardSettings() CardSettings {
 	return CardSettings{
-		NamePos:   "bottom",
-		Fit:       "cover",
-		Aspect:    "1/1",
-		Lines:     2,
-		Size:      "md",
-		ShowStock: true,
+		NamePos:        "bottom",
+		Fit:            "cover",
+		Aspect:         "1/1",
+		Lines:          2,
+		Size:           "md",
+		ShowStock:      true,
+		ShowPromoBadge: true,
 	}
 }
 
