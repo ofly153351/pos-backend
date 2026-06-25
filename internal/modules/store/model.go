@@ -40,7 +40,10 @@ type StoreBankAccount struct {
 	BankName    string    `json:"bank_name" gorm:"not null;default:''"`
 	AccountNo   string    `json:"account_no" gorm:"not null;default:''"`
 	AccountName string    `json:"account_name" gorm:"not null;default:''"`
+	IsActive    bool      `json:"is_active" gorm:"not null;default:true"`
+	IsDefault   bool      `json:"is_default" gorm:"not null;default:false"`
 	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (StoreBankAccount) TableName() string { return "store_bank_accounts" }
@@ -50,6 +53,14 @@ type CreateBankAccountRequest struct {
 	BankName    string `json:"bank_name"`
 	AccountNo   string `json:"account_no"`
 	AccountName string `json:"account_name"`
+}
+
+type UpdateBankAccountRequest struct {
+	BankName    *string `json:"bank_name"`
+	AccountNo   *string `json:"account_no"`
+	AccountName *string `json:"account_name"`
+	IsActive    *bool   `json:"is_active"`
+	IsDefault   *bool   `json:"is_default"`
 }
 
 type CreateStoreRequest struct {

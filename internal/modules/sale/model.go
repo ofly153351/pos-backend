@@ -15,6 +15,8 @@ type Sale struct {
 	CustomerID             string     `json:"customer_id,omitempty" gorm:"column:customer_id"`
 	CustomerName           string     `json:"customer_name,omitempty" gorm:"column:customer_name"`
 	CustomerPhone          string     `json:"customer_phone,omitempty" gorm:"column:customer_phone"`
+	CustomerTaxID          string     `json:"customer_tax_id,omitempty" gorm:"column:customer_tax_id"`
+	CustomerBranch         string     `json:"customer_branch,omitempty" gorm:"column:customer_branch"`
 	StoreName              string     `json:"store_name,omitempty" gorm:"column:store_name"`
 	StoreAddress           string     `json:"store_address,omitempty" gorm:"column:store_address"`
 	StorePhone             string     `json:"store_phone,omitempty" gorm:"column:store_phone"`
@@ -35,9 +37,14 @@ type Sale struct {
 	ChangeAmount           float64    `json:"change_amount" gorm:"column:change_amount"`
 	SoldAt                 time.Time  `json:"sold_at" gorm:"column:sold_at"`
 	CreatedAt              time.Time  `json:"created_at" gorm:"column:created_at"`
+	VoidedAt               *time.Time `json:"voided_at,omitempty" gorm:"column:voided_at"`
+	VoidedBy               string     `json:"voided_by,omitempty" gorm:"column:voided_by"`
+	VoidReason             string     `json:"void_reason,omitempty" gorm:"column:void_reason"`
+	VoidType               string     `json:"void_type,omitempty" gorm:"column:void_type"`
 	IdempotencyKey         string     `json:"-" gorm:"column:idempotency_key"`     // Phase W4B
 	RequestFingerprint     string     `json:"-" gorm:"column:request_fingerprint"` // Phase W4B
-	Items                  []SaleItem `json:"items,omitempty" gorm:"foreignKey:SaleID;references:ID"`
+	Items                  []SaleItem   `json:"items,omitempty" gorm:"foreignKey:SaleID;references:ID"`
+	Returns                []SaleReturn `json:"returns,omitempty" gorm:"-"` // migration 052 — loaded in GetByID
 }
 
 type SaleItem struct {
@@ -56,11 +63,57 @@ type SaleItem struct {
 	LineSubtotal          float64   `json:"line_subtotal" gorm:"column:line_subtotal"`
 	LineDiscountTotal     float64   `json:"line_discount_total" gorm:"column:line_discount_total"`
 	LineTotal             float64   `json:"line_total" gorm:"column:line_total"`
+	ReturnedQuantity      int       `json:"returned_quantity" gorm:"column:returned_quantity"` // migration 052
 	CreatedAt             time.Time `json:"created_at" gorm:"column:created_at"`
 }
 
-func (Sale) TableName() string     { return "sales" }
-func (SaleItem) TableName() string { return "sale_items" }
+// SaleReturn is a partial-or-full return recorded against a sale. The original
+// sale is never voided; status moves to partially_returned / fully_returned.
+type SaleReturn struct {
+	ID           string           `json:"id" gorm:"column:id;primaryKey"`
+	StoreID      string           `json:"store_id" gorm:"column:store_id"`
+	SaleID       string           `json:"sale_id" gorm:"column:sale_id"`
+	ReturnNumber string           `json:"return_number" gorm:"column:return_number"`
+	RefundMethod string           `json:"refund_method" gorm:"column:refund_method"`
+	RefundAmount float64          `json:"refund_amount" gorm:"column:refund_amount"`
+	Reason       string           `json:"reason,omitempty" gorm:"column:reason"`
+	CreatedBy    string           `json:"created_by" gorm:"column:created_by"`
+	CreatedByName string          `json:"created_by_name,omitempty" gorm:"column:created_by_name"`
+	CreatedAt    time.Time        `json:"created_at" gorm:"column:created_at"`
+	Items        []SaleReturnItem `json:"items,omitempty" gorm:"foreignKey:ReturnID;references:ID"`
+}
+
+type SaleReturnItem struct {
+	ID          string  `json:"id" gorm:"column:id;primaryKey"`
+	ReturnID    string  `json:"return_id" gorm:"column:return_id"`
+	SaleItemID  string  `json:"sale_item_id" gorm:"column:sale_item_id"`
+	ProductID   string  `json:"product_id" gorm:"column:product_id"`
+	ProductName string  `json:"product_name,omitempty" gorm:"column:product_name"`
+	SKU         string  `json:"sku,omitempty" gorm:"column:sku"`
+	Quantity    int     `json:"quantity" gorm:"column:quantity"`
+	UnitPrice   float64 `json:"unit_price" gorm:"column:unit_price"`
+	LineRefund  float64 `json:"line_refund" gorm:"column:line_refund"`
+}
+
+func (Sale) TableName() string           { return "sales" }
+func (SaleItem) TableName() string       { return "sale_items" }
+func (SaleReturn) TableName() string     { return "sale_returns" }
+func (SaleReturnItem) TableName() string { return "sale_return_items" }
+
+// CreateReturnRequest is the partial-return payload. Items carry the line id (or
+// product id as fallback) and the quantity to return; the server authoritatively
+// computes the refund from the original sale_items, never trusting client amounts.
+type CreateReturnRequest struct {
+	RefundMethod string              `json:"refund_method"`
+	Reason       string              `json:"reason"`
+	Items        []ReturnItemRequest `json:"items"`
+}
+
+type ReturnItemRequest struct {
+	SaleItemID string `json:"sale_item_id"`
+	ProductID  string `json:"product_id"`
+	Quantity   int    `json:"quantity"`
+}
 
 type CreateSaleRequest struct {
 	PaymentMethod  string                  `json:"payment_method"`
@@ -95,6 +148,11 @@ type DiscountInput struct {
 type appliedPromoResult struct {
 	VerifiedDiscount float64
 	PromotionIDs     []string
+}
+
+type VoidSaleRequest struct {
+	Reason string `json:"reason"`
+	Type   string `json:"type"` // "void" or "return"
 }
 
 type CreateSaleItemRequest struct {

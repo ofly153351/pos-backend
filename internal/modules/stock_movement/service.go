@@ -53,6 +53,20 @@ func (s Service) productExistsInStore(ctx context.Context, storeID, productID st
 // rather than silently pick an arbitrary first row.
 func (s Service) resolveStockLocation(ctx context.Context, storeID, productID, explicit string) (string, error) {
 	if e := strings.TrimSpace(explicit); e != "" {
+		// An explicit location must still belong to THIS store and be active — an absolute SET
+		// or an ADD must never target an inactive or cross-store location. The UI already only
+		// offers valid active in-scope locations; this defends the direct-API path (Test G:
+		// inactive location → rejected; and a cross-store id can never create an orphan stock row).
+		var cnt int64
+		if err := s.db.WithContext(ctx).
+			Table("locations").
+			Where("id = ? AND store_id = ? AND is_active = TRUE", e, storeID).
+			Count(&cnt).Error; err != nil {
+			return "", err
+		}
+		if cnt == 0 {
+			return "", ErrStockLocationRequired
+		}
 		return e, nil
 	}
 	// Product default, only if it points at an active location in this store.
@@ -652,6 +666,24 @@ func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID s
 }
 
 // AdjustStock sets physical stock count at a location, creates ADJUST movement
+// checkExpectedQuantity enforces the SET_ACTUAL optimistic lock. expected is the
+// caller-declared current quantity at the target location (captured when the count was
+// prepared); current is the live, row-locked location quantity. A nil expected is
+// rejected — the caller must prove it knows the location's own on-hand, which is the
+// guard that makes it impossible to write a store-wide aggregate into one location (a
+// grand total never equals a split location's quantity). A mismatch is a stale count.
+// Returning nil means the absolute SET is safe to apply. Pure (no I/O) so it is unit
+// tested directly.
+func checkExpectedQuantity(expected *int, current int) error {
+	if expected == nil {
+		return ErrStockExpectedRequired
+	}
+	if *expected != current {
+		return ErrStockStaleCount
+	}
+	return nil
+}
+
 func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID string, req AdjustStockRequest) (StockMovement, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return StockMovement{}, fmt.Errorf("storeID is required")
@@ -735,6 +767,15 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 		txRepo := NewPostgresRepository(tx)
 		currentQty, err := txRepo.GetCurrentStockQty(ctx, storeID, req.ProductID, resolvedLocID)
 		if err != nil {
+			return err
+		}
+		// Optimistic lock (location-aware safety): the absolute SET is only applied if the
+		// caller proved it knows THIS location's live quantity. A store-wide grand total —
+		// or a count taken before an intervening sale/transfer — will not match currentQty
+		// and is rejected here, which is what prevents inflating one location with an
+		// aggregate and surfaces a stale count. Checked under the row lock so the compare
+		// and the write are atomic.
+		if err := checkExpectedQuantity(req.ExpectedQty, currentQty); err != nil {
 			return err
 		}
 		// SET_ACTUAL equal to current → no DB mutation, no zero-delta movement (§8).

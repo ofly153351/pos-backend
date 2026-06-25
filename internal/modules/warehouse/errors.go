@@ -31,4 +31,14 @@ var (
 	ErrDefaultWarehouseDelete = errors.New("ไม่สามารถลบคลังสินค้าเริ่มต้นของร้านได้ กรุณากำหนดคลังเริ่มต้นใหม่ก่อน")
 	// Phase W1 invariant: the store's default warehouse must stay active.
 	ErrDefaultWarehouseDeactivate = errors.New("ไม่สามารถปิดใช้งานคลังสินค้าเริ่มต้นของร้านได้ กรุณากำหนดคลังเริ่มต้นใหม่ก่อน")
+
+	// Safe-delete / archive lifecycle (migration 047). These carry the user-facing Thai
+	// copy for each structured blocker code; the machine code travels in the HTTP error
+	// details so the frontend can render an adaptive remediation modal.
+	ErrWarehouseHasStock            = errors.New("ไม่สามารถลบคลังสินค้าได้ เนื่องจากยังมีสินค้าคงเหลือในคลัง กรุณาโอนย้ายหรือปรับสต็อกให้เป็นศูนย์ก่อน")
+	ErrWarehouseHasBlockedLocations = errors.New("ไม่สามารถลบคลังสินค้าได้ เนื่องจากมีตำแหน่งจัดเก็บที่ยังถูกใช้งานอยู่ กรุณาจัดการตำแหน่งเหล่านั้นก่อน")
+	ErrWarehouseHasOpenOperations   = errors.New("ไม่สามารถลบคลังสินค้าได้ เนื่องจากมีรายการที่กำลังดำเนินการอยู่ (รับสินค้า/ตรวจนับ) กรุณาดำเนินการให้เสร็จก่อน")
+	// ErrEntityStateChanged: the dependency state changed between the pre-check assessment
+	// and the locked delete — the client should re-assess and confirm again.
+	ErrEntityStateChanged = errors.New("สถานะข้อมูลมีการเปลี่ยนแปลงระหว่างการลบ กรุณาลองใหม่อีกครั้ง")
 )

@@ -39,6 +39,10 @@ type APIError struct {
 	Code    ErrCode      `json:"code"`
 	Message string       `json:"message,omitempty"`
 	Fields  []FieldError `json:"fields,omitempty"`
+	// Details carries an optional machine-readable payload (e.g. a deletion blocker
+	// code + dependency assessment) so the frontend can drive an adaptive remediation
+	// modal without parsing the human-readable message. Omitted when nil.
+	Details any `json:"details,omitempty"`
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -93,6 +97,17 @@ func ErrConflict(c *fiber.Ctx, message string) error {
 	return JSON(c, fiber.StatusConflict, envelope{
 		Success: false, Message: message,
 		Error: APIError{Code: CodeConflict, Message: message},
+	})
+}
+
+// ErrConflictDetails writes a 409 carrying a machine-readable detail payload (e.g. a
+// deletion blocker code + dependency assessment) alongside the human message. The
+// envelope error code stays CONFLICT so existing frontend code keeps working; richer
+// consumers read error.details to render adaptive remediation UI.
+func ErrConflictDetails(c *fiber.Ctx, message string, details any) error {
+	return JSON(c, fiber.StatusConflict, envelope{
+		Success: false, Message: message,
+		Error: APIError{Code: CodeConflict, Message: message, Details: details},
 	})
 }
 

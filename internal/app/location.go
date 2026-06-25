@@ -26,6 +26,9 @@ func registerLocationRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Delete("/stores/:storeID/locations/floors", handler.DeleteFloor)
 	protected.Get("/stores/:storeID/locations/:locationID", handler.GetByID)
 	protected.Get("/stores/:storeID/locations/:locationID/products", handler.ListProducts)
+	// Safe-delete lifecycle: read-only assessment that drives the adaptive delete/archive
+	// modal. Static "deletion-assessment" suffix, so no collision with GetByID above.
+	protected.Get("/stores/:storeID/locations/:locationID/deletion-assessment", handler.AssessDeletion)
 	protected.Patch("/stores/:storeID/locations/:locationID", handler.Update)
 	protected.Delete("/stores/:storeID/locations/:locationID", handler.Delete)
 }

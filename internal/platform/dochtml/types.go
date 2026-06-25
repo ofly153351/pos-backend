@@ -182,28 +182,3 @@ type WHTCertData struct {
 	WHTAmount   float64
 	NetAmount   float64
 }
-
-// pageData holds data for a single printed page.
-type pageData struct {
-	Doc        DocData
-	Store      StoreInfo
-	Items      []DocItem  // items for this page only
-	FillerRows []struct{} // empty filler rows (last page only)
-	ItemOffset int        // global index of first item on this page
-	PageNo     int
-	TotalPages int
-	IsFirst    bool
-	IsLast     bool
-}
-
-// renderData is the template data envelope for paginated invoice (unexported).
-type renderData struct {
-	Pages []pageData
-}
-
-// billRenderData is the template data envelope for bill (no pagination).
-type billRenderData struct {
-	Doc        DocData
-	Store      StoreInfo
-	FillerRows []struct{}
-}

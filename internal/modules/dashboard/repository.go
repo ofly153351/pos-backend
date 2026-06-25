@@ -37,7 +37,7 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -97,13 +97,20 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 	return items, err
 }
 
+// GetLowStockProducts returns active products whose operational on-hand (ready_stock —
+// the sale-point total) is at or below their effective minimum. The effective minimum is
+// the product's own min_stock when set (> 0), otherwise the supplied fallback threshold
+// (the dashboard passes 10). `quantity` is ready_stock so the caller can split the list:
+// out-of-stock = quantity <= 0, low-stock = quantity > 0. This replaces the previous
+// unconditional fixed threshold so the Global Dashboard matches the Inventory/Warehouse
+// pages (which already use min_stock).
 func (r PostgresRepository) GetLowStockProducts(ctx context.Context, storeID string, threshold, limit int) ([]LowStockProduct, error) {
 	var items []LowStockProduct
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Select("pv.id AS product_id, pv.name, COALESCE(pv.sku, '') AS sku, COALESCE(pv.product_unit_name, '') AS unit_type, pv.min_stock, pv.max_stock, COALESCE(pv.total_stock, 0) AS quantity").
-		Where("pv.store_id = ? AND pv.is_active = TRUE AND COALESCE(pv.total_stock, 0) <= ?", storeID, threshold).
-		Order("COALESCE(pv.total_stock, 0) ASC, pv.updated_at DESC").
+		Select("pv.id AS product_id, pv.name, COALESCE(pv.sku, '') AS sku, COALESCE(pv.product_unit_name, '') AS unit_type, pv.min_stock, pv.max_stock, COALESCE(pv.ready_stock, 0) AS quantity").
+		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.deleted_at IS NULL AND COALESCE(pv.ready_stock, 0) <= CASE WHEN COALESCE(pv.min_stock, 0) > 0 THEN pv.min_stock ELSE ? END", storeID, threshold).
+		Order("COALESCE(pv.ready_stock, 0) ASC, pv.updated_at DESC").
 		Limit(limit).
 		Find(&items).Error
 	return items, err

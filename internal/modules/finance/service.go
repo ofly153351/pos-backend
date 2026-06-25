@@ -136,17 +136,20 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 		return ExecutiveSummary{}, err
 	}
 
-	grossProfit := revenue.GrossRevenue - cogs.Total
+	netRevenue := revenue.GrossRevenue - revenue.Refunds
+	prevNetRevenue := prevRevenue.GrossRevenue - prevRevenue.Refunds
+	grossProfit := netRevenue - cogs.Total
 	netProfit := grossProfit - expenses
 	var aov float64
 	if orders > 0 {
-		aov = revenue.GrossRevenue / float64(orders)
+		aov = netRevenue / float64(orders)
 	}
 
 	return ExecutiveSummary{
 		Range:             TimeRange{Period: period, From: from, To: to},
-		Revenue:           revenue.GrossRevenue,
-		PreviousRevenue:   prevRevenue.GrossRevenue,
+		Revenue:           netRevenue,
+		PreviousRevenue:   prevNetRevenue,
+		Refunds:           revenue.Refunds,
 		COGS:              cogs.Total,
 		Expenses:          expenses,
 		GrossProfit:       grossProfit,
@@ -190,9 +193,21 @@ func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, stor
 		return InventoryReport{}, err
 	}
 
+	velocity, err := s.repo.GetStockVelocity(ctx, storeID)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+
+	overstock, err := s.repo.GetOverstockItems(ctx, storeID)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+
 	return InventoryReport{
-		Snapshot:  snapshot,
-		DeadStock: DeadStockStat{Days: deadDays, Count: count, Value: value, Items: deadItems},
+		Snapshot:      snapshot,
+		DeadStock:     DeadStockStat{Days: deadDays, Count: count, Value: value, Items: deadItems},
+		StockVelocity: velocity,
+		Overstock:     overstock,
 	}, nil
 }
 

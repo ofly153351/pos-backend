@@ -114,6 +114,55 @@ func (h Handler) DeleteLevelDiscount(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "customer level discount deleted", nil)
 }
 
+func (h Handler) ListShippingAddresses(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	customerID := c.Params("customerID")
+	result, err := h.service.ListShippingAddresses(c.UserContext(), middleware.ClaimsFromContext(c), storeID, customerID)
+	if err != nil {
+		return writeCustomerError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "shipping addresses fetched", result)
+}
+
+func (h Handler) CreateShippingAddress(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	customerID := c.Params("customerID")
+	var req ShippingAddressRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.CreateShippingAddress(c.UserContext(), middleware.ClaimsFromContext(c), storeID, customerID, req)
+	if err != nil {
+		return writeCustomerError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "shipping address created", result)
+}
+
+func (h Handler) UpdateShippingAddress(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	customerID := c.Params("customerID")
+	addrID := c.Params("addrID")
+	var req ShippingAddressRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.UpdateShippingAddress(c.UserContext(), middleware.ClaimsFromContext(c), storeID, customerID, addrID, req)
+	if err != nil {
+		return writeCustomerError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "shipping address updated", result)
+}
+
+func (h Handler) DeleteShippingAddress(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	customerID := c.Params("customerID")
+	addrID := c.Params("addrID")
+	if err := h.service.DeleteShippingAddress(c.UserContext(), middleware.ClaimsFromContext(c), storeID, customerID, addrID); err != nil {
+		return writeCustomerError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "shipping address deleted", nil)
+}
+
 func writeCustomerError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidCustomerName):
@@ -128,7 +177,7 @@ func writeCustomerError(c *fiber.Ctx, err error) error {
 		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrCustomerForbidden):
 		return httpx.ErrForbidden(c, err.Error())
-	case errors.Is(err, ErrCustomerNotFound):
+	case errors.Is(err, ErrCustomerNotFound), errors.Is(err, ErrShippingAddressNotFound):
 		return httpx.ErrNotFound(c, err.Error())
 	default:
 		log.Printf("[customer] internal error: %v", err)

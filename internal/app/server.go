@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -29,14 +30,14 @@ func NewServer(cfg config.Config) (*Server, error) {
 		}
 	}
 
-	// Phase W1: ensure every existing store has a default warehouse + sale location.
-	// Idempotent and best-effort (per-store failures are logged, never fatal), so this
-	// is safe to run on every boot and never blocks startup.
-	provisioning.BackfillAllStores(context.Background(), db)
-	// Phase W2: assign that default sale location to existing products that still have a
-	// NULL default_location_id (metadata-only; never moves stock). Runs after the store
-	// backfill so the default sale location exists.
-	provisioning.BackfillProductDefaultLocations(context.Background(), db)
+	// Phase W1/W2: run provisioning in background so a stuck DB lock never
+	// prevents the HTTP server from binding and serving traffic.
+	go func() {
+		provCtx, provCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer provCancel()
+		provisioning.BackfillAllStores(provCtx, db)
+		provisioning.BackfillProductDefaultLocations(provCtx, db)
+	}()
 
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		return nil, err

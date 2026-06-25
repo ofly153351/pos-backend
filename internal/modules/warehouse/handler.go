@@ -9,7 +9,15 @@ import (
 
 	"pos-backend/internal/middleware"
 	"pos-backend/internal/platform/httpx"
+	"pos-backend/internal/platform/lifecycle"
 )
+
+// deletionErrorDetails is the machine-readable payload attached to a blocked-delete 409 so
+// the frontend can render an adaptive remediation modal (which blocker, with what counts).
+type deletionErrorDetails struct {
+	Code       string               `json:"code"`
+	Assessment lifecycle.Assessment `json:"assessment"`
+}
 
 type Handler struct{ service Service }
 
@@ -28,11 +36,22 @@ func (h Handler) Create(c *fiber.Ctx) error {
 }
 
 func (h Handler) ListByStore(c *fiber.Ctx) error {
-	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"))
+	includeArchived := c.QueryBool("include_archived", false)
+	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), includeArchived)
 	if err != nil {
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "warehouses fetched", result)
+}
+
+// AssessDeletion returns the read-only deletion assessment that drives the adaptive
+// delete/archive modal (GET .../warehouses/:warehouseID/deletion-assessment).
+func (h Handler) AssessDeletion(c *fiber.Ctx) error {
+	assessment, err := h.service.AssessDeletion(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "deletion assessment", assessment)
 }
 
 func (h Handler) GetByID(c *fiber.Ctx) error {
@@ -56,10 +75,40 @@ func (h Handler) Update(c *fiber.Ctx) error {
 }
 
 func (h Handler) Delete(c *fiber.Ctx) error {
-	if err := h.service.Delete(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID")); err != nil {
+	// expected: optional client-declared action (from the pre-check assessment) for
+	// optimistic concurrency — a mismatch under the lock yields ENTITY_STATE_CHANGED.
+	expected := strings.TrimSpace(c.Query("expected"))
+	outcome, err := h.service.Delete(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("warehouseID"), expected)
+	if err != nil {
+		return writeDeleteError(c, err, outcome.Assessment)
+	}
+	// outcome.Action is "archived" or "deleted"; the FE picks the toast from it.
+	msg := "warehouse deleted"
+	if outcome.Action == "archived" {
+		msg = "warehouse archived"
+	}
+	return httpx.Success(c, fiber.StatusOK, msg, outcome)
+}
+
+// writeDeleteError maps the smart-delete blocker errors to a 409 carrying the structured
+// assessment details; everything else falls back to the standard error mapping.
+func writeDeleteError(c *fiber.Ctx, err error, assessment lifecycle.Assessment) error {
+	switch {
+	case errors.Is(err, ErrEntityStateChanged):
+		return httpx.ErrConflictDetails(c, err.Error(), deletionErrorDetails{
+			Code: lifecycle.CodeEntityStateChanged, Assessment: assessment,
+		})
+	case errors.Is(err, ErrWarehouseHasStock),
+		errors.Is(err, ErrWarehouseHasBlockedLocations),
+		errors.Is(err, ErrWarehouseHasOpenOperations),
+		errors.Is(err, ErrDefaultWarehouseDelete),
+		errors.Is(err, ErrWarehouseInUse):
+		return httpx.ErrConflictDetails(c, err.Error(), deletionErrorDetails{
+			Code: assessment.BlockerCode, Assessment: assessment,
+		})
+	default:
 		return writeError(c, err)
 	}
-	return httpx.Success(c, fiber.StatusOK, "warehouse deleted", nil)
 }
 
 func writeError(c *fiber.Ctx, err error) error {

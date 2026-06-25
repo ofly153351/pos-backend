@@ -33,6 +33,9 @@ func (r *fakeProductRepo) Update(ctx context.Context, product productmodule.Prod
 	r.product = product
 	return product, nil
 }
+func (r *fakeProductRepo) GetTotalStock(ctx context.Context, storeID, productID string) (int, error) {
+	return 0, nil
+}
 func (r *fakeProductRepo) UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error {
 	return nil
 }

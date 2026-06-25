@@ -89,8 +89,20 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "items", err.Error())
 	case errors.Is(err, ErrSessionAlreadyApplied):
 		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrCountLocationRequired):
+		// Legacy / location-less session cannot be applied (aggregate → single-location unsafe).
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrCountLocationInvalid):
+		return httpx.Err422(c, "location", err.Error())
 	case errors.Is(err, stock_movement.ErrInsufficientStock):
 		return httpx.Err422(c, "stock", err.Error())
+	case errors.Is(err, stock_movement.ErrStockStaleCount):
+		// A counted quantity no longer matches the location's live on-hand (multi-location
+		// total, or stock moved after counting). Surface as a conflict so the worksheet can
+		// be re-counted per location rather than overwriting one location with a total.
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, stock_movement.ErrStockExpectedRequired):
+		return httpx.Err422(c, "items", err.Error())
 	case errors.Is(err, stock_movement.ErrProductNotFound):
 		return httpx.ErrNotFound(c, err.Error())
 	case errors.Is(err, stock_movement.ErrStockForbidden):

@@ -54,7 +54,9 @@ type LowStockProduct struct {
 	Name      string `json:"name"`
 	SKU       string `json:"sku,omitempty"`
 	UnitType  string `json:"unit_type"`
-	Quantity  int    `json:"quantity"`
+	Quantity  int    `json:"quantity"` // ready_stock (sale-point on-hand)
+	MinStock  int    `json:"min_stock"`
+	MaxStock  int    `json:"max_stock,omitempty"`
 }
 
 type RecentSale struct {

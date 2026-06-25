@@ -428,6 +428,18 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, product
 		return ErrProductNotFound
 	}
 
+	// Phase 7 — never delete a product that still holds stock. Deletion hides it from every
+	// operational/inventory view, which would strand the on-hand units. Require the operator
+	// to transfer/adjust stock to zero first. This is a guard, NOT a cascade delete: stock
+	// rows and movements are never auto-removed by a delete.
+	qty, err := s.repo.GetTotalStock(ctx, storeID, productID)
+	if err != nil {
+		return err
+	}
+	if qty > 0 {
+		return ProductHasStockError{Quantity: qty}
+	}
+
 	return s.repo.SoftDelete(ctx, storeID, productID)
 }
 

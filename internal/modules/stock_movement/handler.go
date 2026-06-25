@@ -108,12 +108,12 @@ func (h Handler) AdjustStock(c *fiber.Ctx) error {
 	result, err := h.service.AdjustStock(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		switch err {
-		case ErrStockBadQty, ErrStockLocationRequired,
+		case ErrStockBadQty, ErrStockLocationRequired, ErrStockExpectedRequired,
 			ErrStockReasonRequired, ErrStockReasonInvalid, ErrStockReasonNoteRequired:
 			return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 		case ErrProductNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-		case ErrStockNoChange, ErrStockIdempotencyConflict:
+		case ErrStockNoChange, ErrStockIdempotencyConflict, ErrStockStaleCount:
 			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		case ErrStockForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)

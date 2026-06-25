@@ -21,6 +21,7 @@ type Repository interface {
 	Delete(ctx context.Context, storeID, productID string) error
 	SoftDelete(ctx context.Context, storeID, productID string) error
 	ExistsByID(ctx context.Context, storeID, productID string) (bool, error)
+	GetTotalStock(ctx context.Context, storeID, productID string) (int, error)
 	ProductTypeExists(ctx context.Context, storeID, productTypeID string) (bool, error)
 	ProductUnitExists(ctx context.Context, storeID, productUnitID string) (bool, error)
 	BrandExists(ctx context.Context, storeID, brandID string) (bool, error)
@@ -152,9 +153,15 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 		limit = 50
 	}
 
+	// Exclude soft-deleted products from the active product list AND its pagination count
+	// (same baseQuery → list and total stay consistent). product_view does not carry
+	// deleted_at, so join the source row for the filter. Deactivated products (is_active
+	// =false, deleted_at NULL) are NOT excluded here — they remain visible/reactivatable
+	// via the page's status filter.
 	baseQuery := r.db.WithContext(ctx).
 		Table("product_view pv").
-		Where("pv.store_id = ?", storeID)
+		Joins("JOIN products pd ON pd.id = pv.id").
+		Where("pv.store_id = ? AND pd.deleted_at IS NULL", storeID)
 
 	if stockStatus == "out_of_stock" {
 		baseQuery = baseQuery.Where("pv.total_stock = 0")
@@ -203,8 +210,11 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID string) (Product, error) {
 	var row productQueryRow
+	// A soft-deleted product is treated as not found for the active product detail/edit
+	// path (safe existing 404) — historical screens read snapshot fields, not this query.
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
+		Joins("JOIN products pd ON pd.id = pv.id").
 		Select(`
 			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
 			CASE
@@ -214,7 +224,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 			END AS stock_status,
 			pv.is_active, pv.created_at, pv.updated_at, pv.product_code, pv.description, pv.storage_location, pv.default_location_id
 		`).
-		Where("pv.store_id = ? AND pv.id = ?", storeID, productID).
+		Where("pv.store_id = ? AND pv.id = ? AND pd.deleted_at IS NULL", storeID, productID).
 		Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -333,15 +343,35 @@ func (r PostgresRepository) ExistsByID(ctx context.Context, storeID, productID s
 	return count > 0, err
 }
 
+// GetTotalStock returns the product's current on-hand quantity summed across ALL of its
+// stock rows (every location/warehouse in the store). Delete uses it to refuse removing a
+// product that still holds stock (Phase 7). Returns 0 when the product has no stock rows.
+func (r PostgresRepository) GetTotalStock(ctx context.Context, storeID, productID string) (int, error) {
+	var total int
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select("COALESCE(SUM(quantity), 0)").
+		Where("store_id = ? AND product_id = ?", storeID, productID).
+		Scan(&total).Error
+	return total, err
+}
+
 func (r PostgresRepository) SoftDelete(ctx context.Context, storeID, productID string) error {
-	// Phase W0 safety: deactivation must NEVER destroy operational data. It only
-	// flips is_active. Stock quantities, stock_movements (audit), warehouse_inventory
-	// and all receiving/sale/transfer/stock-count references are preserved. An
-	// inactive product may still hold stock and history.
+	// Soft delete: NEVER destroys operational data. It stamps deleted_at (so the product
+	// is hidden from every active view/selector) and flips is_active=false (so the
+	// existing is_active=TRUE operational filters exclude it too). Stock quantities,
+	// stock_movements (audit), warehouse_inventory and all receiving/sale/transfer/
+	// stock-count references are preserved; historical screens still read the row.
+	// deleted_at distinguishes a DELETED product from a merely deactivated one (is_active
+	// =false, deleted_at NULL) which stays visible/reactivatable on the product page.
+	// Re-running on an already-deleted product is harmless (re-stamps; RowsAffected=1).
 	result := r.db.WithContext(ctx).
 		Model(&Product{}).
 		Where("store_id = ? AND id = ?", storeID, productID).
-		Update("is_active", false)
+		Updates(map[string]any{
+			"is_active":  false,
+			"deleted_at": time.Now().UTC(),
+		})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -400,7 +430,7 @@ func (r PostgresRepository) ListProductIDsWithoutSKU(ctx context.Context, storeI
 	err := r.db.WithContext(ctx).
 		Table("products").
 		Select("id").
-		Where("store_id = ? AND (sku IS NULL OR TRIM(sku) = '')", storeID).
+		Where("store_id = ? AND (sku IS NULL OR TRIM(sku) = '') AND deleted_at IS NULL", storeID).
 		Order("created_at ASC, id ASC").
 		Find(&rows).Error
 	if err != nil {

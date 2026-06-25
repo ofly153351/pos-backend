@@ -182,7 +182,8 @@ func (s Service) CanManageStore(ctx context.Context, actor auth.Claims, storeID 
 }
 
 func (s Service) ListBankAccounts(ctx context.Context, actor auth.Claims, storeID string) ([]StoreBankAccount, error) {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	// Cashiers need bank account details at checkout; allow any store member to list.
+	ok, err := s.repo.UserHasStoreAccess(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil || !ok {
 		return nil, ErrUnauthorized
 	}
@@ -201,8 +202,33 @@ func (s Service) CreateBankAccount(ctx context.Context, actor auth.Claims, store
 		BankName:    strings.TrimSpace(req.BankName),
 		AccountNo:   strings.TrimSpace(req.AccountNo),
 		AccountName: strings.TrimSpace(req.AccountName),
+		IsActive:    true,
 	}
 	return s.repo.CreateBankAccount(ctx, acc)
+}
+
+func (s Service) UpdateBankAccount(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateBankAccountRequest) (StoreBankAccount, error) {
+	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil || !ok {
+		return StoreBankAccount{}, ErrUnauthorized
+	}
+	updates := map[string]interface{}{}
+	if req.BankName != nil {
+		updates["bank_name"] = strings.TrimSpace(*req.BankName)
+	}
+	if req.AccountNo != nil {
+		updates["account_no"] = strings.TrimSpace(*req.AccountNo)
+	}
+	if req.AccountName != nil {
+		updates["account_name"] = strings.TrimSpace(*req.AccountName)
+	}
+	if req.IsActive != nil {
+		updates["is_active"] = *req.IsActive
+	}
+	if req.IsDefault != nil {
+		updates["is_default"] = *req.IsDefault
+	}
+	return s.repo.UpdateBankAccount(ctx, storeID, id, updates)
 }
 
 func (s Service) DeleteBankAccount(ctx context.Context, actor auth.Claims, storeID, id string) error {

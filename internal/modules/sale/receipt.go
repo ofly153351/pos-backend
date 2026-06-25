@@ -33,6 +33,7 @@ type ReceiptSettingsView struct {
 	ShowQr        bool
 	QrSize        string
 	PaperSize     string
+	RoundAmount   bool
 }
 
 func defaultSettings() ReceiptSettingsView {
@@ -42,6 +43,7 @@ func defaultSettings() ReceiptSettingsView {
 		TaxMode: "exclusive", VatRate: 7, TaxLabel: "ภาษีมูลค่าเพิ่ม (VAT 7%)",
 		FooterText: "ขอบคุณที่ใช้บริการ",
 		ShowQr: true, QrSize: "medium", PaperSize: "80mm",
+		RoundAmount: true,
 	}
 }
 
@@ -79,19 +81,36 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 	if vatPercent < 0 {
 		vatPercent = 0
 	}
-	afterDiscount := roundMoney(s.SubtotalAmount - s.DiscountAmount)
+
+	// Use authoritative stored totals (computed by repository at sale time) so the
+	// receipt always matches the amount the customer was actually charged.
+	grandTotal := roundMoney(s.TotalAmount)
+	vatAmount := roundMoney(s.VATAmount)
+	if sv.TaxMode != "exclusive" {
+		vatAmount = 0
+	}
+	// afterDiscount keeps full 2dp precision for transparency on the receipt.
+	afterDiscount := roundMoney(grandTotal - vatAmount)
 	if afterDiscount < 0 {
 		afterDiscount = 0
-	}
-	vatAmount := roundMoney(afterDiscount * vatPercent / 100)
-	grandTotal := roundMoney(afterDiscount + vatAmount)
-	if sv.TaxMode != "exclusive" {
-		grandTotal = roundMoney(afterDiscount)
-		vatAmount = 0
 	}
 	discountTotal := roundMoney(s.DiscountAmount)
 	if discountTotal < 0 {
 		discountTotal = 0
+	}
+
+	// Display rounding: only the grand total / paid / change lines are rounded.
+	// Subtotal, VAT, and item lines keep 2dp precision.
+	displayGrandTotal := grandTotal
+	displayChange := roundMoney(s.ChangeAmount)
+	if sv.RoundAmount {
+		displayGrandTotal = math.Round(grandTotal)
+		raw := s.PaidAmount - displayGrandTotal
+		if raw >= 0 {
+			displayChange = roundMoney(raw)
+		} else {
+			displayChange = 0
+		}
 	}
 
 	items := make([]receipthtml.SaleItem, 0, len(s.Items))
@@ -145,12 +164,12 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		DiscountTotal:  discountTotal,
 		AfterDiscount:  afterDiscount,
 		VatAmount:      vatAmount,
-		GrandTotal:     grandTotal,
-		GrandTotalText: formatThaiBahtText(grandTotal),
+		GrandTotal:     displayGrandTotal,
+		GrandTotalText: formatThaiBahtText(displayGrandTotal),
 		PaymentMethod:  fallback(s.PaymentMethod, "-"),
 		PaymentLabel:   receipthtml.PaymentLabel(s.PaymentMethod),
 		Paid:           roundMoney(s.PaidAmount),
-		Change:         roundMoney(s.ChangeAmount),
+		Change:         displayChange,
 		PromptPayQRURI: template.URL(promptPayQR),
 	}
 
@@ -178,6 +197,7 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		ShowQr:        sv.ShowQr,
 		QrSize:        sv.QrSize,
 		PaperSize:     sv.PaperSize,
+		RoundAmount:   sv.RoundAmount,
 	}
 
 	return receipthtml.RenderReceiptHTML(sale, store, cfg)

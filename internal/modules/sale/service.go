@@ -163,6 +163,41 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, saleID
 	return s.repo.GetByID(ctx, storeID, saleID)
 }
 
+func (s Service) VoidSale(ctx context.Context, actor auth.Claims, storeID, saleID string, req VoidSaleRequest) error {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrForbiddenStoreAccess
+	}
+	voidType := strings.TrimSpace(req.Type)
+	if voidType == "" {
+		voidType = "void"
+	}
+	if voidType != "void" && voidType != "return" {
+		return ErrInvalidVoidType
+	}
+	return s.repo.VoidSale(ctx, storeID, saleID, actor.UserID, strings.TrimSpace(req.Reason), voidType)
+}
+
+// CreateReturn records a partial-or-full return against a sale (owner/manager
+// only, mirroring void). The sale is NOT voided; the repository restocks the
+// returned quantities and recomputes the sale status.
+func (s Service) CreateReturn(ctx context.Context, actor auth.Claims, storeID, saleID string, req CreateReturnRequest) (SaleReturn, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return SaleReturn{}, err
+	}
+	if !allowed {
+		return SaleReturn{}, ErrForbiddenStoreAccess
+	}
+	if len(req.Items) == 0 {
+		return SaleReturn{}, ErrInvalidReturnItems
+	}
+	return s.repo.CreateReturn(ctx, storeID, saleID, actor.UserID, req)
+}
+
 // saleFingerprint is a stable SHA-256 over the business-meaningful fields of a sale
 // request (store, sale location, payment, discounts, customer, VAT, promotions, and the
 // item set). Two requests with the same fingerprint represent the same sale intent; a

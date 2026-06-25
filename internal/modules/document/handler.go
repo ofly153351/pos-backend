@@ -230,6 +230,35 @@ func (h Handler) ConvertQuotation(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "invoice created from quotation", doc)
 }
 
+// Convert creates a new document of body.target_type from the source document,
+// validated against the workflow matrix (allowedConversions).
+func (h Handler) Convert(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	var req ConvertRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if req.TargetType == "" {
+		return httpx.Error(c, fiber.StatusBadRequest, "target_type required", nil)
+	}
+	doc, err := h.service.Convert(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.TargetType)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "document converted", doc)
+}
+
+func (h Handler) RelatedDocuments(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	items, err := h.service.RelatedDocuments(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "related documents", fiber.Map{"items": items})
+}
+
 func (h Handler) BulkAction(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	var req BulkActionRequest
@@ -248,7 +277,7 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, "not found", err.Error())
 	case errors.Is(err, ErrForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, "forbidden", err.Error())
-	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction):
+	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction), errors.Is(err, ErrInvalidConversion):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal error", err.Error())

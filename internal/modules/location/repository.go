@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"pos-backend/internal/platform/lifecycle"
 )
 
 type Repository interface {
@@ -15,6 +17,16 @@ type Repository interface {
 	GetByID(ctx context.Context, storeID, locationID string) (Location, error)
 	Update(ctx context.Context, loc Location) (Location, error)
 	Delete(ctx context.Context, storeID, locationID string) error
+	// GatherDeletionBlockers builds the dependency snapshot for a single location.
+	// Read-only; used by the deletion assessment endpoint and as the pre-check feeding
+	// lifecycle.Assess.
+	GatherDeletionBlockers(ctx context.Context, storeID, locationID string) (lifecycle.BlockerCounts, error)
+	// ApplyDeletion runs the smart delete: it re-gathers blockers under a row lock,
+	// re-runs lifecycle.Assess, and either archives (soft-delete), hard-deletes
+	// (never-used location), or reports the blocker. If expected is non-empty and no
+	// longer matches the locked assessment it returns ErrLocationStateChanged. Archiving an
+	// already-archived location is a success no-op.
+	ApplyDeletion(ctx context.Context, storeID, locationID, expected string) (lifecycle.Assessment, string, error)
 	GetTree(ctx context.Context, storeID, warehouseID string) ([]TreeZone, error)
 	GetProducts(ctx context.Context, storeID, locationID string, page, limit int) ([]LocationProduct, int64, error)
 	RenameZone(ctx context.Context, storeID, warehouseID, oldZone, newZone string) (int64, error)
@@ -41,10 +53,11 @@ type locationQueryRow struct {
 	FloorName     *string   `gorm:"column:floor_name"`
 	IsSalePoint   bool      `gorm:"column:is_sale_point"`
 	IsDefaultSale bool      `gorm:"column:is_default_sale"`
-	IsActive      bool      `gorm:"column:is_active"`
-	CreatedAt     time.Time `gorm:"column:created_at"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
-	WarehouseName string    `gorm:"column:warehouse_name"`
+	IsActive      bool       `gorm:"column:is_active"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+	DeletedAt     *time.Time `gorm:"column:deleted_at"`
+	WarehouseName string     `gorm:"column:warehouse_name"`
 }
 
 func (r *locationQueryRow) toLocation() Location {
@@ -58,6 +71,7 @@ func (r *locationQueryRow) toLocation() Location {
 		IsActive:      r.IsActive,
 		CreatedAt:     r.CreatedAt,
 		UpdatedAt:     r.UpdatedAt,
+		DeletedAt:     r.DeletedAt,
 		WarehouseName: r.WarehouseName,
 	}
 	if r.Code != nil {
@@ -78,7 +92,7 @@ func (r PostgresRepository) locationBaseQuery() *gorm.DB {
 			locations.id, locations.store_id, locations.warehouse_id,
 			locations.name, locations.code, locations.zone_name, locations.floor_name,
 			locations.is_sale_point, locations.is_default_sale, locations.is_active,
-			locations.created_at, locations.updated_at,
+			locations.created_at, locations.updated_at, locations.deleted_at,
 			COALESCE(warehouses.name, '') AS warehouse_name
 		`).
 		Joins("LEFT JOIN warehouses ON warehouses.id = locations.warehouse_id")
@@ -121,6 +135,12 @@ func (r PostgresRepository) Create(ctx context.Context, loc Location) (Location,
 
 func (r PostgresRepository) buildListQuery(storeID string, filter ListFilter) *gorm.DB {
 	q := r.locationBaseQuery().Where("locations.store_id = ?", storeID)
+	// Archive filter (migration 047). The Location struct intentionally has no DeletedAt
+	// field, so GORM never injects this automatically — management lists and operational
+	// selectors opt in here, while GetByID (historical resolution) deliberately does not.
+	if !filter.IncludeArchived {
+		q = q.Where("locations.deleted_at IS NULL")
+	}
 	if filter.WarehouseID != "" {
 		q = q.Where("locations.warehouse_id = ?", filter.WarehouseID)
 	}
@@ -146,6 +166,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, fil
 		Table("locations").
 		Joins("LEFT JOIN warehouses ON warehouses.id = locations.warehouse_id").
 		Where("locations.store_id = ?", storeID)
+	if !filter.IncludeArchived {
+		countQ = countQ.Where("locations.deleted_at IS NULL")
+	}
 	if filter.WarehouseID != "" {
 		countQ = countQ.Where("locations.warehouse_id = ?", filter.WarehouseID)
 	}
@@ -342,7 +365,7 @@ func (r PostgresRepository) GetTree(ctx context.Context, storeID, warehouseID st
 	q := r.db.WithContext(ctx).
 		Table("locations").
 		Select("zone_name, floor_name, COUNT(*) AS count").
-		Where("store_id = ?", storeID)
+		Where("store_id = ? AND deleted_at IS NULL", storeID)
 	if warehouseID != "" {
 		q = q.Where("warehouse_id = ?", warehouseID)
 	}
@@ -389,7 +412,7 @@ func (r PostgresRepository) GetProducts(ctx context.Context, storeID, locationID
 		Table("stocks").
 		Select("stocks.product_id, products.name AS product_name, COALESCE(products.sku, '') AS sku, stocks.quantity").
 		Joins("LEFT JOIN products ON products.id = stocks.product_id").
-		Where("stocks.store_id = ? AND stocks.location_id = ? AND stocks.quantity > 0", storeID, locationID)
+		Where("stocks.store_id = ? AND stocks.location_id = ? AND stocks.quantity > 0 AND products.deleted_at IS NULL", storeID, locationID)
 
 	var total int64
 	if err := r.db.WithContext(ctx).Table("(?) AS sub", q).Count(&total).Error; err != nil {

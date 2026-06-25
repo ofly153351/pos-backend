@@ -16,6 +16,12 @@ type Warehouse struct {
 	SourceWarehouseID string    `json:"source_warehouse_id,omitempty" gorm:"column:source_warehouse_id"`
 	CreatedAt         time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt         time.Time `json:"updated_at" gorm:"column:updated_at"`
+	// DeletedAt is the archive timestamp (migration 047). It is a plain *time.Time — NOT
+	// gorm.DeletedAt — so GORM never auto-soft-deletes or auto-filters; the lifecycle module
+	// archives explicitly. Exposed read-only (omitempty hides it for live rows) so the
+	// management "Archived" filter and the เก็บถาวรแล้ว/Archived badge can partition
+	// Active/Inactive/Archived from a single include_archived list.
+	DeletedAt *time.Time `json:"deleted_at,omitempty" gorm:"column:deleted_at"`
 }
 
 func (Warehouse) TableName() string {

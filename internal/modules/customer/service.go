@@ -56,6 +56,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		Note:      strings.TrimSpace(input.Note),
 		TaxID:     strings.TrimSpace(input.TaxID),
 		Branch:    strings.TrimSpace(input.Branch),
+		ShippingContact:    strings.TrimSpace(input.ShippingContact),
+		ShippingPhone:      strings.TrimSpace(input.ShippingPhone),
+		ShippingAddress:    strings.TrimSpace(input.ShippingAddress),
+		ShippingProvince:   strings.TrimSpace(input.ShippingProvince),
+		ShippingDistrict:   strings.TrimSpace(input.ShippingDistrict),
+		ShippingPostalCode: strings.TrimSpace(input.ShippingPostalCode),
+		DeliveryNote:       strings.TrimSpace(input.DeliveryNote),
 		IsActive:  isActive,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -123,6 +130,27 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, custome
 	if input.Branch != nil {
 		existing.Branch = strings.TrimSpace(*input.Branch)
 	}
+	if input.ShippingContact != nil {
+		existing.ShippingContact = strings.TrimSpace(*input.ShippingContact)
+	}
+	if input.ShippingPhone != nil {
+		existing.ShippingPhone = strings.TrimSpace(*input.ShippingPhone)
+	}
+	if input.ShippingAddress != nil {
+		existing.ShippingAddress = strings.TrimSpace(*input.ShippingAddress)
+	}
+	if input.ShippingProvince != nil {
+		existing.ShippingProvince = strings.TrimSpace(*input.ShippingProvince)
+	}
+	if input.ShippingDistrict != nil {
+		existing.ShippingDistrict = strings.TrimSpace(*input.ShippingDistrict)
+	}
+	if input.ShippingPostalCode != nil {
+		existing.ShippingPostalCode = strings.TrimSpace(*input.ShippingPostalCode)
+	}
+	if input.DeliveryNote != nil {
+		existing.DeliveryNote = strings.TrimSpace(*input.DeliveryNote)
+	}
 	if input.IsActive != nil {
 		existing.IsActive = *input.IsActive
 	}
@@ -176,6 +204,80 @@ func (s Service) DeleteLevelDiscount(ctx context.Context, actor auth.Claims, sto
 		return ErrInvalidLevel
 	}
 	return s.repo.DeleteLevelDiscount(ctx, storeID, level)
+}
+
+func (s Service) ListShippingAddresses(ctx context.Context, actor auth.Claims, storeID, customerID string) ([]CustomerShippingAddress, error) {
+	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListShippingAddresses(ctx, customerID)
+}
+
+func (s Service) CreateShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID string, req ShippingAddressRequest) (CustomerShippingAddress, error) {
+	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	now := time.Now().UTC()
+	addr := CustomerShippingAddress{
+		ID:                 newShippingAddressID(),
+		CustomerID:         customerID,
+		Label:              strings.TrimSpace(req.Label),
+		RecipientName:      strings.TrimSpace(req.RecipientName),
+		RecipientPhone:     strings.TrimSpace(req.RecipientPhone),
+		Address:            strings.TrimSpace(req.Address),
+		SubDistrict:        strings.TrimSpace(req.SubDistrict),
+		District:           strings.TrimSpace(req.District),
+		Province:           strings.TrimSpace(req.Province),
+		PostalCode:         strings.TrimSpace(req.PostalCode),
+		Note:               strings.TrimSpace(req.Note),
+		UseCustomerAddress: req.UseCustomerAddress,
+		IsDefault:          req.IsDefault,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}
+	return s.repo.CreateShippingAddress(ctx, addr)
+}
+
+func (s Service) UpdateShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID, addrID string, req ShippingAddressRequest) (CustomerShippingAddress, error) {
+	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	addr := CustomerShippingAddress{
+		ID:                 addrID,
+		CustomerID:         customerID,
+		Label:              strings.TrimSpace(req.Label),
+		RecipientName:      strings.TrimSpace(req.RecipientName),
+		RecipientPhone:     strings.TrimSpace(req.RecipientPhone),
+		Address:            strings.TrimSpace(req.Address),
+		SubDistrict:        strings.TrimSpace(req.SubDistrict),
+		District:           strings.TrimSpace(req.District),
+		Province:           strings.TrimSpace(req.Province),
+		PostalCode:         strings.TrimSpace(req.PostalCode),
+		Note:               strings.TrimSpace(req.Note),
+		UseCustomerAddress: req.UseCustomerAddress,
+		IsDefault:          req.IsDefault,
+		UpdatedAt:          time.Now().UTC(),
+	}
+	return s.repo.UpdateShippingAddress(ctx, addr)
+}
+
+func (s Service) DeleteShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID, addrID string) error {
+	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
+		return err
+	}
+	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
+		return err
+	}
+	return s.repo.DeleteShippingAddress(ctx, addrID, customerID)
 }
 
 func (s Service) ensureStoreAccess(ctx context.Context, actor auth.Claims, storeID string) error {

@@ -70,6 +70,50 @@ func (h Handler) ReceiptPreview(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).Send(content)
 }
 
+// Document renders a sale through a shared document template (?type=TAX_INVOICE,
+// QUOTATION, DELIVERY_ORDER, …) — the same forms the Documents module prints.
+func (h Handler) Document(c *fiber.Ctx) error {
+	content, err := h.service.GenerateSaleDocumentHTML(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"), c.Query("type"))
+	if err != nil {
+		return writeSaleError(c, err)
+	}
+
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	return c.Status(fiber.StatusOK).Send(content)
+}
+
+func (h Handler) VoidSale(c *fiber.Ctx) error {
+	var req VoidSaleRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if err := h.service.VoidSale(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"), req); err != nil {
+		return writeSaleError(c, err)
+	}
+	result, err := h.service.GetByID(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"))
+	if err != nil {
+		return writeSaleError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "sale voided", result)
+}
+
+// CreateReturn records a partial-or-full return without voiding the sale. Returns
+// the refreshed sale (updated status + returns history) so the client can rerender.
+func (h Handler) CreateReturn(c *fiber.Ctx) error {
+	var req CreateReturnRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if _, err := h.service.CreateReturn(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"), req); err != nil {
+		return writeSaleError(c, err)
+	}
+	result, err := h.service.GetByID(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("saleID"))
+	if err != nil {
+		return writeSaleError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "sale return recorded", result)
+}
+
 func writeSaleError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidSaleItems), errors.Is(err, ErrInvalidSaleItem):
@@ -89,6 +133,8 @@ func writeSaleError(c *fiber.Ctx, err error) error {
 		return httpx.Err422(c, "discount_value", err.Error())
 	case errors.Is(err, ErrInvalidVATPercent):
 		return httpx.Err422(c, "vat_percent", err.Error())
+	case errors.Is(err, ErrInvalidSaleDocumentType):
+		return httpx.Err422(c, "type", err.Error())
 	case errors.Is(err, ErrProductInactive):
 		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrInsufficientStock):
@@ -99,6 +145,21 @@ func writeSaleError(c *fiber.Ctx, err error) error {
 		errors.Is(err, ErrSaleLocationCrossStore):
 		return httpx.Err422(c, "location_id", err.Error())
 	case errors.Is(err, ErrSaleIdempotencyConflict):
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrSaleAlreadyVoided):
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrCannotVoidCreditSale):
+		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrInvalidVoidType):
+		return httpx.Err422(c, "type", err.Error())
+	case errors.Is(err, ErrInvalidReturnItems), errors.Is(err, ErrNothingToReturn),
+		errors.Is(err, ErrReturnItemNotInSale):
+		return httpx.Err422(c, "items", err.Error())
+	case errors.Is(err, ErrReturnQtyExceeds):
+		return httpx.Err422(c, "quantity", err.Error())
+	case errors.Is(err, ErrInvalidRefundMethod):
+		return httpx.Err422(c, "refund_method", err.Error())
+	case errors.Is(err, ErrSaleVoidedNoReturn), errors.Is(err, ErrReturnLocationMissing):
 		return httpx.ErrConflict(c, err.Error())
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.ErrForbidden(c, err.Error())

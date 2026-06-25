@@ -86,6 +86,11 @@ func (h Handler) GenerateMissingBarcodes(c *fiber.Ctx) error {
 }
 
 func writeProductError(c *fiber.Ctx, err error) error {
+	// Phase 7 — product still has stock: 409 with the (Thai) reason + remaining quantity.
+	var hasStock ProductHasStockError
+	if errors.As(err, &hasStock) {
+		return httpx.ErrConflict(c, hasStock.Error())
+	}
 	switch {
 	case errors.Is(err, ErrInvalidProductName):
 		return httpx.Err422(c, "name", err.Error())

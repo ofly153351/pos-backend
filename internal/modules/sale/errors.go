@@ -30,6 +30,17 @@ var (
 	ErrSaleLocationInvalid     = errors.New("ตำแหน่งที่เลือกไม่ใช่จุดขายที่ใช้งานได้")
 	ErrSaleLocationCrossStore  = errors.New("ตำแหน่งที่เลือกไม่อยู่ในร้านเดียวกัน")
 	ErrSaleIdempotencyConflict = errors.New("รหัสคำขอนี้ถูกใช้ไปแล้วกับรายการขายที่ไม่ตรงกัน")
+	ErrSaleAlreadyVoided       = errors.New("รายการขายนี้ถูกยกเลิกไปแล้ว")
+	ErrCannotVoidCreditSale    = errors.New("รายการขายเชื่อต้องยกเลิกผ่านระบบขายเชื่อ")
+	ErrInvalidVoidType         = errors.New("ประเภทการยกเลิกไม่ถูกต้อง (void หรือ return)")
+	// Partial returns (migration 052)
+	ErrInvalidReturnItems    = errors.New("ต้องเลือกสินค้าที่จะคืนอย่างน้อย 1 รายการ")
+	ErrNothingToReturn       = errors.New("ไม่มีสินค้าที่คืนได้ (จำนวนคืนเป็นศูนย์หรือคืนครบแล้ว)")
+	ErrReturnQtyExceeds      = errors.New("จำนวนที่คืนเกินจำนวนคงเหลือที่คืนได้")
+	ErrInvalidRefundMethod   = errors.New("วิธีคืนเงินไม่ถูกต้อง")
+	ErrSaleVoidedNoReturn    = errors.New("บิลนี้ถูกยกเลิกแล้ว ไม่สามารถคืนสินค้าได้")
+	ErrReturnItemNotInSale   = errors.New("สินค้าที่จะคืนไม่อยู่ในบิลนี้")
+	ErrReturnLocationMissing = errors.New("ไม่พบตำแหน่งคลังเดิมของสินค้า ไม่สามารถคืนสต็อกได้")
 )
 
 // InsufficientSaleStockError reports that the resolved sale-point location does not hold

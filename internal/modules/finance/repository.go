@@ -26,6 +26,8 @@ type Repository interface {
 
 	GetInventorySnapshot(ctx context.Context, storeID string) (InventorySnapshot, error)
 	GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) ([]DeadStockItem, int64, float64, error)
+	GetStockVelocity(ctx context.Context, storeID string) ([]StockVelocityItem, error)
+	GetOverstockItems(ctx context.Context, storeID string) ([]OverstockItem, error)
 	GetTopProducts(ctx context.Context, storeID string, from, to time.Time, limit int) ([]TopProduct, error)
 	GetSalesTrend(ctx context.Context, storeID string, from, to time.Time) ([]TrendPoint, int64, error)
 	GetSalesCounters(ctx context.Context, storeID string, from, to time.Time) (int64, int64, error)
@@ -48,7 +50,7 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	var count int64
 	err := r.db.WithContext(ctx).
 		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier"}).
+		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -56,9 +58,9 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 	return count > 0, nil
 }
 
-// GetRevenue sums sale totals over [from, to), excluding voided sales (e.g. a
-// cancelled credit sale that was restocked). Refunds are not separately tracked,
-// so the caller leaves Refunds at 0.
+// GetRevenue sums sale totals over [from, to), excluding voided sales.
+// Refunds from sale_returns during the same window are summed separately so the
+// caller can compute net revenue = gross - refunds.
 func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error) {
 	var result Revenue
 	err := r.db.WithContext(ctx).
@@ -71,7 +73,20 @@ func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from
 		`).
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	var refunds float64
+	if err := r.db.WithContext(ctx).
+		Table("sale_returns sr").
+		Select("COALESCE(SUM(sr.refund_amount), 0)").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ?", storeID, from, to).
+		Scan(&refunds).Error; err != nil {
+		return result, err
+	}
+	result.Refunds = refunds
+	return result, nil
 }
 
 // GetCOGS values every sold line at its snapshotted sale-time cost
@@ -171,7 +186,7 @@ func (r PostgresRepository) GetInventorySnapshot(ctx context.Context, storeID st
 			COUNT(*) FILTER (WHERE total_stock <= 0)                                     AS out_of_stock,
 			COUNT(*) FILTER (WHERE total_stock > 0 AND COALESCE(cost_price, 0) <= 0)     AS missing_cost
 		`).
-		Where("store_id = ? AND is_active = TRUE", storeID).
+		Where("store_id = ? AND is_active = TRUE AND deleted_at IS NULL", storeID).
 		Scan(&snap).Error
 	return snap, err
 }
@@ -199,7 +214,7 @@ func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, so
 			(ls.last_sold IS NULL OR ls.last_sold < ?) AS dead
 		`, soldBefore).
 		Joins("LEFT JOIN (?) ls ON ls.product_id = pv.id", lastSold).
-		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.total_stock > 0", storeID)
+		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.total_stock > 0 AND pv.deleted_at IS NULL", storeID)
 
 	var items []DeadStockItem
 	err := r.db.WithContext(ctx).
@@ -359,4 +374,73 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 		totalOrders += rv.Orders
 	}
 	return points, totalOrders, nil
+}
+
+// GetStockVelocity returns the top 20 active in-stock products ordered by urgency
+// (fewest days of stock first). avg_daily_sales is computed over the last 30 days;
+// days_of_stock is NULL when there are no recent sales (no velocity data).
+func (r PostgresRepository) GetStockVelocity(ctx context.Context, storeID string) ([]StockVelocityItem, error) {
+	var items []StockVelocityItem
+	err := r.db.WithContext(ctx).Raw(`
+		WITH velocity AS (
+			SELECT si.product_id,
+			       COALESCE(SUM(si.quantity), 0)::float / 30.0 AS avg_daily_sales
+			FROM sale_items si
+			JOIN sales s ON s.id = si.sale_id
+			WHERE s.store_id = ?
+			  AND s.sold_at >= NOW() - INTERVAL '30 days'
+			  AND s.status <> 'voided'
+			GROUP BY si.product_id
+		)
+		SELECT
+		    pv.id                                                      AS product_id,
+		    pv.name                                                    AS product_name,
+		    COALESCE(pv.total_stock, 0)::bigint                       AS current_stock,
+		    COALESCE(v.avg_daily_sales, 0)                            AS avg_daily_sales,
+		    CASE WHEN COALESCE(v.avg_daily_sales, 0) > 0
+		         THEN COALESCE(pv.total_stock, 0)::float / v.avg_daily_sales
+		         ELSE NULL END                                         AS days_of_stock,
+		    COALESCE(pv.min_stock, 0)::bigint                         AS min_stock,
+		    COALESCE(pv.max_stock, 0)::bigint                         AS max_stock,
+		    COALESCE(pv.cost_price, 0)                                AS cost_price
+		FROM product_view pv
+		LEFT JOIN velocity v ON v.product_id = pv.id
+		WHERE pv.store_id = ?
+		  AND pv.is_active = TRUE
+		  AND pv.deleted_at IS NULL
+		  AND COALESCE(pv.total_stock, 0) > 0
+		ORDER BY
+		    CASE WHEN COALESCE(v.avg_daily_sales, 0) > 0
+		         THEN COALESCE(pv.total_stock, 0)::float / v.avg_daily_sales
+		         ELSE 9999999 END ASC,
+		    pv.name ASC
+		LIMIT 20
+	`, storeID, storeID).Scan(&items).Error
+	return items, err
+}
+
+// GetOverstockItems returns active products whose current stock exceeds max_stock.
+// Only products with max_stock > 0 are included (unset threshold = no cap).
+// Ordered by capital value (excess units × cost) descending.
+func (r PostgresRepository) GetOverstockItems(ctx context.Context, storeID string) ([]OverstockItem, error) {
+	var items []OverstockItem
+	err := r.db.WithContext(ctx).
+		Table("product_view pv").
+		Select(`
+			pv.id                                                      AS product_id,
+			pv.name                                                    AS product_name,
+			COALESCE(pv.total_stock, 0)::bigint                       AS current_stock,
+			pv.max_stock::bigint                                       AS max_stock,
+			(COALESCE(pv.total_stock, 0) - pv.max_stock)::bigint      AS overstock_qty,
+			COALESCE(pv.cost_price, 0)                                AS cost_price,
+			(COALESCE(pv.total_stock, 0) - pv.max_stock) * COALESCE(pv.cost_price, 0) AS capital_value
+		`).
+		Where(
+			"pv.store_id = ? AND pv.is_active = TRUE AND pv.deleted_at IS NULL AND COALESCE(pv.max_stock, 0) > 0 AND COALESCE(pv.total_stock, 0) > pv.max_stock",
+			storeID,
+		).
+		Order("capital_value DESC, pv.name ASC").
+		Limit(10).
+		Find(&items).Error
+	return items, err
 }

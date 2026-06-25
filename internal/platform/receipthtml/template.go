@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"math"
 	"strings"
 )
 
@@ -24,6 +25,7 @@ type Config struct {
 	ShowQr        bool
 	QrSize        string // "small" | "medium" | "large"
 	PaperSize     string // "58mm" | "80mm" | "a4"
+	RoundAmount   bool   // when true, display monetary totals as whole baht (no satang)
 }
 
 // StoreInfo carries the store record fields used in the receipt header.
@@ -122,13 +124,37 @@ func formatThousands(v float64) string {
 	return out
 }
 
+// formatWholeBaht formats a float as "1,234" (no decimal) with comma thousands separators.
+func formatWholeBaht(v float64) string {
+	s := fmt.Sprintf("%.0f", math.Round(v))
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var b strings.Builder
+	n := len(s)
+	for i, c := range s {
+		if i > 0 && (n-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	out := b.String()
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
 // PaymentLabel maps a payment-method code to a Thai display label.
 func PaymentLabel(method string) string {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "cash":
 		return "เงินสด"
 	case "promptpay", "qr", "transfer":
-		return "พร้อมเพย์ / โอน"
+		return "พร้อมเพย์ / QR"
+	case "bank_transfer":
+		return "โอนเงิน"
 	case "card", "credit", "debit":
 		return "บัตรเครดิต / เดบิต"
 	case "truemoney":
@@ -279,12 +305,13 @@ const receiptTpl = `<!DOCTYPE html>
 
   <!-- TOTALS -->
   <div class="totals">
+    {{if gt .Sale.DiscountTotal 0.0}}
+    <div class="total-row"><span>ยอดรวมสินค้า</span><span class="v">{{baht .Sale.Subtotal}}</span></div>
+    <div class="total-row"><span>ส่วนลด</span><span class="v">-{{baht .Sale.DiscountTotal}}</span></div>
+    {{end}}
     {{if eq .Cfg.TaxMode "exclusive"}}
     <div class="total-row"><span>รวมก่อน VAT</span><span class="v">{{baht .Sale.AfterDiscount}}</span></div>
     <div class="total-row"><span>{{.Cfg.TaxLabel}} {{printf "%.0f" .Cfg.VatRate}}%</span><span class="v">{{baht .Sale.VatAmount}}</span></div>
-    {{end}}
-    {{if gt .Sale.DiscountTotal 0.0}}
-    <div class="total-row"><span>ส่วนลด</span><span class="v">{{baht .Sale.DiscountTotal}}</span></div>
     {{end}}
   </div>
 
@@ -292,11 +319,11 @@ const receiptTpl = `<!DOCTYPE html>
 
   <div class="grand">
     <span class="l">ยอดสุทธิ</span>
-    <span class="v">{{baht .Sale.GrandTotal}}</span>
+    <span class="v">{{bahtTotal .Sale.GrandTotal}}</span>
   </div>
   {{if gt .Sale.Paid 0.0}}
-  <div class="total-row"><span>รับเงิน</span><span class="v">{{baht .Sale.Paid}}</span></div>
-  <div class="total-row"><span>เงินทอน</span><span class="v">{{baht .Sale.Change}}</span></div>
+  <div class="total-row"><span>รับเงิน</span><span class="v">{{bahtTotal .Sale.Paid}}</span></div>
+  <div class="total-row"><span>เงินทอน</span><span class="v">{{bahtTotal .Sale.Change}}</span></div>
   {{end}}
 
   <hr class="divider"/>
@@ -368,9 +395,14 @@ func RenderReceiptHTML(sale SaleData, store StoreInfo, cfg Config) ([]byte, erro
 		return a
 	}
 
+	bahtTotalFn := func(v float64) string { return "฿" + formatThousands(v) }
+	if cfg.RoundAmount {
+		bahtTotalFn = func(v float64) string { return "฿" + formatWholeBaht(v) }
+	}
 	tpl, err := template.New("receipt").Funcs(template.FuncMap{
 		"money":     func(v float64) string { return fmt.Sprintf("%.2f", v) },
 		"baht":      func(v float64) string { return "฿" + formatThousands(v) },
+		"bahtTotal": bahtTotalFn,
 		"logoClass": logoClassFn,
 		"or":        orFn,
 		"printf":    fmt.Sprintf,

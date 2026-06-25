@@ -105,6 +105,20 @@ func (h Handler) CreateBankAccount(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "bank account created", acc)
 }
 
+func (h Handler) UpdateBankAccount(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("accountID")
+	var req UpdateBankAccountRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	acc, err := h.service.UpdateBankAccount(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req)
+	if err != nil {
+		return writeStoreError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "bank account updated", acc)
+}
+
 func (h Handler) DeleteBankAccount(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("accountID")

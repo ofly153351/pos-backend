@@ -96,6 +96,30 @@ type DebtSummary struct {
 	OverdueAmount    float64 `json:"overdue_amount"`
 }
 
+// AgingBucket is one row of the aging report: how many receivables fall in a given
+// days-past-due range and the total outstanding for that range.
+type AgingBucket struct {
+	Label  string  `json:"label"`
+	Count  int64   `json:"count"`
+	Amount float64 `json:"amount"`
+}
+
+// AgingCustomerEntry is one customer's total outstanding, bucketed by worst overdue.
+type AgingCustomerEntry struct {
+	CustomerID   string  `json:"customer_id"`
+	CustomerName string  `json:"customer_name"`
+	Outstanding  float64 `json:"outstanding"`
+	OldestBucket string  `json:"oldest_bucket"`
+	DaysOverdue  int     `json:"days_overdue"`
+}
+
+// AgingSummary is the full aging breakdown for a store.
+type AgingSummary struct {
+	Buckets   []AgingBucket        `json:"buckets"`
+	Customers []AgingCustomerEntry `json:"customers"`
+	Total     float64              `json:"total"`
+}
+
 // StatementContext is everything the statement PDF renderer needs: store + customer
 // header info plus all of the customer's non-cancelled credit sales (with payments).
 type StatementContext struct {

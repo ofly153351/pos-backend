@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/lifecycle"
 )
 
 // Phase 0 test coverage map (warehouse-scoped product inventory).
@@ -279,10 +280,18 @@ func (s *stubRepo) ListWarehouseStockRows(_ context.Context, _ string) ([]Wareho
 }
 
 // Inert implementations to satisfy the Repository interface.
-func (s *stubRepo) Create(_ context.Context, _ Warehouse) (Warehouse, error)     { return Warehouse{}, nil }
-func (s *stubRepo) ListByStore(_ context.Context, _ string) ([]Warehouse, error) { return nil, nil }
-func (s *stubRepo) Update(_ context.Context, _ Warehouse) (Warehouse, error)     { return Warehouse{}, nil }
-func (s *stubRepo) Delete(_ context.Context, _, _ string) error                  { return nil }
+func (s *stubRepo) Create(_ context.Context, _ Warehouse) (Warehouse, error) { return Warehouse{}, nil }
+func (s *stubRepo) ListByStore(_ context.Context, _ string, _ bool) ([]Warehouse, error) {
+	return nil, nil
+}
+func (s *stubRepo) Update(_ context.Context, _ Warehouse) (Warehouse, error) { return Warehouse{}, nil }
+func (s *stubRepo) Delete(_ context.Context, _, _ string) error              { return nil }
+func (s *stubRepo) GatherDeletionBlockers(_ context.Context, _, _ string) (lifecycle.BlockerCounts, error) {
+	return lifecycle.BlockerCounts{}, nil
+}
+func (s *stubRepo) ApplyDeletion(_ context.Context, _, _, _ string) (lifecycle.Assessment, string, error) {
+	return lifecycle.Assessment{}, "", nil
+}
 func (s *stubRepo) UserCanManageStore(_ context.Context, _, _, _ string) (bool, error) {
 	return false, nil
 }

@@ -15,6 +15,10 @@ type Location struct {
 	IsActive      bool      `json:"is_active" gorm:"column:is_active"`
 	CreatedAt     time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt     time.Time `json:"updated_at" gorm:"column:updated_at"`
+	// DeletedAt: see warehouse.Warehouse.DeletedAt — a plain *time.Time (NOT gorm.DeletedAt)
+	// so GORM never auto-filters; archived rows expose it so the FE can render the Archived
+	// state and badge. omitempty keeps live-row responses byte-identical to before.
+	DeletedAt *time.Time `json:"deleted_at,omitempty" gorm:"column:deleted_at"`
 
 	// Relations
 	WarehouseName string `json:"warehouse_name,omitempty" gorm:"-"`
@@ -48,6 +52,9 @@ type ListFilter struct {
 	Search      string
 	Page        int
 	Limit       int
+	// IncludeArchived returns soft-deleted (archived) locations as well. Off by default so
+	// management lists and operational selectors only see live locations (migration 047).
+	IncludeArchived bool
 }
 
 // ListResult is the paginated response for location lists.

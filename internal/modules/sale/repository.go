@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"pos-backend/internal/idgen"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -18,8 +20,18 @@ type Repository interface {
 	FindByIdempotencyKey(ctx context.Context, storeID, key string) (*Sale, error)
 	ListByStore(ctx context.Context, storeID string) ([]Sale, error)
 	GetByID(ctx context.Context, storeID, saleID string) (Sale, error)
+	VoidSale(ctx context.Context, storeID, saleID, actorUserID, reason, voidType string) error
+	CreateReturn(ctx context.Context, storeID, saleID, actorUserID string, req CreateReturnRequest) (SaleReturn, error)
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	GetStoreBankAccounts(ctx context.Context, storeID string) []StoreBankAccount
+}
+
+// StoreBankAccount is the seller bank info shown on rendered documents (read-only).
+type StoreBankAccount struct {
+	BankName    string `gorm:"column:bank_name"`
+	AccountNo   string `gorm:"column:account_no"`
+	AccountName string `gorm:"column:account_name"`
 }
 
 type PostgresRepository struct {
@@ -135,6 +147,13 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 		}
 		sale.TotalAmount = roundMoney(afterDiscount + sale.VATAmount)
 	}
+	// Round the final bill total to whole baht. The POS displays and collects integer
+	// totals — the cashier's "ยอดสุทธิ" and the customer's paid amount are both whole
+	// baht — so the payable is rounded half-up here, the single source of truth. This
+	// keeps the frontend's displayed total, the stored total, and the paid-amount check
+	// below in agreement (a frontend Math.round'd paid no longer falls short of a 2dp
+	// total). The sub-baht remainder is a rounding adjustment, consistent with cash handling.
+	sale.TotalAmount = math.Round(sale.TotalAmount)
 	sale.ChangeAmount = roundMoney(sale.PaidAmount - sale.TotalAmount)
 	if sale.ChangeAmount < 0 {
 		// Credit sales defer payment: the unpaid balance is tracked as a receivable
@@ -445,7 +464,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	var sales []Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
+		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, COALESCE(c.tax_id, '') AS customer_tax_id, COALESCE(c.branch, '') AS customer_branch, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at, s.voided_at, COALESCE(s.voided_by, '') AS voided_by, COALESCE(s.void_reason, '') AS void_reason, COALESCE(s.void_type, '') AS void_type", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -461,7 +480,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string)
 	var sale Sale
 	err := r.db.WithContext(ctx).
 		Table("sales s").
-		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at", storeExtra)).
+		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, COALESCE(c.tax_id, '') AS customer_tax_id, COALESCE(c.branch, '') AS customer_branch, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at, s.voided_at, COALESCE(s.voided_by, '') AS voided_by, COALESCE(s.void_reason, '') AS void_reason, COALESCE(s.void_type, '') AS void_type", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
@@ -480,7 +499,431 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, saleID string)
 		Find(&sale.Items).Error; err != nil {
 		return Sale{}, err
 	}
+	// Returns history (migration 052) — best-effort; header still returns if empty.
+	var returns []SaleReturn
+	if err := r.db.WithContext(ctx).
+		Table("sale_returns sr").
+		Select("sr.id, sr.store_id, sr.sale_id, sr.return_number, sr.refund_method, sr.refund_amount, COALESCE(sr.reason,'') AS reason, sr.created_by, COALESCE(u.full_name,'') AS created_by_name, sr.created_at").
+		Joins("LEFT JOIN users u ON u.id = sr.created_by").
+		Where("sr.sale_id = ? AND sr.store_id = ?", sale.ID, storeID).
+		Order("sr.created_at ASC").
+		Find(&returns).Error; err == nil && len(returns) > 0 {
+		ids := make([]string, len(returns))
+		idx := make(map[string]int, len(returns))
+		for i := range returns {
+			ids[i] = returns[i].ID
+			idx[returns[i].ID] = i
+		}
+		var rItems []SaleReturnItem
+		if err := r.db.WithContext(ctx).
+			Model(&SaleReturnItem{}).
+			Where("return_id IN ?", ids).
+			Find(&rItems).Error; err == nil {
+			for _, it := range rItems {
+				if i, ok := idx[it.ReturnID]; ok {
+					returns[i].Items = append(returns[i].Items, it)
+				}
+			}
+		}
+		sale.Returns = returns
+	}
 	return sale, nil
+}
+
+// VoidSale atomically reverses a completed sale: restores stock, creates RETURN
+// movements, reverses promotion usage, and marks the sale voided. Follows the
+// same locking discipline as creditsale.Cancel.
+func (r PostgresRepository) VoidSale(ctx context.Context, storeID, saleID, actorUserID, reason, voidType string) error {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback()
+
+	// Lock the sale row to serialize concurrent void attempts.
+	var header struct {
+		ID            string  `gorm:"column:id"`
+		Status        string  `gorm:"column:status"`
+		PaymentMethod string  `gorm:"column:payment_method"`
+		StoreID       string  `gorm:"column:store_id"`
+	}
+	if err := tx.Table("sales").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id, status, payment_method, store_id").
+		Where("store_id = ? AND id = ?", storeID, saleID).
+		Take(&header).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSaleNotFound
+		}
+		return err
+	}
+	if header.Status == SaleStatusVoided {
+		return ErrSaleAlreadyVoided
+	}
+	// Credit sales have a separate cancellation flow (with payment validation).
+	if header.PaymentMethod == "credit" {
+		var creditCount int64
+		tx.Table("credit_sales").Where("sale_id = ? AND store_id = ?", saleID, storeID).Count(&creditCount)
+		if creditCount > 0 {
+			return ErrCannotVoidCreditSale
+		}
+	}
+
+	now := time.Now().UTC()
+
+	// 1. Restock by reversing the exact SALE stock movements (deterministic order).
+	type mv struct {
+		ProductID      string `gorm:"column:product_id"`
+		LocationID     string `gorm:"column:location_id"`
+		QuantityChange int    `gorm:"column:quantity_change"`
+	}
+	var movements []mv
+	if err := tx.Table("stock_movements").
+		Select("product_id, location_id, quantity_change").
+		Where("reference_id = ? AND type = ?", saleID, "SALE").
+		Order("product_id, location_id").
+		Find(&movements).Error; err != nil {
+		return err
+	}
+	for _, m := range movements {
+		restore := -m.QuantityChange
+		if restore <= 0 {
+			continue
+		}
+		res := tx.Exec(`UPDATE stocks SET quantity = quantity + ?, updated_at = NOW() WHERE product_id = ? AND location_id = ?`,
+			restore, m.ProductID, m.LocationID)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			if err := tx.Exec(`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+				ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stocks.quantity + EXCLUDED.quantity, updated_at = NOW()`,
+				idgen.Generate(idgen.PrefixStock), storeID, m.ProductID, m.LocationID, restore).Error; err != nil {
+				return err
+			}
+		}
+		note := "sale void restock"
+		if voidType == "return" {
+			note = "sale return restock"
+		}
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              idgen.Generate(idgen.PrefixStockMovement),
+			"store_id":        storeID,
+			"product_id":      m.ProductID,
+			"location_id":     m.LocationID,
+			"quantity_change": restore,
+			"type":            "RETURN",
+			"reference_id":    saleID,
+			"note":            note,
+			"created_by":      actorUserID,
+			"created_at":      now,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	// 2. Reverse promotion usage.
+	type promoUsage struct {
+		PromotionID    string  `gorm:"column:promotion_id"`
+		DiscountAmount float64 `gorm:"column:discount_amount"`
+	}
+	var usages []promoUsage
+	_ = tx.Table("promotion_usages").
+		Select("promotion_id, discount_amount").
+		Where("sale_id = ? AND store_id = ?", saleID, storeID).
+		Find(&usages).Error
+	for _, u := range usages {
+		tx.Exec(`UPDATE promotions SET usage_count = GREATEST(usage_count - 1, 0), discount_given_total = GREATEST(discount_given_total - ?, 0) WHERE id = ? AND store_id = ?`,
+			u.DiscountAmount, u.PromotionID, storeID)
+	}
+	tx.Exec(`DELETE FROM promotion_usages WHERE sale_id = ? AND store_id = ?`, saleID, storeID)
+
+	// 3. Mark the sale voided with audit trail.
+	if err := tx.Table("sales").
+		Where("id = ? AND store_id = ?", saleID, storeID).
+		Updates(map[string]any{
+			"status":      SaleStatusVoided,
+			"voided_at":   now,
+			"voided_by":   actorUserID,
+			"void_reason": reason,
+			"void_type":   voidType,
+		}).Error; err != nil {
+		return err
+	}
+
+	return tx.Commit().Error
+}
+
+// CreateReturn records a partial-or-full return against a completed sale WITHOUT
+// voiding it. It restocks only the returned quantities (to the same location each
+// product was sold from), writes RETURN stock movements, bumps each line's
+// returned_quantity, persists a sale_returns record with its line items, and
+// recomputes the sale status (partially_returned / fully_returned). The refund is
+// computed authoritatively from the original sale lines — client amounts are
+// ignored. Promotions are NOT reversed on partial return (documented limitation).
+func (r PostgresRepository) CreateReturn(ctx context.Context, storeID, saleID, actorUserID string, req CreateReturnRequest) (SaleReturn, error) {
+	if len(req.Items) == 0 {
+		return SaleReturn{}, ErrInvalidReturnItems
+	}
+	refundMethod := strings.TrimSpace(strings.ToLower(req.RefundMethod))
+	switch refundMethod {
+	case "cash", "transfer", "card", "qr":
+	case "":
+		refundMethod = "cash"
+	default:
+		return SaleReturn{}, ErrInvalidRefundMethod
+	}
+
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return SaleReturn{}, tx.Error
+	}
+	defer tx.Rollback()
+
+	// Lock the sale row to serialize concurrent return/void attempts.
+	var header struct {
+		ID            string `gorm:"column:id"`
+		Status        string `gorm:"column:status"`
+		PaymentMethod string `gorm:"column:payment_method"`
+		LocationID    string `gorm:"column:location_id"`
+	}
+	if err := tx.Table("sales").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id, status, payment_method, COALESCE(location_id, '') AS location_id").
+		Where("store_id = ? AND id = ?", storeID, saleID).
+		Take(&header).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return SaleReturn{}, ErrSaleNotFound
+		}
+		return SaleReturn{}, err
+	}
+	if header.Status == SaleStatusVoided {
+		return SaleReturn{}, ErrSaleVoidedNoReturn
+	}
+	if header.PaymentMethod == "credit" {
+		var creditCount int64
+		tx.Table("credit_sales").Where("sale_id = ? AND store_id = ?", saleID, storeID).Count(&creditCount)
+		if creditCount > 0 {
+			return SaleReturn{}, ErrCannotVoidCreditSale
+		}
+	}
+
+	// Load the original lines (with running returned tally) and index them.
+	var lines []SaleItem
+	if err := tx.Table("sale_items").
+		Select("id, product_id, product_name, sku, quantity, unit_price, line_total, COALESCE(returned_quantity, 0) AS returned_quantity").
+		Where("sale_id = ?", saleID).
+		Find(&lines).Error; err != nil {
+		return SaleReturn{}, err
+	}
+	byLineID := make(map[string]*SaleItem, len(lines))
+	byProduct := make(map[string]*SaleItem, len(lines))
+	for i := range lines {
+		byLineID[lines[i].ID] = &lines[i]
+		// First line per product wins as the product-id fallback target.
+		if _, ok := byProduct[lines[i].ProductID]; !ok {
+			byProduct[lines[i].ProductID] = &lines[i]
+		}
+	}
+
+	// Map each product to the location it was sold from (reverse of the SALE
+	// movement), so the restock lands where the deduction happened.
+	type mvLoc struct {
+		ProductID  string `gorm:"column:product_id"`
+		LocationID string `gorm:"column:location_id"`
+	}
+	var saleMovements []mvLoc
+	if err := tx.Table("stock_movements").
+		Select("product_id, location_id").
+		Where("reference_id = ? AND type = ?", saleID, "SALE").
+		Find(&saleMovements).Error; err != nil {
+		return SaleReturn{}, err
+	}
+	productLoc := make(map[string]string, len(saleMovements))
+	for _, m := range saleMovements {
+		if _, ok := productLoc[m.ProductID]; !ok {
+			productLoc[m.ProductID] = m.LocationID
+		}
+	}
+
+	now := time.Now().UTC()
+	returnID := newSaleReturnID()
+	var refundTotal float64
+	var returnItems []SaleReturnItem
+
+	// Validate + plan each requested line (no mutation yet).
+	for _, reqItem := range req.Items {
+		if reqItem.Quantity <= 0 {
+			continue
+		}
+		var line *SaleItem
+		if reqItem.SaleItemID != "" {
+			line = byLineID[reqItem.SaleItemID]
+		}
+		if line == nil && reqItem.ProductID != "" {
+			line = byProduct[reqItem.ProductID]
+		}
+		if line == nil {
+			return SaleReturn{}, ErrReturnItemNotInSale
+		}
+		remaining := line.Quantity - line.ReturnedQuantity
+		if remaining <= 0 {
+			continue
+		}
+		if reqItem.Quantity > remaining {
+			return SaleReturn{}, ErrReturnQtyExceeds
+		}
+		// Effective per-unit price actually paid on this line (after item-level
+		// discounts) = line_total / quantity. Matches the figure shown in the UI.
+		effUnit := line.UnitPrice
+		if line.Quantity > 0 {
+			effUnit = line.LineTotal / float64(line.Quantity)
+		}
+		lineRefund := roundMoney(float64(reqItem.Quantity) * effUnit)
+		refundTotal += lineRefund
+		returnItems = append(returnItems, SaleReturnItem{
+			ID:          newSaleReturnItemID(),
+			ReturnID:    returnID,
+			SaleItemID:  line.ID,
+			ProductID:   line.ProductID,
+			ProductName: line.ProductName,
+			SKU:         line.SKU,
+			Quantity:    reqItem.Quantity,
+			UnitPrice:   roundMoney(effUnit),
+			LineRefund:  lineRefund,
+		})
+		// Reserve so a duplicate product/line in the same request can't double-spend.
+		line.ReturnedQuantity += reqItem.Quantity
+	}
+	if len(returnItems) == 0 {
+		return SaleReturn{}, ErrNothingToReturn
+	}
+	refundTotal = roundMoney(refundTotal)
+
+	// Apply: restock + RETURN movement + bump line tally.
+	for _, ri := range returnItems {
+		loc := productLoc[ri.ProductID]
+		if loc == "" {
+			loc = header.LocationID
+		}
+		if loc == "" {
+			return SaleReturn{}, ErrReturnLocationMissing
+		}
+		res := tx.Exec(`UPDATE stocks SET quantity = quantity + ?, updated_at = NOW() WHERE product_id = ? AND location_id = ?`,
+			ri.Quantity, ri.ProductID, loc)
+		if res.Error != nil {
+			return SaleReturn{}, res.Error
+		}
+		if res.RowsAffected == 0 {
+			if err := tx.Exec(`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+				ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stocks.quantity + EXCLUDED.quantity, updated_at = NOW()`,
+				idgen.Generate(idgen.PrefixStock), storeID, ri.ProductID, loc, ri.Quantity).Error; err != nil {
+				return SaleReturn{}, err
+			}
+		}
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              newStockMovementID(),
+			"store_id":        storeID,
+			"product_id":      ri.ProductID,
+			"location_id":     loc,
+			"quantity_change": ri.Quantity,
+			"type":            "RETURN",
+			"reference_id":    saleID,
+			"note":            "sale partial return restock",
+			"created_by":      actorUserID,
+			"created_at":      now,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return SaleReturn{}, err
+		}
+		if err := tx.Exec(`UPDATE sale_items SET returned_quantity = COALESCE(returned_quantity,0) + ? WHERE id = ?`,
+			ri.Quantity, ri.SaleItemID).Error; err != nil {
+			return SaleReturn{}, err
+		}
+	}
+
+	// Persist the return header + items.
+	saleReturn := SaleReturn{
+		ID:           returnID,
+		StoreID:      storeID,
+		SaleID:       saleID,
+		ReturnNumber: newReturnNumber(now),
+		RefundMethod: refundMethod,
+		RefundAmount: refundTotal,
+		Reason:       strings.TrimSpace(req.Reason),
+		CreatedBy:    actorUserID,
+		CreatedAt:    now,
+		Items:        returnItems,
+	}
+	if err := tx.Table("sale_returns").Create(map[string]any{
+		"id":            saleReturn.ID,
+		"store_id":      saleReturn.StoreID,
+		"sale_id":       saleReturn.SaleID,
+		"return_number": saleReturn.ReturnNumber,
+		"refund_method": saleReturn.RefundMethod,
+		"refund_amount": saleReturn.RefundAmount,
+		"reason":        saleReturn.Reason,
+		"created_by":    saleReturn.CreatedBy,
+		"created_at":    saleReturn.CreatedAt,
+	}).Error; err != nil {
+		return SaleReturn{}, err
+	}
+	for _, ri := range returnItems {
+		if err := tx.Table("sale_return_items").Create(map[string]any{
+			"id":           ri.ID,
+			"return_id":    ri.ReturnID,
+			"sale_item_id": ri.SaleItemID,
+			"product_id":   ri.ProductID,
+			"product_name": ri.ProductName,
+			"sku":          ri.SKU,
+			"quantity":     ri.Quantity,
+			"unit_price":   ri.UnitPrice,
+			"line_refund":  ri.LineRefund,
+		}).Error; err != nil {
+			return SaleReturn{}, err
+		}
+	}
+
+	// Recompute status from the running tally: all units returned → fully_returned.
+	var tally struct {
+		TotalQty      int `gorm:"column:total_qty"`
+		TotalReturned int `gorm:"column:total_returned"`
+	}
+	if err := tx.Table("sale_items").
+		Select("COALESCE(SUM(quantity),0) AS total_qty, COALESCE(SUM(returned_quantity),0) AS total_returned").
+		Where("sale_id = ?", saleID).
+		Take(&tally).Error; err != nil {
+		return SaleReturn{}, err
+	}
+	newStatus := SaleStatusPartiallyReturned
+	if tally.TotalReturned >= tally.TotalQty {
+		newStatus = SaleStatusFullyReturned
+	}
+	if err := tx.Table("sales").
+		Where("id = ? AND store_id = ?", saleID, storeID).
+		Update("status", newStatus).Error; err != nil {
+		return SaleReturn{}, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return SaleReturn{}, err
+	}
+	return saleReturn, nil
+}
+
+// GetStoreBankAccounts mirrors the document module's seller bank lookup so a
+// document rendered from a sale shows the same bank block. Best-effort: a query
+// error yields an empty slice (the document simply omits the bank section).
+func (r PostgresRepository) GetStoreBankAccounts(ctx context.Context, storeID string) []StoreBankAccount {
+	var rows []StoreBankAccount
+	_ = r.db.WithContext(ctx).Raw(
+		"SELECT bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? ORDER BY created_at ASC",
+		storeID,
+	).Scan(&rows).Error
+	return rows
 }
 
 func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {

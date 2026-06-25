@@ -179,6 +179,7 @@ type SupplierProductResponse struct {
 	ProductID     string  `json:"product_id"`
 	ProductName   string  `json:"product_name"`
 	ProductSKU    string  `json:"product_sku"`
+	ProductBarcode string `json:"barcode"`
 	SupplierSKU   string  `json:"supplier_sku"`
 	SupplierPrice float64 `json:"supplier_price"`
 	CreatedAt     string  `json:"created_at"`

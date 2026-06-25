@@ -24,12 +24,14 @@ func newCreditSaleHandler(db *gorm.DB) creditsale.Handler {
 
 func registerCreditSaleRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.creditSaleHandler.(creditsale.Handler)
-	// /summary before /:creditSaleID so Fiber matches it first.
+	// /summary and /aging before /:creditSaleID so Fiber matches them first.
 	protected.Get("/stores/:storeID/credit-sales/summary", handler.Summary)
+	protected.Get("/stores/:storeID/credit-sales/aging", handler.Aging)
 	protected.Get("/stores/:storeID/credit-sales", handler.List)
 	protected.Post("/stores/:storeID/credit-sales", handler.Create)
 	protected.Get("/stores/:storeID/credit-sales/:creditSaleID", handler.GetByID)
 	protected.Post("/stores/:storeID/credit-sales/:creditSaleID/payments", handler.AddPayment)
 	protected.Post("/stores/:storeID/credit-sales/:creditSaleID/cancel", handler.Cancel)
 	protected.Get("/stores/:storeID/credit-sales/:creditSaleID/statement", handler.Statement)
+	protected.Get("/stores/:storeID/credit-sales/:creditSaleID/bill", handler.Bill)
 }

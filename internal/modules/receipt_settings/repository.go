@@ -75,6 +75,7 @@ func (r PostgresRepository) Upsert(ctx context.Context, settings ReceiptSettings
 			"date_format":           settings.DateFormat,
 			"time_format":           settings.TimeFormat,
 			"currency_position":     settings.CurrencyPosition,
+			"round_amount":          settings.RoundAmount,
 			"updated_at":            settings.UpdatedAt,
 		})
 	if result.Error != nil {

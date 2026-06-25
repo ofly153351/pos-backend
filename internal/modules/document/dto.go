@@ -43,6 +43,24 @@ type UpdateStatusRequest struct {
 	Status DocumentStatus `json:"status"`
 }
 
+type ConvertRequest struct {
+	TargetType DocumentType `json:"target_type"`
+}
+
+// RelatedDoc is a lightweight projection of a document in the same conversion
+// family (linked through source_document_id), used to render the lineage timeline.
+type RelatedDoc struct {
+	ID               string         `json:"id"`
+	DocumentNo       string         `json:"document_no"`
+	DocumentNoFull   string         `json:"document_no_full"`
+	Type             DocumentType   `json:"type"`
+	Status           DocumentStatus `json:"status"`
+	PaymentStatus    PaymentStatus  `json:"payment_status"`
+	DocumentDate     time.Time      `json:"document_date"`
+	TotalAmount      float64        `json:"total_amount"`
+	SourceDocumentID *string        `json:"source_document_id,omitempty"`
+}
+
 type BulkActionRequest struct {
 	IDs    []string        `json:"ids"`
 	Action string          `json:"action"` // DELETE | SET_STATUS

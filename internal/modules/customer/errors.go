@@ -10,4 +10,5 @@ var (
 	ErrCustomerNotFound        = errors.New("customer not found")
 	ErrCustomerStoreIDRequired = errors.New("storeID is required")
 	ErrCustomerForbidden       = errors.New("user cannot operate this store")
+	ErrShippingAddressNotFound = errors.New("shipping address not found")
 )

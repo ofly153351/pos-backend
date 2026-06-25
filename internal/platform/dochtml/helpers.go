@@ -71,3 +71,7 @@ func isTaxDoc(docType string) bool {
 
 func titleTH(docType string) string { return docTitleTH[docType] }
 func titleEN(docType string) string { return docTitleEN[docType] }
+
+// Short aliases used by the unified template builder.
+func money(f float64) string      { return formatMoney(f) }
+func thaiDate(t time.Time) string { return fmtThaiDate(t) }

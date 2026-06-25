@@ -108,9 +108,17 @@ type TransferResult struct {
 }
 
 type AdjustStockRequest struct {
-	ProductID      string `json:"product_id"`
-	LocationID     string `json:"location_id"`
-	PhysicalQty    int    `json:"physical_quantity"`
+	ProductID   string `json:"product_id"`
+	LocationID  string `json:"location_id"`
+	PhysicalQty int    `json:"physical_quantity"`
+	// ExpectedQty is the caller's view of the CURRENT quantity at LocationID, captured
+	// when the count/adjustment was prepared. SET_ACTUAL requires it: inside the locked
+	// transaction the service rejects the write unless ExpectedQty == the live location
+	// quantity. This is an optimistic lock that (a) makes it impossible to write a
+	// store-wide aggregate into one location — a grand total never equals the location's
+	// own quantity when stock is split — and (b) detects a stale count (stock changed
+	// after counting). A nil value is rejected for SET_ACTUAL (ErrStockExpectedRequired).
+	ExpectedQty    *int   `json:"expected_quantity"`
 	ReferenceID    string `json:"reference_id"`
 	MovementType   string `json:"movement_type"`
 	Reason         string `json:"reason"`
@@ -151,6 +159,14 @@ var (
 	ErrStockReasonNoteRequired = errors.New("กรุณาระบุรายละเอียดเมื่อเลือกเหตุผล \"อื่น ๆ\"")
 	ErrStockExceedsAvailable   = errors.New("จำนวนที่ต้องการลดมากกว่าสต็อกคงเหลือในตำแหน่งนี้")
 	ErrStockNoChange           = errors.New("ยอดจริงเท่ากับยอดปัจจุบัน ไม่มีการเปลี่ยนแปลงสต็อก")
+	// ErrStockExpectedRequired: a SET_ACTUAL adjustment must declare expected_quantity
+	// (the location's current on-hand). Without it the server cannot tell a per-location
+	// count from a store-wide total, so it refuses rather than risk inflating one location.
+	ErrStockExpectedRequired = errors.New("กรุณายืนยันยอดคงเหลือปัจจุบันของตำแหน่งก่อนตั้งยอดจริง")
+	// ErrStockStaleCount: expected_quantity does not match the live location quantity. The
+	// stock at this location changed after counting, or a store-wide total was sent into a
+	// single location. The caller must recount the specific location.
+	ErrStockStaleCount = errors.New("ยอดคงเหลือจริงของตำแหน่งนี้ไม่ตรงกับที่นับไว้ (อาจมีสต็อกหลายตำแหน่งหรือมีการเคลื่อนไหวระหว่างนับ) กรุณาตรวจสอบและนับใหม่ตามตำแหน่ง")
 	// ErrStockIdempotencyConflict: the same idempotency key was reused with a DIFFERENT
 	// request (product/location/quantity/type) — reject rather than return the original.
 	ErrStockIdempotencyConflict = errors.New("รหัสคำขอนี้ถูกใช้ไปแล้วกับรายการที่ไม่ตรงกัน")

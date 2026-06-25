@@ -18,8 +18,10 @@ type Repository interface {
 	ListByUser(ctx context.Context, userID, role string) ([]Store, error)
 	Update(ctx context.Context, storeID string, update Store) error
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	UserHasStoreAccess(ctx context.Context, storeID, userID, role string) (bool, error)
 	ListBankAccounts(ctx context.Context, storeID string) ([]StoreBankAccount, error)
 	CreateBankAccount(ctx context.Context, acc StoreBankAccount) (StoreBankAccount, error)
+	UpdateBankAccount(ctx context.Context, storeID, id string, updates map[string]interface{}) (StoreBankAccount, error)
 	DeleteBankAccount(ctx context.Context, storeID, id string) error
 }
 
@@ -387,6 +389,22 @@ func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, use
 	return count > 0, nil
 }
 
+func (r PostgresRepository) UserHasStoreAccess(ctx context.Context, storeID, userID, role string) (bool, error) {
+	if role == "platform_admin" {
+		return true, nil
+	}
+
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("store_members").
+		Where("store_id = ? AND user_id = ?", storeID, userID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool, error) {
 	type columnLookup struct {
 		Exists bool `gorm:"column:exists"`
@@ -412,13 +430,32 @@ func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool
 
 func (r PostgresRepository) ListBankAccounts(ctx context.Context, storeID string) ([]StoreBankAccount, error) {
 	var accounts []StoreBankAccount
-	err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Order("created_at ASC").Find(&accounts).Error
+	err := r.db.WithContext(ctx).
+		Where("store_id = ?", storeID).
+		Order("is_default DESC, created_at ASC").
+		Find(&accounts).Error
 	return accounts, err
 }
 
 func (r PostgresRepository) CreateBankAccount(ctx context.Context, acc StoreBankAccount) (StoreBankAccount, error) {
-	acc.CreatedAt = time.Now()
+	now := time.Now()
+	acc.CreatedAt = now
+	acc.UpdatedAt = now
 	if err := r.db.WithContext(ctx).Create(&acc).Error; err != nil {
+		return StoreBankAccount{}, err
+	}
+	return acc, nil
+}
+
+func (r PostgresRepository) UpdateBankAccount(ctx context.Context, storeID, id string, updates map[string]interface{}) (StoreBankAccount, error) {
+	updates["updated_at"] = time.Now()
+	if err := r.db.WithContext(ctx).Model(&StoreBankAccount{}).
+		Where("id = ? AND store_id = ?", id, storeID).
+		Updates(updates).Error; err != nil {
+		return StoreBankAccount{}, err
+	}
+	var acc StoreBankAccount
+	if err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&acc).Error; err != nil {
 		return StoreBankAccount{}, err
 	}
 	return acc, nil

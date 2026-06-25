@@ -139,11 +139,14 @@ func TestRenderReceipt_PaymentLabelAutofill(t *testing.T) {
 
 func TestPaymentLabel(t *testing.T) {
 	cases := map[string]string{
-		"cash":      "เงินสด",
-		"promptpay": "พร้อมเพย์ / โอน",
-		"card":      "บัตรเครดิต / เดบิต",
-		"":          "-",
-		"weird":     "weird",
+		"cash":          "เงินสด",
+		"promptpay":     "พร้อมเพย์ / QR",
+		"qr":            "พร้อมเพย์ / QR",
+		"transfer":      "พร้อมเพย์ / QR",
+		"bank_transfer": "โอนเงิน",
+		"card":          "บัตรเครดิต / เดบิต",
+		"":              "-",
+		"weird":         "weird",
 	}
 	for in, want := range cases {
 		if got := receipthtml.PaymentLabel(in); got != want {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"pos-backend/internal/idgen"
@@ -15,12 +16,33 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("document not found")
-	ErrForbidden    = errors.New("forbidden")
-	ErrInvalidInput = errors.New("invalid input")
-	ErrNoItems      = errors.New("document must have at least one item")
-	ErrBadAction    = errors.New("unknown bulk action")
+	ErrNotFound          = errors.New("document not found")
+	ErrForbidden         = errors.New("forbidden")
+	ErrInvalidInput      = errors.New("invalid input")
+	ErrNoItems           = errors.New("document must have at least one item")
+	ErrBadAction         = errors.New("unknown bulk action")
+	ErrInvalidConversion = errors.New("conversion not allowed for this document type")
 )
+
+// allowedConversions is the document workflow matrix: which target types a given
+// source type may be converted into. Arbitrary conversions that break the
+// business workflow are rejected (ErrInvalidConversion).
+var allowedConversions = map[DocumentType][]DocumentType{
+	TypeQuotation:     {TypeInvoice},
+	TypeInvoice:       {TypeReceipt, TypeTaxInvoice, TypeDeliveryOrder, TypeCreditNote},
+	TypeReceipt:       {TypeTaxInvoice, TypeCreditNote},
+	TypeDeliveryOrder: {TypeInvoice},
+	TypeTaxInvoice:    {TypeCreditNote},
+}
+
+func canConvert(from, to DocumentType) bool {
+	for _, t := range allowedConversions[from] {
+		if t == to {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	PrefixDocument     = "doc"
@@ -166,13 +188,10 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		deliveryDate = &t
 	}
 
-	// Generate document number
-	seq, _ := s.repo.NextSeq(storeID, req.Type)
+	// Document number is generated per-attempt inside the create-retry loop below.
 	prefix := typePrefix(req.Type)
 	now := time.Now()
 	buddhistYear := now.Year() + 543
-	docNo := fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
-	docNoFull := fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
 
 	// Build items + totals (round to 2 dp to avoid float64 precision drift)
 	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
@@ -215,8 +234,6 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	doc := &Document{
 		ID:              idgen.Generate(PrefixDocument),
 		StoreID:         storeID,
-		DocumentNo:      docNo,
-		DocumentNoFull:  docNoFull,
 		Type:            req.Type,
 		Status:          StatusPending,
 		PaymentStatus:   PaymentUnpaid,
@@ -249,10 +266,36 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CreatedBy:      actor.UserID,
 	}
 
-	if err := s.repo.Create(doc); err != nil {
-		return nil, err
+	// Assign the document number and insert, retrying on a unique-violation: a
+	// concurrent create (or a NextSeq race) can hand two documents the same number,
+	// so step the sequence forward and try again rather than 500-ing.
+	const maxDocNoAttempts = 6
+	var createErr error
+	for attempt := 0; attempt < maxDocNoAttempts; attempt++ {
+		seq, _ := s.repo.NextSeq(storeID, req.Type)
+		seq += int64(attempt)
+		doc.DocumentNo = fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
+		doc.DocumentNoFull = fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
+		createErr = s.repo.Create(doc)
+		if createErr == nil {
+			return doc, nil
+		}
+		if !isDuplicateDocNo(createErr) {
+			return nil, createErr
+		}
 	}
-	return doc, nil
+	return nil, createErr
+}
+
+// isDuplicateDocNo reports whether err is a Postgres unique-violation (SQLSTATE
+// 23505) — driver-agnostic string check so the create-retry loop stays decoupled
+// from the concrete pg driver type.
+func isDuplicateDocNo(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "23505") || strings.Contains(msg, "duplicate key")
 }
 
 func (s Service) UpdateDocumentStatus(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateStatusRequest) error {
@@ -311,6 +354,69 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
 	})
+}
+
+// RelatedDocuments returns every document in the same conversion family as id —
+// the lineage reachable through source_document_id links (e.g. Quotation → Invoice
+// → Delivery Order → Tax Invoice). It walks up to the family root, then collects
+// the whole subtree, ordered chronologically for a timeline view. Both walks are
+// bounded so a malformed/cyclic link graph can never loop forever.
+func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeID, id string) ([]RelatedDoc, error) {
+	if err := s.ensureAccess(actor, storeID); err != nil {
+		return nil, err
+	}
+
+	// 1. Climb to the family root following source_document_id.
+	root := id
+	seen := map[string]bool{id: true}
+	for i := 0; i < 50; i++ {
+		var row struct{ SourceDocumentID *string }
+		s.db.WithContext(ctx).Model(&Document{}).
+			Select("source_document_id").
+			Where("store_id = ? AND id = ?", storeID, root).
+			Scan(&row)
+		if row.SourceDocumentID == nil || *row.SourceDocumentID == "" || seen[*row.SourceDocumentID] {
+			break
+		}
+		var cnt int64
+		s.db.WithContext(ctx).Model(&Document{}).
+			Where("store_id = ? AND id = ?", storeID, *row.SourceDocumentID).
+			Count(&cnt)
+		if cnt == 0 {
+			break // dangling parent — stop here
+		}
+		root = *row.SourceDocumentID
+		seen[*row.SourceDocumentID] = true
+	}
+
+	// 2. Breadth-first collect the whole subtree under the root.
+	inFamily := map[string]bool{root: true}
+	family := []string{root}
+	frontier := []string{root}
+	for len(frontier) > 0 && len(family) < 200 {
+		var kids []string
+		s.db.WithContext(ctx).Model(&Document{}).
+			Where("store_id = ? AND source_document_id IN ?", storeID, frontier).
+			Pluck("id", &kids)
+		next := kids[:0:0]
+		for _, k := range kids {
+			if !inFamily[k] {
+				inFamily[k] = true
+				family = append(family, k)
+				next = append(next, k)
+			}
+		}
+		frontier = next
+	}
+
+	// 3. Project the family, ordered as a chronological lifecycle.
+	var out []RelatedDoc
+	s.db.WithContext(ctx).Model(&Document{}).
+		Select("id, document_no, document_no_full, type, status, payment_status, document_date, total_amount, source_document_id").
+		Where("store_id = ? AND id IN ?", storeID, family).
+		Order("document_date ASC, created_at ASC").
+		Scan(&out)
+	return out, nil
 }
 
 func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) error {
@@ -462,19 +568,75 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	return taxDoc, nil
 }
 
-// ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
-func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+// Convert creates a new document of targetType from an existing one, copying its
+// line items, customer snapshot, VAT rate and notes, and linking back to the
+// source via SourceDocumentID. The (source → target) pair must be permitted by
+// allowedConversions. This is a document-level copy — pricing / VAT / accounting
+// are NOT altered (a CREDIT_NOTE is copied as-is, not auto-negated).
+func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType) (*Document, error) {
 	src, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return nil, err
 	}
-	if src.Type != TypeInvoice {
-		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
+	if !canConvert(src.Type, target) {
+		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
-	return s.createTaxInvoiceFrom(ctx, actor, storeID, src)
+	req := buildConversionRequest(src, target)
+	// A DELIVERY_ORDER ships to the customer's saved delivery profile, not their
+	// billing snapshot — overlay it when one exists (blank fields keep the fallback).
+	if target == TypeDeliveryOrder && src.CustomerID != "" {
+		s.applyCustomerShipping(ctx, storeID, src.CustomerID, &req)
+	}
+	return s.CreateDocument(ctx, actor, storeID, req)
 }
 
-func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
+// applyCustomerShipping overlays the customer's shipping profile onto a delivery
+// order request. Each field falls back to whatever buildConversionRequest already
+// set (the billing snapshot) when the shipping value is blank.
+func (s Service) applyCustomerShipping(ctx context.Context, storeID, customerID string, req *CreateDocumentRequest) {
+	var sh struct {
+		Contact    string
+		Phone      string
+		Address    string
+		Province   string
+		District   string
+		PostalCode string
+	}
+	_ = s.db.WithContext(ctx).Raw(
+		`SELECT COALESCE(shipping_contact,'') AS contact, COALESCE(shipping_phone,'') AS phone,
+		        COALESCE(shipping_address,'') AS address, COALESCE(shipping_province,'') AS province,
+		        COALESCE(shipping_district,'') AS district, COALESCE(shipping_postal_code,'') AS postal_code
+		   FROM customers WHERE id = ? AND store_id = ?`,
+		customerID, storeID,
+	).Scan(&sh)
+
+	if sh.Contact != "" {
+		req.DeliveryContact = sh.Contact
+	}
+	if sh.Phone != "" {
+		req.DeliveryPhone = sh.Phone
+	}
+	if addr := joinNonEmpty(" ", sh.Address, sh.District, sh.Province, sh.PostalCode); addr != "" {
+		req.DeliveryAddress = addr
+	}
+}
+
+// joinNonEmpty joins the trimmed, non-blank parts with sep.
+func joinNonEmpty(sep string, parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+// buildConversionRequest maps a source document to a CreateDocumentRequest for the
+// target type. SourceDocumentID is always set (invisible link powering the document
+// timeline); only DELIVERY_ORDER carries the extra visible delivery / reference
+// fields, preserving the previously-rendered output of the other conversions.
+func buildConversionRequest(src *Document, target DocumentType) CreateDocumentRequest {
 	items := make([]CreateDocumentItemInput, len(src.Items))
 	for i, it := range src.Items {
 		items[i] = CreateDocumentItemInput{
@@ -487,96 +649,51 @@ func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, st
 			DiscountValue: it.DiscountValue,
 		}
 	}
-	today := time.Now().Format("2006-01-02")
+	srcID := src.ID
 	req := CreateDocumentRequest{
-		Type:         TypeTaxInvoice,
-		CustomerID:   src.CustomerID,
-		DocumentDate: today,
-		VatRate:      src.VatRate,
-		Notes:        src.Notes,
-		Items:        items,
+		Type:       target,
+		CustomerID: src.CustomerID,
+		// Carry the customer snapshot so walk-in source docs (empty CustomerID)
+		// still pass CreateDocument's customer resolution. Ignored when CustomerID set.
+		CustomerNameOverride:    src.CustomerName,
+		CustomerAddressOverride: src.CustomerAddress,
+		CustomerPhoneOverride:   src.CustomerPhone,
+		DocumentDate:            time.Now().Format("2006-01-02"),
+		VatRate:                 src.VatRate,
+		Notes:                   src.Notes,
+		SourceDocumentID:        &srcID,
+		Items:                   items,
 	}
-	return s.CreateDocument(ctx, actor, storeID, req)
+	if target == TypeDeliveryOrder {
+		req.InvoiceRefNo = src.DocumentNoFull
+		req.DeliveryAddress = src.CustomerAddress
+		req.DeliveryContact = src.CustomerName
+		req.DeliveryPhone = src.CustomerPhone
+		if src.DueDate != nil {
+			d := src.DueDate.Format("2006-01-02")
+			req.DueDate = &d
+		}
+	}
+	return req
+}
+
+func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
+	return s.CreateDocument(ctx, actor, storeID, buildConversionRequest(src, TypeTaxInvoice))
+}
+
+// ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
+func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
+	return s.Convert(ctx, actor, storeID, id, TypeTaxInvoice)
 }
 
 // ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
 func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	src, err := s.GetDocument(ctx, actor, storeID, id)
-	if err != nil {
-		return nil, err
-	}
-	if src.Type != TypeInvoice {
-		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
-	}
-
-	items := make([]CreateDocumentItemInput, len(src.Items))
-	for i, it := range src.Items {
-		items[i] = CreateDocumentItemInput{
-			ProductID:     it.ProductID,
-			Description:   it.Description,
-			Unit:          it.Unit,
-			Quantity:      it.Quantity,
-			UnitPrice:     it.UnitPrice,
-			DiscountType:  it.DiscountType,
-			DiscountValue: it.DiscountValue,
-		}
-	}
-	today := time.Now().Format("2006-01-02")
-	var dueDateStr *string
-	if src.DueDate != nil {
-		s := src.DueDate.Format("2006-01-02")
-		dueDateStr = &s
-	}
-	req := CreateDocumentRequest{
-		Type:             TypeDeliveryOrder,
-		CustomerID:       src.CustomerID,
-		DocumentDate:     today,
-		DueDate:          dueDateStr,
-		VatRate:          src.VatRate,
-		Notes:            src.Notes,
-		InvoiceRefNo:     src.DocumentNoFull,
-		SourceDocumentID: &src.ID,
-		DeliveryAddress:  src.CustomerAddress,
-		DeliveryContact:  src.CustomerName,
-		DeliveryPhone:    src.CustomerPhone,
-		Items:            items,
-	}
-	return s.CreateDocument(ctx, actor, storeID, req)
+	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder)
 }
 
 // ConvertQuotation creates an INVOICE document from an existing QUOTATION.
 func (s Service) ConvertQuotation(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	src, err := s.GetDocument(ctx, actor, storeID, id)
-	if err != nil {
-		return nil, err
-	}
-	if src.Type != TypeQuotation {
-		return nil, fmt.Errorf("document is not a quotation: %w", ErrInvalidInput)
-	}
-
-	items := make([]CreateDocumentItemInput, len(src.Items))
-	for i, it := range src.Items {
-		items[i] = CreateDocumentItemInput{
-			ProductID:     it.ProductID,
-			Description:   it.Description,
-			Unit:          it.Unit,
-			Quantity:      it.Quantity,
-			UnitPrice:     it.UnitPrice,
-			DiscountType:  it.DiscountType,
-			DiscountValue: it.DiscountValue,
-		}
-	}
-
-	today := time.Now().Format("2006-01-02")
-	req := CreateDocumentRequest{
-		Type:         TypeInvoice,
-		CustomerID:   src.CustomerID,
-		DocumentDate: today,
-		VatRate:      src.VatRate,
-		Notes:        src.Notes,
-		Items:        items,
-	}
-	return s.CreateDocument(ctx, actor, storeID, req)
+	return s.Convert(ctx, actor, storeID, id, TypeInvoice)
 }
 
 // toDocData maps a *Document to dochtml.DocData for HTML rendering.

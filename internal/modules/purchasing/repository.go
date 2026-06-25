@@ -362,7 +362,7 @@ func (r PostgresRepository) GetProduct(ctx context.Context, storeID, productID s
 	err := r.db.WithContext(ctx).
 		Table("product_view").
 		Select("id, store_id, name, COALESCE(total_stock, 0) AS quantity, cost_price").
-		Where("id = ? AND store_id = ?", productID, storeID).
+		Where("id = ? AND store_id = ? AND deleted_at IS NULL", productID, storeID).
 		Take(&prod).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -532,12 +532,13 @@ func (r PostgresRepository) ListSupplierProducts(ctx context.Context, storeID, s
 			supplier_products.product_id,
 			COALESCE(products.name, '') AS product_name,
 			COALESCE(products.sku, '') AS product_sku,
+			COALESCE(products.barcode, '') AS barcode,
 			supplier_products.supplier_sku,
 			supplier_products.supplier_price,
 			supplier_products.created_at
 		`).
 		Joins("LEFT JOIN products ON products.id = supplier_products.product_id AND products.store_id = ?", storeID).
-		Where("supplier_products.supplier_id = ?", supplierID).
+		Where("supplier_products.supplier_id = ? AND products.deleted_at IS NULL", supplierID).
 		Order("supplier_products.created_at DESC").
 		Scan(&items).Error
 	if err != nil {

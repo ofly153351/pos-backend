@@ -29,9 +29,12 @@ type CountItem struct {
 // CountSession is one physical-count worksheet (draft → counting → review →
 // completed/cancelled). Items are loaded/saved together with the header.
 type CountSession struct {
-	ID            string      `json:"id" gorm:"column:id"`
-	StoreID       string      `json:"-" gorm:"column:store_id"`
-	Name          string      `json:"name" gorm:"column:name"`
+	ID      string `json:"id" gorm:"column:id"`
+	StoreID string `json:"-" gorm:"column:store_id"`
+	Name    string `json:"name" gorm:"column:name"`
+	// LocationID is the single storage location this session counts. Nullable for legacy
+	// sessions created before location-scoping; a NULL-location session cannot be applied.
+	LocationID    *string     `json:"locationId" gorm:"column:location_id"`
 	WarehouseName *string     `json:"warehouseName" gorm:"column:warehouse_name"`
 	Zone          *string     `json:"zone" gorm:"column:zone"`
 	CategoryID    *string     `json:"categoryId" gorm:"column:category_id"`

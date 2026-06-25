@@ -52,7 +52,7 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 		SELECT COALESCE(SUM(p.cost_price * s.quantity), 0) AS stock_value
 		FROM stocks s
 		JOIN products p ON p.id = s.product_id
-		WHERE s.store_id = ?
+		WHERE s.store_id = ? AND p.deleted_at IS NULL
 	`, storeID).Scan(&stockRow).Error; err != nil {
 		return kpi, err
 	}
@@ -104,7 +104,7 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 			FROM stocks
 			GROUP BY product_id
 		) s_agg ON s_agg.product_id = p.id
-		WHERE p.store_id = ? AND p.is_active = TRUE
+		WHERE p.store_id = ? AND p.is_active = TRUE AND p.deleted_at IS NULL
 	`, storeID).Scan(&skuRow).Error; err != nil {
 		return kpi, err
 	}
@@ -235,7 +235,7 @@ func (r PostgresRepository) GetLowStockAlerts(ctx context.Context, storeID strin
 		FROM products p
 		LEFT JOIN stocks s         ON s.product_id  = p.id
 		LEFT JOIN product_units pu ON pu.id          = p.product_unit_id
-		WHERE p.store_id = ? AND p.is_active = TRUE AND p.min_stock > 0
+		WHERE p.store_id = ? AND p.is_active = TRUE AND p.min_stock > 0 AND p.deleted_at IS NULL
 		GROUP BY p.id, p.name, p.sku, pu.name, p.min_stock
 		HAVING COALESCE(SUM(s.quantity), 0) <= p.min_stock
 		ORDER BY (COALESCE(SUM(s.quantity), 0)::FLOAT / NULLIF(p.min_stock, 0)) ASC
@@ -351,7 +351,7 @@ func (r PostgresRepository) GetWarehouseDistribution(ctx context.Context, storeI
 		FROM warehouses w
 		LEFT JOIN locations l ON l.warehouse_id = w.id
 		LEFT JOIN stocks    s ON s.location_id  = l.id
-		LEFT JOIN products  p ON p.id           = s.product_id
+		LEFT JOIN products  p ON p.id           = s.product_id AND p.deleted_at IS NULL
 		WHERE w.store_id = ? AND w.is_active = TRUE
 		GROUP BY w.id, w.name
 		ORDER BY total_value DESC

@@ -1,6 +1,9 @@
 package product
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrInvalidProductName      = errors.New("product name is required")
@@ -24,3 +27,16 @@ var (
 	ErrGenerateSKUFailed          = errors.New("unable to generate unique barcode")
 	ErrProductInUse               = errors.New("cannot delete product: it is referenced by active purchase orders or other records")
 )
+
+// ProductHasStockError is returned when deletion is attempted on a product that still has
+// on-hand stock. Deleting hides a product from every operational/inventory view, so allowing
+// it while units remain would strand (and silently lose track of) that stock. The operator
+// must transfer/adjust the stock to zero first. This is a guard, NOT a cascade delete — stock
+// rows and movements are never auto-removed by a delete. Quantity is surfaced to the user.
+type ProductHasStockError struct {
+	Quantity int
+}
+
+func (e ProductHasStockError) Error() string {
+	return fmt.Sprintf("ไม่สามารถลบสินค้าได้ สินค้านี้ยังมีสต็อกคงเหลือ %d หน่วย กรุณาโอนย้ายหรือปรับสต็อกให้เหลือ 0 ก่อนลบสินค้า", e.Quantity)
+}

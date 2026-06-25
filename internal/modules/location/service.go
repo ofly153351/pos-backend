@@ -8,11 +8,19 @@ import (
 	"gorm.io/gorm"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/lifecycle"
 )
 
 type Service struct {
 	repo Repository
 	db   *gorm.DB
+}
+
+// DeleteOutcome is the result of a smart delete: the action that was applied ("archived" or
+// "deleted") plus the dependency assessment that drove it (for the client toast/log).
+type DeleteOutcome struct {
+	Action     string               `json:"action"`
+	Assessment lifecycle.Assessment `json:"assessment"`
 }
 
 func NewService(repo Repository, db *gorm.DB) Service {
@@ -218,18 +226,55 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, locatio
 	return s.repo.Update(ctx, current)
 }
 
-func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, locationID string) error {
+// AssessDeletion returns the read-only deletion assessment for a location (drives the
+// adaptive delete/archive modal). Manage-level access required.
+func (s Service) AssessDeletion(ctx context.Context, actor auth.Claims, storeID, locationID string) (lifecycle.Assessment, error) {
 	if strings.TrimSpace(storeID) == "" {
-		return ErrLocationForbidden
+		return lifecycle.Assessment{}, ErrLocationForbidden
 	}
 	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
-		return err
+		return lifecycle.Assessment{}, err
 	}
 	if !allowed {
-		return ErrLocationForbidden
+		return lifecycle.Assessment{}, ErrLocationForbidden
 	}
-	return s.repo.Delete(ctx, storeID, locationID)
+	// Confirm the location exists and is in this store (→ 404 otherwise).
+	if _, err := s.repo.GetByID(ctx, storeID, locationID); err != nil {
+		return lifecycle.Assessment{}, err
+	}
+	b, err := s.repo.GatherDeletionBlockers(ctx, storeID, locationID)
+	if err != nil {
+		return lifecycle.Assessment{}, err
+	}
+	return lifecycle.Assess(lifecycle.EntityLocation, b), nil
+}
+
+// Delete is the smart delete (§6): it resolves the safe strategy and applies it atomically.
+// A never-used location is hard-deleted; a used location with zero stock and history is
+// archived (soft-deleted); anything with a hard blocker returns the structured blocker error
+// with no mutation. expected is an optional client-declared action for optimistic
+// concurrency (LOCATION/ENTITY_STATE_CHANGED on mismatch).
+func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, locationID, expected string) (DeleteOutcome, error) {
+	if strings.TrimSpace(storeID) == "" {
+		return DeleteOutcome{}, ErrLocationForbidden
+	}
+	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return DeleteOutcome{}, err
+	}
+	if !allowed {
+		return DeleteOutcome{}, ErrLocationForbidden
+	}
+	// Confirm existence + store scope before the locked apply (→ 404 otherwise).
+	if _, err := s.repo.GetByID(ctx, storeID, locationID); err != nil {
+		return DeleteOutcome{}, err
+	}
+	assessment, applied, err := s.repo.ApplyDeletion(ctx, storeID, locationID, expected)
+	if err != nil {
+		return DeleteOutcome{Assessment: assessment}, err
+	}
+	return DeleteOutcome{Action: applied, Assessment: assessment}, nil
 }
 
 func (s Service) RenameZone(ctx context.Context, actor auth.Claims, storeID, warehouseID, oldZone, newZone string) error {

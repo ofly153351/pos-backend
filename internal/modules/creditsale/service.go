@@ -57,6 +57,13 @@ func (s Service) Summary(ctx context.Context, actor auth.Claims, storeID string)
 	return s.repo.Summary(ctx, storeID)
 }
 
+func (s Service) Aging(ctx context.Context, actor auth.Claims, storeID string) (AgingSummary, error) {
+	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+		return AgingSummary{}, err
+	}
+	return s.repo.Aging(ctx, storeID)
+}
+
 // Create mints a REAL product-backed sale (deducts stock, accrual revenue) tagged
 // payment_method='credit', then records the receivable + an optional down-payment.
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateCreditSaleRequest) (CreditSale, error) {

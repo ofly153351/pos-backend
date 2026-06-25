@@ -37,6 +37,15 @@ func (h Handler) Summary(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "credit summary fetched", result)
 }
 
+func (h Handler) Aging(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	result, err := h.service.Aging(c.UserContext(), middleware.ClaimsFromContext(c), storeID)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "aging summary fetched", result)
+}
+
 func (h Handler) GetByID(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("creditSaleID")
@@ -95,6 +104,21 @@ func (h Handler) Statement(c *fiber.Ctx) error {
 	c.Set("Content-Disposition", "inline; filename=\"credit-statement.pdf\"")
 	c.Set("Cache-Control", "no-store")
 	return c.Send(data)
+}
+
+// Bill renders the credit sale as a ใบวางบิล (BILL) HTML document via the shared
+// unified template — served inline so the frontend can preview it in a modal/iframe
+// (no new tab, no PDF). Replaces the legacy client-side A4 print page.
+func (h Handler) Bill(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("creditSaleID")
+	html, err := h.service.BillHTML(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set(fiber.HeaderContentType, "text/html; charset=utf-8")
+	c.Set("Cache-Control", "no-store")
+	return c.Status(fiber.StatusOK).SendString(html)
 }
 
 func writeError(c *fiber.Ctx, err error) error {

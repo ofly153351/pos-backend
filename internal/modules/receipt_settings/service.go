@@ -90,6 +90,7 @@ func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSet
 		DateFormat:          "DD/MM/YYYY",
 		TimeFormat:          "24h",
 		CurrencyPosition:    "before",
+		RoundAmount:         true,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -104,9 +105,10 @@ func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSet
 func defaultChannels() PaymentChannels {
 	return PaymentChannels{
 		{Key: "cash", Enabled: true},
-		{Key: "card", Enabled: true},
-		{Key: "qr", Enabled: true},
+		{Key: "credit_card", Enabled: false},
+		{Key: "debit_card", Enabled: false},
 		{Key: "promptpay", Enabled: true},
+		{Key: "bank_transfer", Enabled: true},
 		{Key: "truemoney", Enabled: false},
 		{Key: "shopeepay", Enabled: false},
 	}
@@ -153,6 +155,7 @@ func (s Service) PreviewHTML(ctx context.Context, actor auth.Claims, storeID str
 		ShowQr:        base.ShowQr,
 		QrSize:        base.QrSize,
 		PaperSize:     base.PaperSize,
+		RoundAmount:   base.RoundAmount,
 	}
 
 	storeInfo := receipthtml.StoreInfo{
@@ -197,7 +200,11 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 		promptPayQR = receipthtml.PromptPayQRDataURI(store.PromptPayID, grandTotal)
 	}
 
-	paid := math.Ceil(grandTotal)
+	displayGrandTotal := grandTotal
+	if s.RoundAmount {
+		displayGrandTotal = math.Round(grandTotal)
+	}
+	paid := math.Ceil(displayGrandTotal)
 
 	return receipthtml.SaleData{
 		OrderNo:        "INV-20250526",
@@ -210,12 +217,12 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 		DiscountTotal:  discountTotal,
 		AfterDiscount:  afterDiscount,
 		VatAmount:      vatAmount,
-		GrandTotal:     grandTotal,
+		GrandTotal:     displayGrandTotal,
 		GrandTotalText: "หกสิบสามบาทหกสิบห้าสตางค์",
 		PaymentMethod:  "cash",
 		PaymentLabel:   "เงินสด",
 		Paid:           paid,
-		Change:         math.Round((paid-grandTotal)*100) / 100,
+		Change:         math.Round((paid-displayGrandTotal)*100) / 100,
 		PromptPayQRURI: template.URL(promptPayQR),
 	}
 }
@@ -246,4 +253,5 @@ func applyUpdate(s *ReceiptSettings, in UpdateReceiptSettingsRequest) {
 	if in.DateFormat != nil          { s.DateFormat = *in.DateFormat }
 	if in.TimeFormat != nil          { s.TimeFormat = *in.TimeFormat }
 	if in.CurrencyPosition != nil    { s.CurrencyPosition = *in.CurrencyPosition }
+	if in.RoundAmount != nil         { s.RoundAmount = *in.RoundAmount }
 }

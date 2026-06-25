@@ -47,6 +47,8 @@ const (
 	PrefixStock                 = "stk"
 	PrefixSale                  = "sale"
 	PrefixSaleItem              = "si"
+	PrefixSaleReturn            = "sret"
+	PrefixSaleReturnItem        = "srti"
 	PrefixInvoice               = "inv"
 	PrefixInvoiceItem           = "ii"
 	PrefixInvoicePayment        = "ipay"
@@ -61,8 +63,9 @@ const (
 	PrefixStockCountItem        = "sci"
 	PrefixCreditSale            = "crs"
 	PrefixCreditPayment         = "crp"
-	PrefixPromotion             = "promo"
-	PrefixPromotionUsage        = "pru"
+	PrefixPromotion                 = "promo"
+	PrefixPromotionUsage            = "pru"
+	PrefixCustomerShippingAddress   = "csa"
 )
 
 // Generate returns {prefix}-{xid}, e.g. "pd-cbva8q9k4r7f3m2n1p0g".

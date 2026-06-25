@@ -115,6 +115,7 @@ func (r PostgresRepository) Get(ctx context.Context, storeID, sessionID string) 
 func sessionHeader(s CountSession) map[string]any {
 	return map[string]any{
 		"name":           s.Name,
+		"location_id":    s.LocationID,
 		"warehouse_name": s.WarehouseName,
 		"zone":           s.Zone,
 		"category_id":    s.CategoryID,

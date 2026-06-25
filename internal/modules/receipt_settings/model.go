@@ -57,6 +57,7 @@ type ReceiptSettings struct {
 	DateFormat          string          `json:"date_format"          gorm:"column:date_format"`
 	TimeFormat          string          `json:"time_format"          gorm:"column:time_format"`
 	CurrencyPosition    string          `json:"currency_position"    gorm:"column:currency_position"`
+	RoundAmount         bool            `json:"round_amount"         gorm:"column:round_amount"`
 	CreatedAt           time.Time       `json:"created_at"           gorm:"column:created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"           gorm:"column:updated_at"`
 }
@@ -90,4 +91,5 @@ type UpdateReceiptSettingsRequest struct {
 	DateFormat          *string                 `json:"date_format"`
 	TimeFormat          *string                 `json:"time_format"`
 	CurrencyPosition    *string                 `json:"currency_position"`
+	RoundAmount         *bool                   `json:"round_amount"`
 }

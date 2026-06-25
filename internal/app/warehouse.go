@@ -23,6 +23,11 @@ func registerWarehouseRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Put("/stores/:storeID/warehouses/:warehouseID", handler.Update)
 	protected.Delete("/stores/:storeID/warehouses/:warehouseID", handler.Delete)
 
+	// Safe-delete lifecycle: read-only assessment that drives the adaptive delete/archive
+	// modal. The static "deletion-assessment" segment follows the :warehouseID capture, so
+	// it does not collide with the GetByID route above.
+	protected.Get("/stores/:storeID/warehouses/:warehouseID/deletion-assessment", handler.AssessDeletion)
+
 	// Warehouse-Product association
 	protected.Get("/stores/:storeID/warehouses/:warehouseID/products", handler.ListProducts)
 	protected.Post("/stores/:storeID/warehouses/:warehouseID/products", handler.AddProduct)

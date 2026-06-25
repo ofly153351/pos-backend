@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,6 +67,7 @@ func RunMigrations(db *gorm.DB, migrationsDir string) error {
 			return err
 		}
 
+		log.Printf("migration: applying %s", name)
 		// Run the migration and record it in ONE transaction: a failed migration
 		// rolls back cleanly and is retried (never half-applied) on the next boot.
 		if err := db.Transaction(func(tx *gorm.DB) error {

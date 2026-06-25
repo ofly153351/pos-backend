@@ -14,6 +14,21 @@ const saleStatusCompleted = "completed"
 // sale whose goods were restocked). Voided sales are excluded from all
 // revenue/COGS reporting.
 const SaleStatusVoided = "voided"
+
+// Partial-return statuses (migration 052). The sale row stays; only some-or-all
+// item quantities are returned. Distinct from voided (entire-bill cancel).
+const (
+	SaleStatusPartiallyReturned = "partially_returned"
+	SaleStatusFullyReturned     = "fully_returned"
+)
+
+func newSaleReturnID() string     { return idgen.Generate(idgen.PrefixSaleReturn) }
+func newSaleReturnItemID() string { return idgen.Generate(idgen.PrefixSaleReturnItem) }
+
+func newReturnNumber(now time.Time) string {
+	id := idgen.Generate(idgen.PrefixSaleReturn)
+	return fmt.Sprintf("RET-%s-%s", now.UTC().Format("20060102150405"), id[len(id)-6:])
+}
 const (
 	DiscountTypeAmount  = "amount"
 	DiscountTypePercent = "percent"

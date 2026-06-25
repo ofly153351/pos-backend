@@ -21,6 +21,7 @@ type Repository interface {
 	AddPayment(ctx context.Context, storeID string, p CreditPayment) (CreditSale, error)
 	Cancel(ctx context.Context, storeID, creditSaleID, actorUserID string) (CreditSale, error)
 	Summary(ctx context.Context, storeID string) (DebtSummary, error)
+	Aging(ctx context.Context, storeID string) (AgingSummary, error)
 	StatementContext(ctx context.Context, storeID, creditSaleID string) (StatementContext, error)
 }
 
@@ -396,6 +397,74 @@ func (r PostgresRepository) Summary(ctx context.Context, storeID string) (DebtSu
 		Where("store_id = ?", storeID).
 		Take(&s).Error
 	return s, err
+}
+
+// ── Aging ───────────────────────────────────────────────────────────────────
+
+func (r PostgresRepository) Aging(ctx context.Context, storeID string) (AgingSummary, error) {
+	var buckets []AgingBucket
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT label, COUNT(*) AS count, COALESCE(SUM(remaining_amount), 0) AS amount
+		FROM (
+			SELECT remaining_amount,
+			CASE
+				WHEN NULLIF(due_date, '') IS NULL THEN 'current'
+				WHEN due_date::date >= CURRENT_DATE THEN 'current'
+				WHEN CURRENT_DATE - due_date::date BETWEEN 1 AND 30 THEN '1_30'
+				WHEN CURRENT_DATE - due_date::date BETWEEN 31 AND 60 THEN '31_60'
+				WHEN CURRENT_DATE - due_date::date BETWEEN 61 AND 90 THEN '61_90'
+				ELSE '90_plus'
+			END AS label
+			FROM credit_sales
+			WHERE store_id = ?
+			  AND status NOT IN ('cancelled','completed')
+			  AND remaining_amount > 0
+		) sub
+		GROUP BY label
+	`, storeID).Scan(&buckets).Error
+	if err != nil {
+		return AgingSummary{}, err
+	}
+
+	var customers []AgingCustomerEntry
+	err = r.db.WithContext(ctx).Raw(`
+		SELECT
+			cs.customer_id,
+			COALESCE(c.full_name, '') AS customer_name,
+			SUM(cs.remaining_amount) AS outstanding,
+			MAX(CASE
+				WHEN NULLIF(cs.due_date, '') IS NULL THEN 'current'
+				WHEN cs.due_date::date >= CURRENT_DATE THEN 'current'
+				WHEN CURRENT_DATE - cs.due_date::date > 90 THEN '90_plus'
+				WHEN CURRENT_DATE - cs.due_date::date > 60 THEN '61_90'
+				WHEN CURRENT_DATE - cs.due_date::date > 30 THEN '31_60'
+				WHEN CURRENT_DATE - cs.due_date::date >= 1 THEN '1_30'
+				ELSE 'current'
+			END) AS oldest_bucket,
+			COALESCE(MAX(CASE
+				WHEN NULLIF(cs.due_date, '') IS NOT NULL AND cs.due_date::date < CURRENT_DATE
+				THEN CURRENT_DATE - cs.due_date::date
+				ELSE 0
+			END), 0) AS days_overdue
+		FROM credit_sales cs
+		LEFT JOIN customers c ON c.id = cs.customer_id
+		WHERE cs.store_id = ?
+		  AND cs.status NOT IN ('cancelled','completed')
+		  AND cs.remaining_amount > 0
+		GROUP BY cs.customer_id, c.full_name
+		ORDER BY outstanding DESC
+		LIMIT 10
+	`, storeID).Scan(&customers).Error
+	if err != nil {
+		return AgingSummary{}, err
+	}
+
+	var total float64
+	for _, b := range buckets {
+		total += b.Amount
+	}
+
+	return AgingSummary{Buckets: buckets, Customers: customers, Total: total}, nil
 }
 
 // ── Statement ───────────────────────────────────────────────────────────────

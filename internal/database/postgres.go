@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -20,8 +22,17 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= dbConnectMaxAttempts; attempt++ {
+		gormLogger := logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			logger.Config{
+				SlowThreshold:             200 * time.Millisecond,
+				LogLevel:                  logger.Warn,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  false,
+			},
+		)
 		db, err := gorm.Open(postgres.Open(cfg.DatabaseURL()), &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Warn), // log slow queries only
+			Logger: gormLogger,
 		})
 		if err != nil {
 			lastErr = err

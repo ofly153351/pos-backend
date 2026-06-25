@@ -6,7 +6,15 @@ import (
 	"time"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/lifecycle"
 )
+
+// DeleteOutcome is the result of a smart delete: the action that was applied ("archived" or
+// "deleted") plus the dependency assessment that drove it (for the client toast/log).
+type DeleteOutcome struct {
+	Action     string               `json:"action"`
+	Assessment lifecycle.Assessment `json:"assessment"`
+}
 
 type Service struct{ repo Repository }
 
@@ -41,7 +49,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	return s.repo.Create(ctx, item)
 }
 
-func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Warehouse, error) {
+func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string, includeArchived bool) ([]Warehouse, error) {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
 		return nil, err
@@ -49,7 +57,7 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 	if !allowed {
 		return nil, ErrForbiddenStoreAccess
 	}
-	return s.repo.ListByStore(ctx, storeID)
+	return s.repo.ListByStore(ctx, storeID, includeArchived)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, id string) (Warehouse, error) {
@@ -105,15 +113,49 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 	return s.repo.Update(ctx, item)
 }
 
-func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id string) error {
+// AssessDeletion returns the read-only deletion assessment for a warehouse (drives the
+// adaptive delete/archive modal). Manage-level access required.
+func (s Service) AssessDeletion(ctx context.Context, actor auth.Claims, storeID, id string) (lifecycle.Assessment, error) {
 	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
-		return err
+		return lifecycle.Assessment{}, err
 	}
 	if !allowed {
-		return ErrForbiddenStoreAccess
+		return lifecycle.Assessment{}, ErrForbiddenStoreAccess
 	}
-	return s.repo.Delete(ctx, storeID, id)
+	// Confirm the warehouse exists and is in this store (→ 404 otherwise).
+	if _, err := s.repo.GetByID(ctx, storeID, id); err != nil {
+		return lifecycle.Assessment{}, err
+	}
+	b, err := s.repo.GatherDeletionBlockers(ctx, storeID, id)
+	if err != nil {
+		return lifecycle.Assessment{}, err
+	}
+	return lifecycle.Assess(lifecycle.EntityWarehouse, b), nil
+}
+
+// Delete is the smart delete (§6): it resolves the safe strategy and applies it atomically.
+// A never-used warehouse is hard-deleted; a used warehouse with zero stock and history is
+// archived (soft-deleted with its child locations); anything with a hard blocker returns the
+// structured blocker error with no mutation. expected is an optional client-declared action
+// for optimistic concurrency (ENTITY_STATE_CHANGED on mismatch).
+func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id, expected string) (DeleteOutcome, error) {
+	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	if err != nil {
+		return DeleteOutcome{}, err
+	}
+	if !allowed {
+		return DeleteOutcome{}, ErrForbiddenStoreAccess
+	}
+	// Confirm existence + store scope before the locked apply (→ 404 otherwise).
+	if _, err := s.repo.GetByID(ctx, storeID, id); err != nil {
+		return DeleteOutcome{}, err
+	}
+	assessment, applied, err := s.repo.ApplyDeletion(ctx, storeID, id, expected)
+	if err != nil {
+		return DeleteOutcome{Assessment: assessment}, err
+	}
+	return DeleteOutcome{Action: applied, Assessment: assessment}, nil
 }
 
 // ──────────────────────────────────────────────

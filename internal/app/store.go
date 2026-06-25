@@ -31,5 +31,6 @@ func registerStoreRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Put("/stores/:storeID", handler.Update)
 	protected.Get("/stores/:storeID/bank-accounts", handler.ListBankAccounts)
 	protected.Post("/stores/:storeID/bank-accounts", handler.CreateBankAccount)
+	protected.Patch("/stores/:storeID/bank-accounts/:accountID", handler.UpdateBankAccount)
 	protected.Delete("/stores/:storeID/bank-accounts/:accountID", handler.DeleteBankAccount)
 }

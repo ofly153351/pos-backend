@@ -103,12 +103,40 @@ type DeadStockStat struct {
 	Items []DeadStockItem `json:"items"`
 }
 
+// StockVelocityItem is a per-product snapshot of current stock vs 30-day sales
+// velocity. DaysOfStock = CurrentStock / AvgDailySales; nil when no recent sales.
+// Top 20 active products ordered by urgency (fewest days first).
+type StockVelocityItem struct {
+	ProductID     string   `json:"product_id"      gorm:"column:product_id"`
+	ProductName   string   `json:"product_name"    gorm:"column:product_name"`
+	CurrentStock  int64    `json:"current_stock"   gorm:"column:current_stock"`
+	AvgDailySales float64  `json:"avg_daily_sales" gorm:"column:avg_daily_sales"`
+	DaysOfStock   *float64 `json:"days_of_stock"   gorm:"column:days_of_stock"`
+	MinStock      int64    `json:"min_stock"       gorm:"column:min_stock"`
+	MaxStock      int64    `json:"max_stock"       gorm:"column:max_stock"`
+	CostPrice     float64  `json:"cost_price"      gorm:"column:cost_price"`
+}
+
+// OverstockItem is a product whose current stock exceeds its max_stock threshold.
+// CapitalValue = OverstockQty × CostPrice.
+type OverstockItem struct {
+	ProductID    string  `json:"product_id"    gorm:"column:product_id"`
+	ProductName  string  `json:"product_name"  gorm:"column:product_name"`
+	CurrentStock int64   `json:"current_stock" gorm:"column:current_stock"`
+	MaxStock     int64   `json:"max_stock"     gorm:"column:max_stock"`
+	OverstockQty int64   `json:"overstock_qty" gorm:"column:overstock_qty"`
+	CostPrice    float64 `json:"cost_price"    gorm:"column:cost_price"`
+	CapitalValue float64 `json:"capital_value" gorm:"column:capital_value"`
+}
+
 // InventoryReport backs the Inventory Value & Dead Stock report. Both halves are
 // DB aggregates (GetInventorySnapshot + GetDeadStock), so the report scales to any
 // dataset size with no client-side movement scanning.
 type InventoryReport struct {
-	Snapshot  InventorySnapshot `json:"snapshot"`
-	DeadStock DeadStockStat     `json:"dead_stock"`
+	Snapshot      InventorySnapshot   `json:"snapshot"`
+	DeadStock     DeadStockStat       `json:"dead_stock"`
+	StockVelocity []StockVelocityItem `json:"stock_velocity"`
+	Overstock     []OverstockItem     `json:"overstock"`
 }
 
 // TrendPoint is one day of the sales-performance chart. Profit is the gross
@@ -146,6 +174,7 @@ type ExecutiveSummary struct {
 	Range             TimeRange           `json:"range"`
 	Revenue           float64             `json:"revenue"`
 	PreviousRevenue   float64             `json:"previous_revenue"`
+	Refunds           float64             `json:"refunds"`
 	COGS              float64             `json:"cogs"`
 	Expenses          float64             `json:"expenses"`
 	GrossProfit       float64             `json:"gross_profit"`

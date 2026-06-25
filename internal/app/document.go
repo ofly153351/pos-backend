@@ -21,6 +21,7 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Get("/stores/:storeID/documents/statement", h.GetStatementPDF)
 	protected.Get("/stores/:storeID/documents/:docID", h.GetDocument)
 	protected.Get("/stores/:storeID/documents/:docID/print", h.PrintDocument)
+	protected.Get("/stores/:storeID/documents/:docID/related", h.RelatedDocuments)
 	protected.Get("/stores/:storeID/documents/:docID/wht-cert", h.PrintWHTCert)
 	protected.Get("/stores/:storeID/documents/:docID/pdf", h.GetDocumentPDF)
 	protected.Put("/stores/:storeID/documents/:docID/status", h.UpdateDocumentStatus)
@@ -30,4 +31,5 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/documents/:docID/convert-tax", h.ConvertToTaxInvoice)
 	protected.Post("/stores/:storeID/documents/:docID/convert-do", h.ConvertToDeliveryOrder)
 	protected.Post("/stores/:storeID/documents/:docID/convert", h.ConvertQuotation)
+	protected.Post("/stores/:storeID/documents/:docID/convert-to", h.Convert)
 }

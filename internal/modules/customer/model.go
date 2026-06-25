@@ -2,6 +2,28 @@ package customer
 
 import "time"
 
+type CustomerShippingAddress struct {
+	ID                 string    `json:"id" gorm:"column:id;primaryKey"`
+	CustomerID         string    `json:"customer_id" gorm:"column:customer_id"`
+	Label              string    `json:"label" gorm:"column:label"`
+	RecipientName      string    `json:"recipient_name" gorm:"column:recipient_name"`
+	RecipientPhone     string    `json:"recipient_phone" gorm:"column:recipient_phone"`
+	Address            string    `json:"address" gorm:"column:address"`
+	SubDistrict        string    `json:"sub_district" gorm:"column:sub_district"`
+	District           string    `json:"district" gorm:"column:district"`
+	Province           string    `json:"province" gorm:"column:province"`
+	PostalCode         string    `json:"postal_code" gorm:"column:postal_code"`
+	Note               string    `json:"note" gorm:"column:note"`
+	UseCustomerAddress bool      `json:"use_customer_address" gorm:"column:use_customer_address"`
+	IsDefault          bool      `json:"is_default" gorm:"column:is_default"`
+	CreatedAt          time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt          time.Time `json:"updated_at" gorm:"column:updated_at"`
+}
+
+func (CustomerShippingAddress) TableName() string {
+	return "customer_shipping_addresses"
+}
+
 type Customer struct {
 	ID        string    `json:"id" gorm:"column:id;primaryKey"`
 	StoreID   string    `json:"store_id" gorm:"column:store_id"`
@@ -13,6 +35,16 @@ type Customer struct {
 	Note      string    `json:"note,omitempty" gorm:"column:note"`
 	TaxID     string    `json:"tax_id,omitempty" gorm:"column:tax_id"`
 	Branch    string    `json:"branch,omitempty" gorm:"column:branch"`
+	// Shipping / delivery profile (Phase 3) — separate from the billing Address above.
+	ShippingContact    string `json:"shipping_contact,omitempty" gorm:"column:shipping_contact"`
+	ShippingPhone      string `json:"shipping_phone,omitempty" gorm:"column:shipping_phone"`
+	ShippingAddress    string `json:"shipping_address,omitempty" gorm:"column:shipping_address"`
+	ShippingProvince   string `json:"shipping_province,omitempty" gorm:"column:shipping_province"`
+	ShippingDistrict   string `json:"shipping_district,omitempty" gorm:"column:shipping_district"`
+	ShippingPostalCode string `json:"shipping_postal_code,omitempty" gorm:"column:shipping_postal_code"`
+	DeliveryNote       string `json:"delivery_note,omitempty" gorm:"column:delivery_note"`
+	// Multi-address shipping (Phase 4)
+	ShippingAddresses []CustomerShippingAddress `json:"shipping_addresses" gorm:"foreignKey:CustomerID"`
 	IsActive  bool      `json:"is_active" gorm:"column:is_active"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
@@ -35,6 +67,13 @@ type CreateCustomerRequest struct {
 	Note     string `json:"note"`
 	TaxID    string `json:"tax_id"`
 	Branch   string `json:"branch"`
+	ShippingContact    string `json:"shipping_contact"`
+	ShippingPhone      string `json:"shipping_phone"`
+	ShippingAddress    string `json:"shipping_address"`
+	ShippingProvince   string `json:"shipping_province"`
+	ShippingDistrict   string `json:"shipping_district"`
+	ShippingPostalCode string `json:"shipping_postal_code"`
+	DeliveryNote       string `json:"delivery_note"`
 	IsActive *bool  `json:"is_active"`
 }
 
@@ -47,11 +86,32 @@ type UpdateCustomerRequest struct {
 	Note     *string `json:"note"`
 	TaxID    *string `json:"tax_id"`
 	Branch   *string `json:"branch"`
+	ShippingContact    *string `json:"shipping_contact"`
+	ShippingPhone      *string `json:"shipping_phone"`
+	ShippingAddress    *string `json:"shipping_address"`
+	ShippingProvince   *string `json:"shipping_province"`
+	ShippingDistrict   *string `json:"shipping_district"`
+	ShippingPostalCode *string `json:"shipping_postal_code"`
+	DeliveryNote       *string `json:"delivery_note"`
 	IsActive *bool   `json:"is_active"`
 }
 
 type UpsertLevelDiscountRequest struct {
 	DiscountPercent float64 `json:"discount_percent"`
+}
+
+type ShippingAddressRequest struct {
+	Label              string `json:"label"`
+	RecipientName      string `json:"recipient_name"`
+	RecipientPhone     string `json:"recipient_phone"`
+	Address            string `json:"address"`
+	SubDistrict        string `json:"sub_district"`
+	District           string `json:"district"`
+	Province           string `json:"province"`
+	PostalCode         string `json:"postal_code"`
+	Note               string `json:"note"`
+	UseCustomerAddress bool   `json:"use_customer_address"`
+	IsDefault          bool   `json:"is_default"`
 }
 
 func (Customer) TableName() string {

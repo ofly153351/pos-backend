@@ -77,8 +77,14 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 		page = 1
 	}
 	limit := q.Limit
-	if limit < 1 || limit > 200 {
+	if limit < 1 {
 		limit = 20
+	}
+	if limit > 200 {
+		// Clamp oversized requests to the max page size instead of silently
+		// resetting to the default — a caller asking for "everything" should get
+		// the largest page we allow, not 20 rows.
+		limit = 200
 	}
 	offset := (page - 1) * limit
 
@@ -141,15 +147,20 @@ func (r *repository) BulkSetStatus(storeID string, ids []string, status Document
 		}).Error
 }
 
-// NextSeq returns the next sequence number for a given store+type combo in the current month.
+// NextSeq returns the next sequence number for a given store+type combo in the
+// current month. It derives the highest existing trailing sequence (MAX), not a
+// COUNT: a COUNT shrinks when rows are deleted and would then re-issue a
+// document_no that still exists, violating the unique index (DOC-1). MAX+1 keeps
+// numbering monotonic across deletes.
 func (r *repository) NextSeq(storeID string, docType DocumentType) (int64, error) {
 	now := time.Now()
 	prefix := fmt.Sprintf("%s-%02d%02d", typePrefix(docType), now.Year()%100, now.Month())
-	var count int64
+	var maxSeq int64
 	r.db.Model(&Document{}).
 		Where("store_id = ? AND document_no LIKE ?", storeID, prefix+"-%").
-		Count(&count)
-	return count + 1, nil
+		Select("COALESCE(MAX(CAST(SUBSTRING(document_no FROM '[0-9]+$') AS INTEGER)), 0)").
+		Scan(&maxSeq)
+	return maxSeq + 1, nil
 }
 
 func typePrefix(t DocumentType) string {

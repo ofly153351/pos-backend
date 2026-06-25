@@ -31,13 +31,14 @@ type rawReceiptSettings struct {
 	ShowQr        bool    `gorm:"column:show_qr"`
 	QrSize        string  `gorm:"column:qr_size"`
 	PaperSize     string  `gorm:"column:paper_size"`
+	RoundAmount   bool    `gorm:"column:round_amount"`
 }
 
 func (r *dbSettingsRepo) GetByStoreID(ctx context.Context, storeID string) (ReceiptSettingsView, error) {
 	var row rawReceiptSettings
 	err := r.db.WithContext(ctx).
 		Table("store_receipt_settings").
-		Select("show_logo, logo_position, show_store_name, show_address, show_phone, show_tax_id, tax_mode, vat_rate, tax_label, footer_text, show_qr, qr_size, paper_size").
+		Select("show_logo, logo_position, show_store_name, show_address, show_phone, show_tax_id, tax_mode, vat_rate, tax_label, footer_text, show_qr, qr_size, paper_size, round_amount").
 		Where("store_id = ?", storeID).
 		Take(&row).Error
 	if err != nil {
@@ -60,5 +61,6 @@ func (r *dbSettingsRepo) GetByStoreID(ctx context.Context, storeID string) (Rece
 		ShowQr:        row.ShowQr,
 		QrSize:        row.QrSize,
 		PaperSize:     row.PaperSize,
+		RoundAmount:   row.RoundAmount,
 	}, nil
 }

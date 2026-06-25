@@ -2,15 +2,24 @@ package location
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
 	"pos-backend/internal/middleware"
 	"pos-backend/internal/platform/httpx"
+	"pos-backend/internal/platform/lifecycle"
 )
 
 type Handler struct {
 	service Service
+}
+
+// deletionErrorDetails is the machine-readable payload attached to a blocked-delete 409 so
+// the frontend can render an adaptive remediation modal (which blocker, with what counts).
+type deletionErrorDetails struct {
+	Code       string               `json:"code"`
+	Assessment lifecycle.Assessment `json:"assessment"`
 }
 
 func NewHandler(service Service) Handler {
@@ -55,12 +64,13 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	page, limit := parsePage(c)
 	filter := ListFilter{
-		WarehouseID: c.Query("warehouse_id"),
-		ZoneName:    c.Query("zone_name"),
-		FloorName:   c.Query("floor_name"),
-		Search:      c.Query("search"),
-		Page:        page,
-		Limit:       limit,
+		WarehouseID:     c.Query("warehouse_id"),
+		ZoneName:        c.Query("zone_name"),
+		FloorName:       c.Query("floor_name"),
+		Search:          c.Query("search"),
+		Page:            page,
+		Limit:           limit,
+		IncludeArchived: c.QueryBool("include_archived", false),
 	}
 	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), storeID, filter)
 	if err != nil {
@@ -135,25 +145,63 @@ func (h Handler) Update(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "location updated", result)
 }
 
-func (h Handler) Delete(c *fiber.Ctx) error {
+// AssessDeletion returns the read-only deletion assessment that drives the adaptive
+// delete/archive modal (GET .../locations/:locationID/deletion-assessment).
+func (h Handler) AssessDeletion(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	locationID := c.Params("locationID")
-	err := h.service.Delete(c.UserContext(), middleware.ClaimsFromContext(c), storeID, locationID)
+	assessment, err := h.service.AssessDeletion(c.UserContext(), middleware.ClaimsFromContext(c), storeID, locationID)
 	if err != nil {
 		switch err {
 		case ErrLocationForbidden:
 			return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 		case ErrLocationNotFound:
 			return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
-		case ErrLocationInUse:
-			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
-		case ErrDefaultSaleLocationDelete:
-			return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 		default:
 			return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 		}
 	}
-	return httpx.Success(c, fiber.StatusOK, "location deleted", nil)
+	return httpx.Success(c, fiber.StatusOK, "deletion assessment", assessment)
+}
+
+func (h Handler) Delete(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	locationID := c.Params("locationID")
+	// expected: optional client-declared action (from the pre-check assessment) for
+	// optimistic concurrency — a mismatch under the lock yields ENTITY_STATE_CHANGED.
+	expected := strings.TrimSpace(c.Query("expected"))
+	outcome, err := h.service.Delete(c.UserContext(), middleware.ClaimsFromContext(c), storeID, locationID, expected)
+	if err != nil {
+		return writeDeleteError(c, err, outcome.Assessment)
+	}
+	// outcome.Action is "archived" or "deleted"; the FE picks the toast from it.
+	msg := "location deleted"
+	if outcome.Action == "archived" {
+		msg = "location archived"
+	}
+	return httpx.Success(c, fiber.StatusOK, msg, outcome)
+}
+
+// writeDeleteError maps the smart-delete blocker errors to a 409 carrying the structured
+// assessment details; everything else falls back to the standard status mapping.
+func writeDeleteError(c *fiber.Ctx, err error, assessment lifecycle.Assessment) error {
+	switch err {
+	case ErrLocationForbidden:
+		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
+	case ErrLocationNotFound:
+		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	case ErrLocationStateChanged:
+		return httpx.ErrConflictDetails(c, err.Error(), deletionErrorDetails{
+			Code: lifecycle.CodeEntityStateChanged, Assessment: assessment,
+		})
+	case ErrLocationHasStock, ErrLocationIsProductDefault, ErrLocationHasOpenOperations,
+		ErrDefaultSaleLocationDelete, ErrLocationInUse:
+		return httpx.ErrConflictDetails(c, err.Error(), deletionErrorDetails{
+			Code: assessment.BlockerCode, Assessment: assessment,
+		})
+	default:
+		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
+	}
 }
 
 type renameZoneRequest struct {

@@ -9,14 +9,28 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+
+	"pos-backend/internal/platform/lifecycle"
 )
 
 type Repository interface {
 	Create(ctx context.Context, item Warehouse) (Warehouse, error)
-	ListByStore(ctx context.Context, storeID string) ([]Warehouse, error)
+	// ListByStore returns the store's warehouses. Archived (soft-deleted) warehouses are
+	// excluded unless includeArchived is true (management "Archived" tab only).
+	ListByStore(ctx context.Context, storeID string, includeArchived bool) ([]Warehouse, error)
 	GetByID(ctx context.Context, storeID, id string) (Warehouse, error)
 	Update(ctx context.Context, item Warehouse) (Warehouse, error)
 	Delete(ctx context.Context, storeID, id string) error
+	// GatherDeletionBlockers builds the dependency snapshot for a warehouse (aggregated
+	// across all of its non-archived child locations). Read-only; used by the deletion
+	// assessment endpoint and as the pre-check feeding lifecycle.Assess.
+	GatherDeletionBlockers(ctx context.Context, storeID, warehouseID string) (lifecycle.BlockerCounts, error)
+	// ApplyDeletion runs the smart delete: it re-gathers blockers under a row lock,
+	// re-runs lifecycle.Assess, and either archives (soft-delete warehouse + children),
+	// hard-deletes (never-used warehouse + children), or reports the blocker. If expected
+	// is non-empty and no longer matches the locked assessment it returns
+	// ErrEntityStateChanged. Archiving an already-archived warehouse is a success no-op.
+	ApplyDeletion(ctx context.Context, storeID, warehouseID, expected string) (lifecycle.Assessment, string, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	// UserCanOperateStore reports whether an active member may READ operational data
 	// (owner/manager/cashier/warehouse, excluding suspended). Used by read-only endpoints.
@@ -70,13 +84,18 @@ func (r PostgresRepository) Create(ctx context.Context, item Warehouse) (Warehou
 	return item, nil
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Warehouse, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, includeArchived bool) ([]Warehouse, error) {
 	var items []Warehouse
-	err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Model(&Warehouse{}).
-		Where("store_id = ?", storeID).
-		Order("name ASC").
-		Find(&items).Error
+		Where("store_id = ?", storeID)
+	// Archive filter (migration 047). The Warehouse struct intentionally has no DeletedAt
+	// field, so GORM never injects this automatically — active/operational lists must opt
+	// in explicitly, and historical LEFT JOINs keep resolving archived names.
+	if !includeArchived {
+		q = q.Where("deleted_at IS NULL")
+	}
+	err := q.Order("name ASC").Find(&items).Error
 	return items, err
 }
 
@@ -257,7 +276,7 @@ func (r PostgresRepository) ListWarehouseStockRows(ctx context.Context, warehous
 		`).
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
-		Where("locations.warehouse_id = ?", warehouseID).
+		Where("locations.warehouse_id = ? AND pv.deleted_at IS NULL", warehouseID).
 		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.product_type_id, pv.product_type_name, pv.product_unit_name, pv.cost_price, pv.base_price, pv.min_stock").
 		Scan(&rows).Error
 	if err != nil {
@@ -359,7 +378,7 @@ func (r PostgresRepository) ListProducts(ctx context.Context, warehouseID string
 		`).
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
-		Where("locations.warehouse_id = ? AND locations.is_sale_point = ?", warehouseID, false).
+		Where("locations.warehouse_id = ? AND locations.is_sale_point = ? AND pv.deleted_at IS NULL", warehouseID, false).
 		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
 		Order("COALESCE(pv.name, '') ASC").
 		Find(&items).Error
@@ -480,7 +499,7 @@ func (r PostgresRepository) getWarehouseProduct(ctx context.Context, productID, 
 		`).
 		Joins("JOIN locations ON locations.id = stocks.location_id").
 		Joins("LEFT JOIN product_view pv ON pv.id = stocks.product_id").
-		Where("stocks.product_id = ? AND locations.warehouse_id = ? AND locations.is_sale_point = ?", productID, warehouseID, false).
+		Where("stocks.product_id = ? AND locations.warehouse_id = ? AND locations.is_sale_point = ? AND pv.deleted_at IS NULL", productID, warehouseID, false).
 		Group("stocks.product_id, pv.name, pv.sku, pv.barcode, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.image_url, pv.product_type_name, pv.product_unit_name, pv.min_stock, pv.max_stock").
 		Take(&wp).Error
 	if err != nil {
@@ -1110,7 +1129,7 @@ func (r PostgresRepository) ListWarehouseInventory(ctx context.Context, warehous
 		`).
 		Joins("LEFT JOIN product_view pv ON pv.id = wi.product_id").
 		Joins("LEFT JOIN stores s ON s.id = wi.source_store_id").
-		Where("wi.warehouse_id = ?", warehouseID).
+		Where("wi.warehouse_id = ? AND pv.deleted_at IS NULL", warehouseID).
 		Order("wi.transferred_at DESC").
 		Find(&items).Error
 	if err != nil {

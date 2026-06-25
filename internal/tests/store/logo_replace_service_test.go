@@ -53,6 +53,14 @@ func (r *fakeStoreRepo) DeleteBankAccount(ctx context.Context, storeID, id strin
 	return nil
 }
 
+func (r *fakeStoreRepo) UpdateBankAccount(ctx context.Context, storeID, id string, updates map[string]interface{}) (storemodule.StoreBankAccount, error) {
+	return storemodule.StoreBankAccount{}, nil
+}
+
+func (r *fakeStoreRepo) UserHasStoreAccess(ctx context.Context, storeID, userID, role string) (bool, error) {
+	return true, nil
+}
+
 type fakeLogoStorage struct {
 	saveURL   string
 	deleted   []string

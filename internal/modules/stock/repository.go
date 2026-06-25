@@ -153,19 +153,24 @@ func (r PostgresRepository) GetCurrentQuantity(ctx context.Context, storeID, pro
 
 func (r PostgresRepository) ListLowStock(ctx context.Context, storeID string, threshold int) ([]LowStockItem, error) {
 	var items []LowStockItem
+	// Operational low-stock = sale-point on-hand (ready_stock) at or below the effective
+	// minimum. ready_stock counts only is_sale_point locations, matching the inventory page,
+	// dashboard and notification bell — so every surface agrees on what "low" means (a
+	// product fully stocked in the back but empty at the counter IS low: it can't be sold).
+	// Effective minimum = the product's own min_stock when set (> 0), else the caller's
+	// fallback threshold. Read from product_view so products with no sale-point stock row
+	// still surface at quantity 0 (an INNER JOIN on stocks would silently drop them).
 	err := r.db.WithContext(ctx).
-		Table("stocks").
+		Table("product_view pv").
 		Select(`
-			stocks.product_id,
-			COALESCE(products.name, '') AS product_name,
-			COALESCE(products.sku, '') AS sku,
-			SUM(stocks.quantity) AS quantity,
-			products.min_stock
+			pv.id AS product_id,
+			COALESCE(pv.name, '') AS product_name,
+			COALESCE(pv.sku, '') AS sku,
+			COALESCE(pv.ready_stock, 0) AS quantity,
+			COALESCE(pv.min_stock, 0) AS min_stock
 		`).
-		Joins("JOIN products ON products.id = stocks.product_id AND products.store_id = stocks.store_id").
-		Where("stocks.store_id = ?", storeID).
-		Group("stocks.product_id, products.name, products.sku, products.min_stock").
-		Having("SUM(stocks.quantity) <= ?", threshold).
+		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.deleted_at IS NULL AND COALESCE(pv.ready_stock, 0) <= CASE WHEN COALESCE(pv.min_stock, 0) > 0 THEN pv.min_stock ELSE ? END", storeID, threshold).
+		Order("COALESCE(pv.ready_stock, 0) ASC, pv.updated_at DESC").
 		Find(&items).Error
 	if err != nil {
 		return nil, err

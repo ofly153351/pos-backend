@@ -20,6 +20,11 @@ type Repository interface {
 	UpsertLevelDiscount(ctx context.Context, item LevelDiscount) (LevelDiscount, error)
 	DeleteLevelDiscount(ctx context.Context, storeID string, level int) error
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
+	// Shipping addresses
+	ListShippingAddresses(ctx context.Context, customerID string) ([]CustomerShippingAddress, error)
+	CreateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error)
+	UpdateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error)
+	DeleteShippingAddress(ctx context.Context, addrID, customerID string) error
 }
 
 type PostgresRepository struct {
@@ -28,6 +33,17 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
+}
+
+// setOrNull writes a trimmed value to the column map, or SQL NULL when the value is
+// blank — preserving the customers table's empty->NULL convention so optional text
+// columns round-trip cleanly instead of storing empty strings.
+func setOrNull(m map[string]any, col, val string) {
+	if strings.TrimSpace(val) == "" {
+		m[col] = nil
+	} else {
+		m[col] = strings.TrimSpace(val)
+	}
 }
 
 func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Customer, error) {
@@ -40,36 +56,19 @@ func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Cust
 		"created_at":     customer.CreatedAt,
 		"updated_at":     customer.CreatedAt,
 	}
-	if strings.TrimSpace(customer.Phone) == "" {
-		payload["phone"] = nil
-	} else {
-		payload["phone"] = strings.TrimSpace(customer.Phone)
-	}
-	if strings.TrimSpace(customer.Email) == "" {
-		payload["email"] = nil
-	} else {
-		payload["email"] = strings.TrimSpace(customer.Email)
-	}
-	if strings.TrimSpace(customer.Address) == "" {
-		payload["address"] = nil
-	} else {
-		payload["address"] = strings.TrimSpace(customer.Address)
-	}
-	if strings.TrimSpace(customer.Note) == "" {
-		payload["note"] = nil
-	} else {
-		payload["note"] = strings.TrimSpace(customer.Note)
-	}
-	if strings.TrimSpace(customer.TaxID) == "" {
-		payload["tax_id"] = nil
-	} else {
-		payload["tax_id"] = strings.TrimSpace(customer.TaxID)
-	}
-	if strings.TrimSpace(customer.Branch) == "" {
-		payload["branch"] = nil
-	} else {
-		payload["branch"] = strings.TrimSpace(customer.Branch)
-	}
+	setOrNull(payload, "phone", customer.Phone)
+	setOrNull(payload, "email", customer.Email)
+	setOrNull(payload, "address", customer.Address)
+	setOrNull(payload, "note", customer.Note)
+	setOrNull(payload, "tax_id", customer.TaxID)
+	setOrNull(payload, "branch", customer.Branch)
+	setOrNull(payload, "shipping_contact", customer.ShippingContact)
+	setOrNull(payload, "shipping_phone", customer.ShippingPhone)
+	setOrNull(payload, "shipping_address", customer.ShippingAddress)
+	setOrNull(payload, "shipping_province", customer.ShippingProvince)
+	setOrNull(payload, "shipping_district", customer.ShippingDistrict)
+	setOrNull(payload, "shipping_postal_code", customer.ShippingPostalCode)
+	setOrNull(payload, "delivery_note", customer.DeliveryNote)
 
 	if err := r.db.WithContext(ctx).Table("customers").Create(payload).Error; err != nil {
 		return Customer{}, err
@@ -83,6 +82,9 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 	err := r.db.WithContext(ctx).
 		Model(&Customer{}).
 		Where("store_id = ?", storeID).
+		Preload("ShippingAddresses", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
 		Order("created_at DESC").
 		Find(&items).Error
 	return items, err
@@ -93,6 +95,9 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, customerID str
 	err := r.db.WithContext(ctx).
 		Model(&Customer{}).
 		Where("store_id = ? AND id = ?", storeID, customerID).
+		Preload("ShippingAddresses", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
 		Take(&item).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -110,36 +115,19 @@ func (r PostgresRepository) Update(ctx context.Context, customer Customer) (Cust
 		"is_active":      customer.IsActive,
 		"updated_at":     customer.UpdatedAt,
 	}
-	if strings.TrimSpace(customer.Phone) == "" {
-		updates["phone"] = nil
-	} else {
-		updates["phone"] = strings.TrimSpace(customer.Phone)
-	}
-	if strings.TrimSpace(customer.Email) == "" {
-		updates["email"] = nil
-	} else {
-		updates["email"] = strings.TrimSpace(customer.Email)
-	}
-	if strings.TrimSpace(customer.Address) == "" {
-		updates["address"] = nil
-	} else {
-		updates["address"] = strings.TrimSpace(customer.Address)
-	}
-	if strings.TrimSpace(customer.Note) == "" {
-		updates["note"] = nil
-	} else {
-		updates["note"] = strings.TrimSpace(customer.Note)
-	}
-	if strings.TrimSpace(customer.TaxID) == "" {
-		updates["tax_id"] = nil
-	} else {
-		updates["tax_id"] = strings.TrimSpace(customer.TaxID)
-	}
-	if strings.TrimSpace(customer.Branch) == "" {
-		updates["branch"] = nil
-	} else {
-		updates["branch"] = strings.TrimSpace(customer.Branch)
-	}
+	setOrNull(updates, "phone", customer.Phone)
+	setOrNull(updates, "email", customer.Email)
+	setOrNull(updates, "address", customer.Address)
+	setOrNull(updates, "note", customer.Note)
+	setOrNull(updates, "tax_id", customer.TaxID)
+	setOrNull(updates, "branch", customer.Branch)
+	setOrNull(updates, "shipping_contact", customer.ShippingContact)
+	setOrNull(updates, "shipping_phone", customer.ShippingPhone)
+	setOrNull(updates, "shipping_address", customer.ShippingAddress)
+	setOrNull(updates, "shipping_province", customer.ShippingProvince)
+	setOrNull(updates, "shipping_district", customer.ShippingDistrict)
+	setOrNull(updates, "shipping_postal_code", customer.ShippingPostalCode)
+	setOrNull(updates, "delivery_note", customer.DeliveryNote)
 
 	result := r.db.WithContext(ctx).
 		Model(&Customer{}).
@@ -246,4 +234,60 @@ func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, us
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (r PostgresRepository) ListShippingAddresses(ctx context.Context, customerID string) ([]CustomerShippingAddress, error) {
+	var items []CustomerShippingAddress
+	err := r.db.WithContext(ctx).
+		Where("customer_id = ?", customerID).
+		Order("created_at ASC").
+		Find(&items).Error
+	return items, err
+}
+
+func (r PostgresRepository) CreateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error) {
+	if err := r.db.WithContext(ctx).Create(&addr).Error; err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	return addr, nil
+}
+
+func (r PostgresRepository) UpdateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error) {
+	result := r.db.WithContext(ctx).
+		Model(&CustomerShippingAddress{}).
+		Where("id = ? AND customer_id = ?", addr.ID, addr.CustomerID).
+		Updates(map[string]any{
+			"label":                addr.Label,
+			"recipient_name":       addr.RecipientName,
+			"recipient_phone":      addr.RecipientPhone,
+			"address":              addr.Address,
+			"sub_district":         addr.SubDistrict,
+			"district":             addr.District,
+			"province":             addr.Province,
+			"postal_code":          addr.PostalCode,
+			"note":                 addr.Note,
+			"use_customer_address": addr.UseCustomerAddress,
+			"is_default":           addr.IsDefault,
+			"updated_at":           addr.UpdatedAt,
+		})
+	if result.Error != nil {
+		return CustomerShippingAddress{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return CustomerShippingAddress{}, ErrShippingAddressNotFound
+	}
+	return addr, nil
+}
+
+func (r PostgresRepository) DeleteShippingAddress(ctx context.Context, addrID, customerID string) error {
+	result := r.db.WithContext(ctx).
+		Where("id = ? AND customer_id = ?", addrID, customerID).
+		Delete(&CustomerShippingAddress{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrShippingAddressNotFound
+	}
+	return nil
 }
