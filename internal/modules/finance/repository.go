@@ -361,15 +361,36 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 		cogsByDay[c.Day] = c.COGS
 	}
 
+	// Deduct per-day refunds so trend revenue matches P&L net revenue methodology.
+	type refundRow struct {
+		Day     string  `gorm:"column:day"`
+		Refunds float64 `gorm:"column:refunds"`
+	}
+	var refundRows []refundRow
+	err = r.db.WithContext(ctx).
+		Table("sale_returns sr").
+		Select("to_char(sr.created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS day, COALESCE(SUM(sr.refund_amount), 0) AS refunds").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ?", storeID, from, to).
+		Group("to_char(sr.created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')").
+		Find(&refundRows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	refundsByDay := make(map[string]float64, len(refundRows))
+	for _, rf := range refundRows {
+		refundsByDay[rf.Day] = rf.Refunds
+	}
+
 	points := make([]TrendPoint, 0, len(revRows))
 	var totalOrders int64
 	for _, rv := range revRows {
 		cogs := cogsByDay[rv.Day]
+		netRev := rv.Revenue - refundsByDay[rv.Day]
 		points = append(points, TrendPoint{
 			Day:     rv.Day,
-			Revenue: rv.Revenue,
+			Revenue: netRev,
 			COGS:    cogs,
-			Profit:  rv.Revenue - cogs,
+			Profit:  netRev - cogs,
 		})
 		totalOrders += rv.Orders
 	}
