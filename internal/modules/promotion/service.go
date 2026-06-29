@@ -111,6 +111,8 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 	if err != nil {
 		return nil, ErrInvalidBody
 	}
+	// Snapshot the prior campaign before overwriting it (Activity Center diff + restore).
+	oldData, _ := s.repo.GetData(ctx, storeID, id)
 	meta := extractMeta(data)
 	affected, err := s.repo.Update(ctx, storeID, id, map[string]any{
 		"name":       meta.Name,
@@ -126,6 +128,7 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 	if affected == 0 {
 		return nil, ErrNotFound
 	}
+	recordPromotionChange(ctx, oldData, string(data))
 	return json.RawMessage(data), nil
 }
 

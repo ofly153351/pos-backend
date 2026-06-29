@@ -2,6 +2,7 @@ package activity_log
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"pos-backend/internal/modules/auth"
@@ -28,6 +29,7 @@ type LogRequest struct {
 	Method     string
 	Path       string
 	IPAddress  string
+	Changes    JSONText
 }
 
 func (s Service) Log(ctx context.Context, req LogRequest) {
@@ -41,6 +43,7 @@ func (s Service) Log(ctx context.Context, req LogRequest) {
 		Method:     req.Method,
 		Path:       req.Path,
 		IPAddress:  req.IPAddress,
+		Changes:    req.Changes,
 	})
 }
 
@@ -79,6 +82,10 @@ func (s Service) List(ctx context.Context, actor auth.Claims, q ListQuery) (List
 			Path:       l.Path,
 			IPAddress:  l.IPAddress,
 			CreatedAt:  l.CreatedAt,
+			// Derived (never stored) — kept identical to the filter logic.
+			Severity: DeriveSeverity(l.Action, l.Module),
+			Category: DeriveCategory(l.Action, l.Module),
+			Changes:  json.RawMessage(l.Changes),
 		}
 	}
 	return ListResponse{Items: items, Total: total, Page: q.Page, Limit: q.Limit}, nil

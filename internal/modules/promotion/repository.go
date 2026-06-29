@@ -12,6 +12,7 @@ type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	List(ctx context.Context, storeID string) ([]json.RawMessage, error)
+	GetData(ctx context.Context, storeID, id string) (string, error)
 	Insert(ctx context.Context, row PromotionRow) error
 	Update(ctx context.Context, storeID, id string, updates map[string]any) (int64, error)
 	Delete(ctx context.Context, storeID, id string) (int64, error)
@@ -90,6 +91,19 @@ func (r PostgresRepository) List(ctx context.Context, storeID string) ([]json.Ra
 		out[i] = json.RawMessage(row.Data)
 	}
 	return out, nil
+}
+
+// GetData returns the stored campaign JSON for a promotion, or "" if it does not
+// exist. Used to snapshot the prior state for the Activity Center change log.
+func (r PostgresRepository) GetData(ctx context.Context, storeID, id string) (string, error) {
+	var data string
+	err := r.db.WithContext(ctx).
+		Table("promotions").
+		Select("data").
+		Where("store_id = ? AND id = ? AND deleted_at IS NULL", storeID, id).
+		Limit(1).
+		Scan(&data).Error
+	return data, err
 }
 
 func (r PostgresRepository) Insert(ctx context.Context, row PromotionRow) error {

@@ -31,14 +31,18 @@ func (h Handler) List(c *fiber.Ctx) error {
 
 	claims, _ := c.Locals(claimsLocalKey).(auth.Claims)
 	result, err := h.service.List(c.UserContext(), claims, ListQuery{
-		StoreID:  c.Params("storeID"),
-		Module:   c.Query("module"),
-		Action:   c.Query("action"),
-		UserID:   c.Query("user_id"),
-		DateFrom: c.Query("date_from"),
-		DateTo:   c.Query("date_to"),
-		Page:     page,
-		Limit:    limit,
+		StoreID:    c.Params("storeID"),
+		Module:     c.Query("module"),
+		Action:     c.Query("action"),
+		UserID:     c.Query("user_id"),
+		ResourceID: c.Query("resource_id"),
+		Severity:   c.Query("severity"),
+		Category:   c.Query("category"),
+		Search:     c.Query("q"),
+		DateFrom:   c.Query("date_from"),
+		DateTo:     c.Query("date_to"),
+		Page:       page,
+		Limit:      limit,
 	})
 	if err != nil {
 		if errors.Is(err, ErrForbidden) {

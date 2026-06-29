@@ -8,6 +8,7 @@ import (
 
 	"pos-backend/internal/idgen"
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/activitycapture"
 )
 
 type Service struct {
@@ -98,6 +99,7 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 	if err != nil {
 		return Store{}, err
 	}
+	beforeSnapshot := activitySnapshot(current)
 
 	if input.Name != nil {
 		current.Name = strings.TrimSpace(*input.Name)
@@ -174,6 +176,7 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 			)
 		}
 	}
+	activitycapture.Record(ctx, "store", beforeSnapshot, activitySnapshot(updated))
 	return updated, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"pos-backend/internal/modules/activity_log"
+	"pos-backend/internal/platform/activitycapture"
 )
 
 // moduleMap maps URL segment to canonical module name.
@@ -26,6 +27,7 @@ var moduleMap = map[string]string{
 	"purchase-orders":   "purchasing",
 	"stock-movements":   "stock",
 	"stock":             "stock",
+	"promotions":        "promotion",
 	"locations":         "location",
 	"vat":               "settings",
 	"bank-accounts":     "settings",
@@ -110,6 +112,11 @@ func parseModuleAction(method, rawPath string) (module, action, resourceID strin
 // successful mutating request (POST/PUT/PATCH/DELETE) to the activity_logs table.
 func ActivityLog(svc activity_log.Service) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// Install a change recorder so service-layer Update methods can capture a
+		// {before, after} field diff that we attach to the audit row below.
+		recorder := activitycapture.New()
+		c.SetUserContext(activitycapture.WithRecorder(c.UserContext(), recorder))
+
 		err := c.Next()
 
 		method := c.Method()
@@ -131,6 +138,7 @@ func ActivityLog(svc activity_log.Service) fiber.Handler {
 		claims := ClaimsFromContext(c)
 		path := c.Path()
 		module, action, resourceID := parseModuleAction(method, path)
+		changes := recorder.JSON() // nil unless a service recorded a diff
 
 		go svc.Log(context.Background(), activity_log.LogRequest{
 			StoreID:    storeID,
@@ -142,6 +150,7 @@ func ActivityLog(svc activity_log.Service) fiber.Handler {
 			Method:     method,
 			Path:       path,
 			IPAddress:  c.IP(),
+			Changes:    activity_log.JSONText(changes),
 		})
 
 		return err

@@ -9,6 +9,7 @@ import (
 
 	"pos-backend/internal/modules/auth"
 	"pos-backend/internal/modules/store"
+	"pos-backend/internal/platform/activitycapture"
 	"pos-backend/internal/platform/receipthtml"
 )
 
@@ -56,8 +57,14 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 		return ReceiptSettings{}, err
 	}
 
+	beforeSnapshot := activitySnapshot(current)
 	applyUpdate(&current, input)
-	return s.repo.Upsert(ctx, current)
+	updated, err := s.repo.Upsert(ctx, current)
+	if err != nil {
+		return ReceiptSettings{}, err
+	}
+	activitycapture.Record(ctx, "receipt_settings", beforeSnapshot, activitySnapshot(updated))
+	return updated, nil
 }
 
 func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSettings, error) {
@@ -102,13 +109,14 @@ func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSet
 	return result, nil
 }
 
+// defaultChannels — the canonical payment channels (keys mirror lib/payment-method.ts
+// on the frontend). Credit & debit cards are one combined "card" channel.
 func defaultChannels() PaymentChannels {
 	return PaymentChannels{
 		{Key: "cash", Enabled: true},
-		{Key: "credit_card", Enabled: false},
-		{Key: "debit_card", Enabled: false},
-		{Key: "promptpay", Enabled: true},
 		{Key: "bank_transfer", Enabled: true},
+		{Key: "promptpay", Enabled: true},
+		{Key: "card", Enabled: false},
 		{Key: "truemoney", Enabled: false},
 		{Key: "shopeepay", Enabled: false},
 	}

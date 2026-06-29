@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/activitycapture"
 )
 
 type Service struct {
@@ -157,7 +158,13 @@ func (s Service) UpdateMember(ctx context.Context, actor auth.Claims, storeID, u
 	if input.Status != nil {
 		statusPtr = &newStatus
 	}
-	return s.repo.UpdateMember(ctx, storeID, userID, rolePtr, statusPtr)
+	beforeSnapshot := map[string]any{"role": target.Role, "status": target.Status}
+	updated, err := s.repo.UpdateMember(ctx, storeID, userID, rolePtr, statusPtr)
+	if err != nil {
+		return Member{}, err
+	}
+	activitycapture.Record(ctx, "member", beforeSnapshot, map[string]any{"role": updated.Role, "status": updated.Status})
+	return updated, nil
 }
 
 func (s Service) RemoveMember(ctx context.Context, actor auth.Claims, storeID, userID string) error {
