@@ -25,12 +25,14 @@ type BillPDFInput struct {
 	IssueDate time.Time
 	DueDate   *time.Time // nil → "ไม่ระบุ"
 
-	Items       []InvoicePDFItem
-	Subtotal    float64
-	VATRate     float64
-	VATAmount   float64
-	TotalAmount float64
-	Note        string
+	Items         []InvoicePDFItem
+	Subtotal      float64
+	TotalDiscount float64 // Σ line discounts + bill discount (stored)
+	PreVatAmount  float64 // Subtotal - TotalDiscount (stored)
+	VATRate       float64
+	VATAmount     float64
+	TotalAmount   float64
+	Note          string
 }
 
 // RenderBillPDF generates an A4 Bill (ใบวางบิล) PDF.
@@ -183,8 +185,8 @@ func RenderBillPDF(in BillPDFInput) ([]byte, error) {
 	hRule(pdf)
 	pdf.Ln(3)
 
-	// ── 5. Items table (no discount column — bills show net amounts) ──────────
-	cNo, cDesc, cQty, cUnit, cPrice, cTotal := 8.0, 82.0, 18.0, 20.0, 21.0, 21.0
+	// ── 5. Items table (stored per-line discount so rows reconcile to Subtotal) ──
+	cNo, cDesc, cQty, cUnit, cPrice, cDisc, cTotal := 8.0, 70.0, 16.0, 16.0, 22.0, 20.0, 18.0
 
 	pdf.SetFillColor(237, 233, 254)
 	pdf.SetTextColor(88, 28, 135)
@@ -195,12 +197,18 @@ func RenderBillPDF(in BillPDFInput) ([]byte, error) {
 	pdf.CellFormat(cQty, rowH, "จำนวน", "TB", 0, "C", true, 0, "")
 	pdf.CellFormat(cUnit, rowH, "หน่วย", "TB", 0, "C", true, 0, "")
 	pdf.CellFormat(cPrice, rowH, "ราคา/หน่วย", "TB", 0, "R", true, 0, "")
+	pdf.CellFormat(cDisc, rowH, "ส่วนลด", "TB", 0, "R", true, 0, "")
 	pdf.CellFormat(cTotal, rowH, "รวม", "TB", 1, "R", true, 0, "")
 
 	pdf.SetTextColor(51, 65, 85)
 	pdf.SetFont(font, "", 9)
 	for i, it := range in.Items {
-		lineTotal := it.Quantity * it.UnitPrice
+		// Stored post-discount line total; never recompute Quantity*UnitPrice.
+		lineTotal := it.LineAmount
+		discCell := "-"
+		if it.LineDiscount > 0 {
+			discCell = "-" + money(it.LineDiscount)
+		}
 		fill := i%2 == 1
 		if fill {
 			pdf.SetFillColor(250, 248, 255)
@@ -212,6 +220,7 @@ func RenderBillPDF(in BillPDFInput) ([]byte, error) {
 		pdf.CellFormat(cQty, rowH, fmtQtyPDF(it.Quantity), "B", 0, "C", fill, 0, "")
 		pdf.CellFormat(cUnit, rowH, it.Unit, "B", 0, "C", fill, 0, "")
 		pdf.CellFormat(cPrice, rowH, money(it.UnitPrice), "B", 0, "R", fill, 0, "")
+		pdf.CellFormat(cDisc, rowH, discCell, "B", 0, "R", fill, 0, "")
 		pdf.CellFormat(cTotal, rowH, money(lineTotal), "B", 1, "R", fill, 0, "")
 	}
 	pdf.Ln(3)
@@ -224,6 +233,10 @@ func RenderBillPDF(in BillPDFInput) ([]byte, error) {
 	pdf.SetTextColor(100, 116, 139)
 	pdf.SetFont(font, "", 9)
 	summaryRow(pdf, font, sumX, sumLabelW, sumValueW, "ยอดรวม / Subtotal", money(in.Subtotal), false, false)
+	if in.TotalDiscount > 0 {
+		summaryRow(pdf, font, sumX, sumLabelW, sumValueW, "ส่วนลด / Discount", "-"+money(in.TotalDiscount), false, false)
+		summaryRow(pdf, font, sumX, sumLabelW, sumValueW, "ยอดก่อนภาษี / Pre-VAT", money(in.PreVatAmount), false, false)
+	}
 	if in.VATRate > 0 {
 		summaryRow(pdf, font, sumX, sumLabelW, sumValueW,
 			fmt.Sprintf("VAT %.0f%%", in.VATRate), money(in.VATAmount), false, false)

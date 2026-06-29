@@ -96,11 +96,13 @@ func (s Service) StoreBankAccountInfos(ctx context.Context, storeID string) []do
 }
 
 // documentVAT returns the VAT rate/amount a customer-facing document should display.
-// It mirrors the receipt (GenerateReceiptHTML): VAT is only broken out for stores that
-// charge it exclusively. Inclusive / no-VAT stores show no VAT line — the tax it
-// already embeds keeps the grand total equal to the amount the customer paid.
-func documentVAT(s Sale, sv ReceiptSettingsView) (rate, amount float64) {
-	if sv.TaxMode == "exclusive" && s.VATPercent > 0 {
+// VAT is broken out whenever the sale actually carried VAT (vat_percent > 0 and a
+// stored vat_amount), regardless of inclusive vs exclusive pricing — matching the
+// document module (toDocData) and the legacy invoice render so the SAME document type
+// never shows a VAT line on one path and hides it on another. For inclusive pricing the
+// VAT is the carved-out portion; the grand total is unchanged.
+func documentVAT(s Sale, _ ReceiptSettingsView) (rate, amount float64) {
+	if s.VATPercent > 0 && s.VATAmount > 0 {
 		return s.VATPercent, roundMoney(s.VATAmount)
 	}
 	return 0, 0

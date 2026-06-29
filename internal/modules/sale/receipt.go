@@ -85,12 +85,18 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 	// Use authoritative stored totals (computed by repository at sale time) so the
 	// receipt always matches the amount the customer was actually charged.
 	grandTotal := roundMoney(s.TotalAmount)
+	// Break out VAT whenever the sale actually carried it. Driven by how VAT was computed
+	// (s.VATIncluded), NOT the display-only TaxMode flag, so inclusive and exclusive
+	// receipts both show VAT consistently with the A4 documents (document.documentVAT).
 	vatAmount := roundMoney(s.VATAmount)
-	if sv.TaxMode != "exclusive" {
-		vatAmount = 0
+	// "รวมก่อน VAT" = goods value excluding VAT. Taxable base = subtotal − total discount
+	// (the exact value the repository taxed at sale time); for inclusive pricing the VAT
+	// is carved out of it. Derived from stored subtotal/discount so it reconciles to the
+	// whole-baht total and matches the document renderer's pre-VAT line (toDocData).
+	afterDiscount := roundMoney(s.SubtotalAmount - s.DiscountAmount)
+	if s.VATIncluded {
+		afterDiscount = roundMoney(afterDiscount - vatAmount)
 	}
-	// afterDiscount keeps full 2dp precision for transparency on the receipt.
-	afterDiscount := roundMoney(grandTotal - vatAmount)
 	if afterDiscount < 0 {
 		afterDiscount = 0
 	}
@@ -140,9 +146,11 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 
 	promptPayID := strings.TrimSpace(s.StorePromptPayID)
 	promptPayQR := ""
-	// Only generate QR when: setting enabled + ID present + generated URI is non-empty
+	// Only generate QR when: setting enabled + ID present + generated URI is non-empty.
+	// Encode displayGrandTotal — the exact figure printed on the receipt and used for
+	// change — so the scanned amount always equals what the customer is asked to pay.
 	if sv.ShowQr && promptPayID != "" {
-		uri := receipthtml.PromptPayQRDataURI(promptPayID, grandTotal)
+		uri := receipthtml.PromptPayQRDataURI(promptPayID, displayGrandTotal)
 		if uri != "" {
 			promptPayQR = uri
 		}

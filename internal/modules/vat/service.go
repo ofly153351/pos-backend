@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"pos-backend/internal/modules/auth"
+	"pos-backend/internal/platform/taxcalc"
 )
 
 type Service struct {
@@ -67,16 +68,9 @@ func (s Service) Calculate(req CalculateVATRequest) (VATSummary, error) {
 		afterDiscount = 0
 	}
 
-	vatAmount := 0.0
-	grandTotal := afterDiscount
-	if vatPercent > 0 {
-		if vatIncluded {
-			vatAmount = afterDiscount * vatPercent / (100 + vatPercent)
-		} else {
-			vatAmount = afterDiscount * vatPercent / 100
-			grandTotal = afterDiscount + vatAmount
-		}
-	}
+	// Canonical VAT formula, shared with the sale + invoice modules so a preview can
+	// never diverge from what a sale actually charges.
+	vatAmount, grandTotal := taxcalc.ComputeVAT(afterDiscount, vatPercent, vatIncluded)
 
 	return VATSummary{
 		Subtotal:      roundMoney(subtotal),
@@ -84,8 +78,8 @@ func (s Service) Calculate(req CalculateVATRequest) (VATSummary, error) {
 		DiscountBill:  roundMoney(discountBill),
 		AfterDiscount: roundMoney(afterDiscount),
 		VATPercent:    vatPercent,
-		VATAmount:     roundMoney(vatAmount),
-		GrandTotal:    roundMoney(grandTotal),
+		VATAmount:     vatAmount,
+		GrandTotal:    grandTotal,
 		VATIncluded:   vatIncluded,
 	}, nil
 }

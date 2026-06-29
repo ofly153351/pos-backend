@@ -54,6 +54,10 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 	}
 
 	logoBytes, logoExt := fetchLogo(doc.StoreLogoURL)
+	// Canonical numbers — identical to what the HTML document / receipt render.
+	// The PDF prints these verbatim; opts.DiscountPercent is intentionally ignored
+	// (it was the source of the discount-omitted / VAT-on-pre-discount bug).
+	dd := toDocData(doc)
 	in := docpdf.InvoicePDFInput{
 		SellerName:      doc.StoreName,
 		SellerAddress:   doc.StoreAddress,
@@ -72,24 +76,30 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 		DueDate:     dueDate,
 		ReferenceDO: opts.ReferenceDO,
 
-		VATRegistered:   doc.VatRate > 0,
-		DiscountPercent: opts.DiscountPercent,
+		Subtotal:      dd.Subtotal,
+		TotalDiscount: dd.TotalDiscount,
+		PreVatAmount:  dd.PreVatAmount,
+		VATRate:       dd.VatRate,
+		VATAmount:     dd.VatAmount,
+		TotalAmount:   dd.TotalAmount,
 
 		BankName:      opts.BankName,
 		AccountNumber: opts.AccountNumber,
 		PromptPay:     opts.PromptPay,
 		Note:          noteStr(doc.Notes),
 	}
-	for _, it := range doc.Items {
+	for _, it := range dd.Items {
 		unit := it.Unit
 		if unit == "" {
 			unit = defaultUnit
 		}
 		in.Items = append(in.Items, docpdf.InvoicePDFItem{
-			Description: it.Description,
-			Quantity:    it.Quantity,
-			Unit:        unit,
-			UnitPrice:   it.UnitPrice,
+			Description:  it.Description,
+			Quantity:     it.Quantity,
+			Unit:         unit,
+			UnitPrice:    it.UnitPrice,
+			LineDiscount: it.DiscountValue,
+			LineAmount:   it.Amount,
 		})
 	}
 
@@ -118,6 +128,8 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 	}
 
 	billLogoBytes, billLogoExt := fetchLogo(doc.StoreLogoURL)
+	// Same canonical numbers as the HTML document / receipt — printed verbatim.
+	dd := toDocData(doc)
 	in := docpdf.BillPDFInput{
 		SellerName:      doc.StoreName,
 		SellerAddress:   doc.StoreAddress,
@@ -134,26 +146,30 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 		IssueDate: doc.DocumentDate,
 		DueDate:   doc.DueDate,
 
-		Subtotal:    doc.Subtotal,
-		VATRate:     doc.VatRate,
-		VATAmount:   doc.VatAmount,
-		TotalAmount: doc.TotalAmount,
-		Note:        noteStr(doc.Notes),
+		Subtotal:      dd.Subtotal,
+		TotalDiscount: dd.TotalDiscount,
+		PreVatAmount:  dd.PreVatAmount,
+		VATRate:       dd.VatRate,
+		VATAmount:     dd.VatAmount,
+		TotalAmount:   dd.TotalAmount,
+		Note:          noteStr(doc.Notes),
 	}
 	defaultUnit := opts.DefaultUnit
 	if defaultUnit == "" {
 		defaultUnit = "ชิ้น"
 	}
-	for _, it := range doc.Items {
+	for _, it := range dd.Items {
 		unit := it.Unit
 		if unit == "" {
 			unit = defaultUnit
 		}
 		in.Items = append(in.Items, docpdf.InvoicePDFItem{
-			Description: it.Description,
-			Quantity:    it.Quantity,
-			Unit:        unit,
-			UnitPrice:   it.UnitPrice,
+			Description:  it.Description,
+			Quantity:     it.Quantity,
+			Unit:         unit,
+			UnitPrice:    it.UnitPrice,
+			LineDiscount: it.DiscountValue,
+			LineAmount:   it.Amount,
 		})
 	}
 

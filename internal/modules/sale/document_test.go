@@ -81,17 +81,22 @@ func TestBuildSaleDocDataNoteOptional(t *testing.T) {
 	}
 }
 
-// documentVAT mirrors the receipt: VAT only breaks out for an exclusive-tax store.
+// documentVAT breaks out VAT whenever the sale actually carried it (vat_percent>0 &&
+// vat_amount>0), independent of the store's display-only TaxMode flag — so inclusive and
+// exclusive sales both show VAT consistently with the A4 documents and the legacy invoice.
 func TestDocumentVAT(t *testing.T) {
 	s := sampleSaleForDoc() // VATPercent 7, VATAmount 63
-	if r, a := documentVAT(s, ReceiptSettingsView{TaxMode: "exclusive"}); r != 7 || a != 63 {
-		t.Errorf("exclusive: got rate=%v amount=%v, want 7/63", r, a)
+	for _, mode := range []string{"exclusive", "inclusive", "none"} {
+		if r, a := documentVAT(s, ReceiptSettingsView{TaxMode: mode}); r != 7 || a != 63 {
+			t.Errorf("%s: got rate=%v amount=%v, want 7/63 (TaxMode must not gate VAT)", mode, r, a)
+		}
 	}
-	if r, a := documentVAT(s, ReceiptSettingsView{TaxMode: "inclusive"}); r != 0 || a != 0 {
-		t.Errorf("inclusive: got rate=%v amount=%v, want 0/0 (VAT stays embedded)", r, a)
-	}
-	if r, a := documentVAT(s, ReceiptSettingsView{TaxMode: "none"}); r != 0 || a != 0 {
-		t.Errorf("none: got rate=%v amount=%v, want 0/0", r, a)
+	// A sale with no stored VAT shows no VAT line.
+	noVat := s
+	noVat.VATPercent = 0
+	noVat.VATAmount = 0
+	if r, a := documentVAT(noVat, ReceiptSettingsView{TaxMode: "exclusive"}); r != 0 || a != 0 {
+		t.Errorf("no-vat: got rate=%v amount=%v, want 0/0", r, a)
 	}
 }
 

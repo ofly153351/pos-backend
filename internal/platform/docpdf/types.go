@@ -22,9 +22,23 @@ type InvoicePDFInput struct {
 	DueDate     time.Time
 	ReferenceDO string // optional
 
-	Items           []InvoicePDFItem
-	DiscountPercent float64 // 0 = no discount
-	VATRegistered   bool
+	// Document identity + copy context (per Thai Revenue copy/original rules).
+	DocTitleTH    string // e.g. "ใบส่งของ / ใบกำกับภาษี" (empty → falls back to Invoice)
+	DocTitleEN    string // e.g. "Delivery Note / Tax Invoice"
+	BadgeText     string // e.g. "ต้นฉบับ (Original)" / "สำเนา (Copy)"
+	PurposeText   string // e.g. "(สำหรับลูกค้า)"
+	ShowSignature bool   // draw the goods-received signature block on this copy
+
+	Items []InvoicePDFItem
+	// Stored, authoritative totals — taken verbatim from the document (toDocData),
+	// never recomputed here. This is what guarantees the PDF matches the receipt /
+	// HTML document / stored sale exactly.
+	Subtotal      float64 // Σ pre-discount line amounts
+	TotalDiscount float64 // Σ line discounts + bill discount
+	PreVatAmount  float64 // taxable base = Subtotal - TotalDiscount
+	VATRate       float64 // 0 = no VAT line
+	VATAmount     float64
+	TotalAmount   float64 // grand total (stored, already rounded)
 
 	BankName      string
 	AccountNumber string
@@ -37,6 +51,11 @@ type InvoicePDFItem struct {
 	Quantity    float64
 	Unit        string
 	UnitPrice   float64
+	// LineDiscount is the per-line discount value (stored). LineAmount is the
+	// post-discount line total (stored doc item Amount). Both come verbatim from
+	// the document so printed rows reconcile to the Subtotal box.
+	LineDiscount float64
+	LineAmount   float64
 }
 
 // ── Statement PDF ─────────────────────────────────────────────────────────────

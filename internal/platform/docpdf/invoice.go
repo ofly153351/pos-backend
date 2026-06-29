@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jung-kurt/gofpdf"
+
+	"pos-backend/internal/platform/doccopy"
 )
 
 const (
@@ -17,34 +19,65 @@ const (
 )
 
 // RenderInvoicePDF generates an A4 Invoice PDF and returns the raw bytes.
+//
+// All financial figures are taken VERBATIM from the stored document totals
+// (Subtotal / TotalDiscount / VATAmount / TotalAmount) — the builder never
+// recomputes subtotal, discount or VAT. This guarantees the Invoice PDF shows
+// the same numbers as the receipt, the HTML document and the stored sale.
 func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
-	// ── Calculations ──────────────────────────────────────────────────────────
-	var subtotal float64
-	for _, it := range in.Items {
-		subtotal += it.Quantity * it.UnitPrice
-	}
-	discountAmt := math.Round(subtotal*in.DiscountPercent/100*100) / 100
-	afterDiscount := subtotal - discountAmt
-	var vatAmt float64
-	if in.VATRegistered {
-		vatAmt = math.Round(afterDiscount*0.07*100) / 100
-	}
-	totalDue := afterDiscount + vatAmt
+	return RenderInvoicePDFCopies(in, nil)
+}
 
-	// ── PDF setup ─────────────────────────────────────────────────────────────
+// RenderInvoicePDFCopies renders one A4 page per copy variant into a SINGLE PDF
+// (Original + Copy set), each page stamped with its "ต้นฉบับ/สำเนา" badge per the
+// Thai Revenue copy rules. nil/empty variants → a single page (no badge), keeping
+// the original single-document behaviour.
+func RenderInvoicePDFCopies(in InvoicePDFInput, variants []doccopy.CopyVariant) ([]byte, error) {
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(margin, margin, margin)
 	pdf.SetAutoPageBreak(true, margin)
-	pdf.AddPage()
 	font := registerFont(pdf)
 
+	if len(variants) == 0 {
+		pdf.AddPage()
+		drawInvoicePage(pdf, font, in)
+	} else {
+		for _, v := range variants {
+			pi := in // copy: per-page badge/purpose/signature
+			pi.BadgeText = v.BadgeLabel()
+			pi.PurposeText = v.Purpose
+			pi.ShowSignature = v.ShowSignature
+			pdf.AddPage()
+			drawInvoicePage(pdf, font, pi)
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, fmt.Errorf("pdf render: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// drawInvoicePage draws one complete document page onto the current pdf page.
+func drawInvoicePage(pdf *gofpdf.Fpdf, font string, in InvoicePDFInput) {
+	// ── Stored totals (no recompute) ──────────────────────────────────────────
+	subtotal := in.Subtotal
+	discountAmt := in.TotalDiscount
+	vatAmt := in.VATAmount
+	totalDue := in.TotalAmount
+
 	// ── 1. Header band ────────────────────────────────────────────────────────
+	titleBand := "ใบแจ้งหนี้  /  Invoice"
+	if in.DocTitleTH != "" {
+		titleBand = in.DocTitleTH + "  /  " + in.DocTitleEN
+	}
 	pdf.SetFillColor(109, 40, 217)
 	pdf.Rect(0, 0, pageW, 12, "F")
 	pdf.SetTextColor(255, 255, 255)
 	pdf.SetFont(font, "", 8)
 	pdf.SetXY(margin, 3.5)
-	pdf.CellFormat(body, 5, "ใบแจ้งหนี้  /  Invoice", "", 1, "R", false, 0, "")
+	pdf.CellFormat(body, 5, titleBand, "", 1, "R", false, 0, "")
 
 	// ── 1b. Logo + seller name row ────────────────────────────────────────────
 	const logoW, logoH = 50.0, 12.5 // 480px×120px ratio at PDF scale
@@ -81,16 +114,42 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 		pdf.CellFormat(nameW, 4.5, "TIN: "+in.SellerTaxID, "", 1, "L", false, 0, "")
 	}
 
-	// ── 2b. INVOICE title ─────────────────────────────────────────────────────
+	// ── 2b. Document title ────────────────────────────────────────────────────
+	bigTitle := "INVOICE"
+	if in.DocTitleEN != "" {
+		bigTitle = in.DocTitleEN
+	}
 	pdf.SetTextColor(30, 27, 75)
 	pdf.SetXY(margin, 30)
-	pdf.SetFont(font, "", 22)
-	pdf.CellFormat(body/2, 12, "INVOICE", "", 0, "L", false, 0, "")
+	pdf.SetFont(font, "", 20)
+	pdf.CellFormat(body/2, 12, bigTitle, "", 0, "L", false, 0, "")
 
-	// Right: doc number, dates
+	// ── 2c. Copy badge (ต้นฉบับ/สำเนา) — top-right corner per Revenue rules ─────
+	metaY := 17.0
+	if in.BadgeText != "" {
+		bw := 42.0
+		bx := pageW - margin - bw
+		pdf.SetDrawColor(30, 27, 75)
+		pdf.SetLineWidth(0.4)
+		pdf.SetFont(font, "", 10)
+		pdf.SetTextColor(30, 27, 75)
+		pdf.SetXY(bx, 14.5)
+		pdf.CellFormat(bw, 6, in.BadgeText, "1", 1, "C", false, 0, "")
+		if in.PurposeText != "" {
+			pdf.SetFont(font, "", 7)
+			pdf.SetTextColor(110, 116, 139)
+			pdf.SetXY(bx, 21)
+			pdf.CellFormat(bw, 4, in.PurposeText, "", 1, "C", false, 0, "")
+		}
+		pdf.SetTextColor(30, 27, 75)
+		pdf.SetLineWidth(0.2)
+		metaY = 26.0
+	}
+
+	// Right: doc number, dates (pushed below the badge when present)
 	pdf.SetFont(font, "", 9)
-	pdf.SetXY(margin+body/2, 17)
-	pdf.CellFormat(body/4, 6, "เลขที่เอกสาร / Invoice No.", "", 0, "R", false, 0, "")
+	pdf.SetXY(margin+body/2, metaY)
+	pdf.CellFormat(body/4, 6, "เลขที่เอกสาร / Doc No.", "", 0, "R", false, 0, "")
 	pdf.SetFont(font, "", 9)
 	pdf.CellFormat(body/4, 6, in.InvoiceNo, "", 1, "R", false, 0, "")
 
@@ -142,12 +201,13 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 
 	// ── 4. Line items table ───────────────────────────────────────────────────
 	cNo := 8.0
-	cDesc := 72.0
-	cQty := 18.0
-	cUnit := 20.0
-	cUnitPrice := 26.0
-	cTotal := 26.0
-	// cNo+cDesc+cQty+cUnit+cUnitPrice+cTotal = 170 = body ✓
+	cDesc := 60.0
+	cQty := 16.0
+	cUnit := 16.0
+	cUnitPrice := 24.0
+	cDisc := 22.0
+	cTotal := 24.0
+	// cNo+cDesc+cQty+cUnit+cUnitPrice+cDisc+cTotal = 170 = body ✓
 
 	// Header row
 	pdf.SetFillColor(237, 233, 254) // violet-100
@@ -158,13 +218,19 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 	pdf.CellFormat(cDesc, rowH, "รายการ / Description", "TB", 0, "L", true, 0, "")
 	pdf.CellFormat(cQty, rowH, "จำนวน", "TB", 0, "C", true, 0, "")
 	pdf.CellFormat(cUnit, rowH, "หน่วย", "TB", 0, "C", true, 0, "")
-	pdf.CellFormat(cUnitPrice, rowH, "ราคาต่อหน่วย", "TB", 0, "R", true, 0, "")
+	pdf.CellFormat(cUnitPrice, rowH, "ราคา/หน่วย", "TB", 0, "R", true, 0, "")
+	pdf.CellFormat(cDisc, rowH, "ส่วนลด", "TB", 0, "R", true, 0, "")
 	pdf.CellFormat(cTotal, rowH, "รวม", "TB", 1, "R", true, 0, "")
 
 	pdf.SetTextColor(51, 65, 85) // slate-700
 	pdf.SetFont(font, "", 9)
 	for i, it := range in.Items {
-		lineTotal := it.Quantity * it.UnitPrice
+		// Stored post-discount line total; never recompute Quantity*UnitPrice.
+		lineTotal := it.LineAmount
+		discCell := "-"
+		if it.LineDiscount > 0 {
+			discCell = "-" + money(it.LineDiscount)
+		}
 		fill := i%2 == 1
 		if fill {
 			pdf.SetFillColor(250, 248, 255)
@@ -176,6 +242,7 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 		pdf.CellFormat(cQty, rowH, fmtQtyPDF(it.Quantity), "B", 0, "C", fill, 0, "")
 		pdf.CellFormat(cUnit, rowH, it.Unit, "B", 0, "C", fill, 0, "")
 		pdf.CellFormat(cUnitPrice, rowH, money(it.UnitPrice), "B", 0, "R", fill, 0, "")
+		pdf.CellFormat(cDisc, rowH, discCell, "B", 0, "R", fill, 0, "")
 		pdf.CellFormat(cTotal, rowH, money(lineTotal), "B", 1, "R", fill, 0, "")
 	}
 	pdf.Ln(4)
@@ -192,11 +259,13 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 
 	if discountAmt > 0 {
 		summaryRow(pdf, font, sumX, sumLabelW, sumValueW,
-			fmt.Sprintf("ส่วนลด %.2f%% / Discount", in.DiscountPercent),
-			"-"+money(discountAmt), false, false)
+			"ส่วนลด / Discount", "-"+money(discountAmt), false, false)
+		summaryRow(pdf, font, sumX, sumLabelW, sumValueW,
+			"ยอดก่อนภาษี / Pre-VAT", money(in.PreVatAmount), false, false)
 	}
-	if in.VATRegistered {
-		summaryRow(pdf, font, sumX, sumLabelW, sumValueW, "ภาษีมูลค่าเพิ่ม 7% / VAT", money(vatAmt), false, false)
+	if in.VATRate > 0 {
+		summaryRow(pdf, font, sumX, sumLabelW, sumValueW,
+			fmt.Sprintf("ภาษีมูลค่าเพิ่ม %g%% / VAT", in.VATRate), money(vatAmt), false, false)
 	}
 
 	// Total due — bold + accent
@@ -237,11 +306,34 @@ func RenderInvoicePDF(in InvoicePDFInput) ([]byte, error) {
 		}
 	}
 
-	var buf bytes.Buffer
-	if err := pdf.Output(&buf); err != nil {
-		return nil, fmt.Errorf("pdf render: %w", err)
+	// ── 7. Goods-received signature block (company copy only) ────────────────
+	if in.ShowSignature {
+		drawInvoiceSignature(pdf, font)
 	}
-	return buf.Bytes(), nil
+}
+
+// drawInvoiceSignature draws the two-column delivered-by / received-by signature
+// block at the bottom of the page.
+func drawInvoiceSignature(pdf *gofpdf.Fpdf, font string) {
+	pdf.Ln(10)
+	y := pdf.GetY()
+	if y > pageH-40 {
+		y = pageH - 40
+	}
+	colW := body / 2
+	for i, label := range []string{"ผู้ส่งสินค้า / Delivered By", "ผู้รับสินค้า / Received By"} {
+		x := margin + float64(i)*colW
+		lineY := y + 12
+		pdf.SetDrawColor(120, 120, 120)
+		pdf.SetLineWidth(0.2)
+		pdf.Line(x+6, lineY, x+colW-12, lineY)
+		pdf.SetXY(x, lineY+1)
+		pdf.SetFont(font, "", 8)
+		pdf.SetTextColor(100, 116, 139)
+		pdf.CellFormat(colW-6, 5, label, "", 0, "C", false, 0, "")
+		pdf.SetXY(x, lineY+6)
+		pdf.CellFormat(colW-6, 5, "วันที่ / Date ......./......./.......", "", 0, "C", false, 0, "")
+	}
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pos-backend/internal/idgen"
+	"pos-backend/internal/platform/taxcalc"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -136,17 +137,10 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	if sale.VATPercent < 0 {
 		sale.VATPercent = 0
 	}
-	if sale.VATIncluded {
-		if sale.VATPercent > 0 {
-			sale.VATAmount = roundMoney(afterDiscount * sale.VATPercent / (100 + sale.VATPercent))
-		}
-		sale.TotalAmount = afterDiscount
-	} else {
-		if sale.VATPercent > 0 {
-			sale.VATAmount = roundMoney(afterDiscount * sale.VATPercent / 100)
-		}
-		sale.TotalAmount = roundMoney(afterDiscount + sale.VATAmount)
-	}
+	// Canonical VAT formula, shared with the invoice module and the /vat/calculate
+	// preview (internal/platform/taxcalc). afterDiscount is the taxable base; the grand
+	// total is rounded to whole baht just below for whole-baht cash collection.
+	sale.VATAmount, sale.TotalAmount = taxcalc.ComputeVAT(afterDiscount, sale.VATPercent, sale.VATIncluded)
 	// Round the final bill total to whole baht. The POS displays and collects integer
 	// totals — the cashier's "ยอดสุทธิ" and the customer's paid amount are both whole
 	// baht — so the payable is rounded half-up here, the single source of truth. This
@@ -467,7 +461,10 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID, dateFrom, 
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
-		Where("s.store_id = ?", storeID)
+		// Loans (ยืมสินค้า) create a sale row only to deduct stock; a returned loan's row
+		// stays status='completed' forever, so exclude them from the sales history — they
+		// are not sales. Real credit sales (credit_sales.type='credit') still appear.
+		Where("s.store_id = ? AND NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')", storeID)
 
 	// Date window is interpreted as Bangkok calendar days (the store's wall clock),
 	// matching the finance module's `AT TIME ZONE 'Asia/Bangkok'` convention. Comparing
