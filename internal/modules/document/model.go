@@ -49,6 +49,11 @@ type Document struct {
 	DueDate        *time.Time     `json:"due_date,omitempty"`
 	ValidUntil     *time.Time     `json:"valid_until,omitempty"`
 	Subtotal       float64        `gorm:"not null;default:0" json:"subtotal"`
+	// BillDiscount is a whole-bill discount applied on top of the per-item
+	// discount_value (migration 054). It exists so a document issued from a POS
+	// sale can mirror that sale's bill-level discount; manually-created documents
+	// leave it 0. toDocData folds it into the rendered "ส่วนลด" line.
+	BillDiscount   float64        `gorm:"not null;default:0" json:"bill_discount"`
 	VatRate        float64        `gorm:"not null;default:0" json:"vat_rate"`
 	VatAmount      float64        `gorm:"not null;default:0" json:"vat_amount"`
 	TotalAmount    float64        `gorm:"not null;default:0" json:"total_amount"`

@@ -18,6 +18,9 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 
 	protected.Get("/stores/:storeID/documents", h.ListDocuments)
 	protected.Post("/stores/:storeID/documents", h.CreateDocument)
+	// Issue a persisted document (e.g. TAX_INVOICE) from a POS sale, copying the
+	// sale's authoritative totals so the document matches the receipt exactly.
+	protected.Post("/stores/:storeID/sales/:saleID/documents", h.CreateFromSale)
 	protected.Get("/stores/:storeID/documents/statement", h.GetStatementPDF)
 	protected.Get("/stores/:storeID/documents/:docID", h.GetDocument)
 	protected.Get("/stores/:storeID/documents/:docID/print", h.PrintDocument)

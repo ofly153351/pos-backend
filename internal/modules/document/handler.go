@@ -59,6 +59,24 @@ func (h Handler) CreateDocument(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "document created", doc)
 }
 
+// CreateFromSale issues a persisted document (TAX_INVOICE by default) from a POS sale,
+// mirroring the sale's authoritative totals so the document matches the receipt.
+// Body: { "type": "TAX_INVOICE" }. The sale id comes from the route.
+func (h Handler) CreateFromSale(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	saleID := c.Params("saleID")
+	var req struct {
+		Type string `json:"type"`
+	}
+	// Body is optional — default to TAX_INVOICE when absent/empty.
+	_ = c.BodyParser(&req)
+	doc, err := h.service.CreateFromSale(c.UserContext(), middleware.ClaimsFromContext(c), storeID, saleID, req.Type)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "document created from sale", doc)
+}
+
 func (h Handler) UpdateDocumentStatus(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")

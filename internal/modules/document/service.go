@@ -188,11 +188,6 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		deliveryDate = &t
 	}
 
-	// Document number is generated per-attempt inside the create-retry loop below.
-	prefix := typePrefix(req.Type)
-	now := time.Now()
-	buddhistYear := now.Year() + 543
-
 	// Build items + totals (round to 2 dp to avoid float64 precision drift)
 	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
 
@@ -266,13 +261,23 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CreatedBy:      actor.UserID,
 	}
 
-	// Assign the document number and insert, retrying on a unique-violation: a
-	// concurrent create (or a NextSeq race) can hand two documents the same number,
-	// so step the sequence forward and try again rather than 500-ing.
+	return s.assignNumberAndInsert(doc)
+}
+
+// assignNumberAndInsert stamps doc with the next per-store/per-type document number
+// and inserts it, retrying on a unique-violation: a concurrent create (or a NextSeq
+// race) can hand two documents the same number, so step the sequence forward and try
+// again rather than 500-ing. Shared by CreateDocument and CreateFromSale so both speak
+// the same numbering scheme.
+func (s Service) assignNumberAndInsert(doc *Document) (*Document, error) {
+	prefix := typePrefix(doc.Type)
+	now := time.Now()
+	buddhistYear := now.Year() + 543
+
 	const maxDocNoAttempts = 6
 	var createErr error
 	for attempt := 0; attempt < maxDocNoAttempts; attempt++ {
-		seq, _ := s.repo.NextSeq(storeID, req.Type)
+		seq, _ := s.repo.NextSeq(doc.StoreID, doc.Type)
 		seq += int64(attempt)
 		doc.DocumentNo = fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
 		doc.DocumentNoFull = fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
@@ -296,6 +301,194 @@ func isDuplicateDocNo(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "23505") || strings.Contains(msg, "duplicate key")
+}
+
+// CreateFromSale issues a persisted customer-facing document (e.g. TAX_INVOICE) from a
+// completed POS sale, copying the sale's AUTHORITATIVE stored totals instead of
+// recomputing them. This is the single source of truth that guarantees the document's
+// subtotal / discount / VAT / grand-total exactly match the sale's receipt.
+//
+// Why not reuse CreateDocument: that path recomputes the subtotal from gross unit
+// prices, has no field for a whole-bill discount, and always treats VAT as exclusive —
+// so a sale with a bill discount and/or VAT-inclusive (or zero-VAT) pricing came out
+// with the wrong subtotal, a dropped discount and a spurious VAT line. Here every money
+// figure is taken verbatim from the sale row the cashier already collected against.
+func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID, saleID, docType string) (*Document, error) {
+	if err := s.ensureAccess(actor, storeID); err != nil {
+		return nil, err
+	}
+	dt := DocumentType(strings.ToUpper(strings.TrimSpace(docType)))
+	if dt == "" {
+		dt = TypeTaxInvoice
+	}
+
+	// 1. Authoritative sale row (stored totals computed by the sale repository at sale
+	//    time — the same numbers the receipt prints).
+	var sr struct {
+		SaleNumber         string    `gorm:"column:sale_number"`
+		CustomerID         string    `gorm:"column:customer_id"`
+		CustomerName       string    `gorm:"column:customer_name"`
+		CustomerPhone      string    `gorm:"column:customer_phone"`
+		CustomerTaxID      string    `gorm:"column:customer_tax_id"`
+		Note               string    `gorm:"column:note"`
+		SubtotalAmount     float64   `gorm:"column:subtotal_amount"`
+		DiscountAmount     float64   `gorm:"column:discount_amount"`
+		BillDiscountAmount float64   `gorm:"column:bill_discount_amount"`
+		VATPercent         float64   `gorm:"column:vat_percent"`
+		VATAmount          float64   `gorm:"column:vat_amount"`
+		TotalAmount        float64   `gorm:"column:total_amount"`
+		SoldAt             time.Time `gorm:"column:sold_at"`
+		CreatedAt          time.Time `gorm:"column:created_at"`
+	}
+	if err := s.db.Table("sales").
+		Where("id = ? AND store_id = ?", saleID, storeID).
+		Take(&sr).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	// 2. Sale line items (UnitPrice is gross/pre-discount; LineTotal is what the
+	//    customer paid for the line; LineDiscountTotal is the per-line discount × qty).
+	var rows []struct {
+		ProductID         string  `gorm:"column:product_id"`
+		ProductName       string  `gorm:"column:product_name"`
+		UnitType          string  `gorm:"column:unit_type"`
+		Quantity          float64 `gorm:"column:quantity"`
+		UnitPrice         float64 `gorm:"column:unit_price"`
+		LineDiscountTotal float64 `gorm:"column:line_discount_total"`
+		LineTotal         float64 `gorm:"column:line_total"`
+	}
+	if err := s.db.Table("sale_items").
+		Where("sale_id = ?", saleID).
+		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNoItems
+	}
+
+	// 3. VAT display mirrors the receipt: it is only broken out when the store charges
+	//    VAT exclusively. Inclusive / no-VAT stores show no VAT line (vat_amount stays
+	//    inside the price), so the tax invoice's grand total equals the receipt's.
+	taxMode := "exclusive"
+	var rsv struct {
+		TaxMode string `gorm:"column:tax_mode"`
+	}
+	if err := s.db.Table("receipt_settings").
+		Select("tax_mode").
+		Where("store_id = ?", storeID).
+		Take(&rsv).Error; err == nil && strings.TrimSpace(rsv.TaxMode) != "" {
+		taxMode = rsv.TaxMode
+	}
+	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
+	var vatRate, vatAmount float64
+	if taxMode == "exclusive" && sr.VATPercent > 0 {
+		vatRate = sr.VATPercent
+		vatAmount = round2(sr.VATAmount)
+	}
+
+	items := make([]DocumentItem, 0, len(rows))
+	for _, r := range rows {
+		discType := ""
+		if r.LineDiscountTotal > 0 {
+			discType = "AMOUNT"
+		}
+		unit := strings.TrimSpace(r.UnitType)
+		if unit == "" {
+			unit = "ชิ้น"
+		}
+		productID := r.ProductID
+		var pid *string
+		if strings.TrimSpace(productID) != "" {
+			pid = &productID
+		}
+		items = append(items, DocumentItem{
+			ID:            idgen.Generate(PrefixDocumentItem),
+			ProductID:     pid,
+			Description:   r.ProductName,
+			Unit:          unit,
+			Quantity:      r.Quantity,
+			UnitPrice:     round2(r.UnitPrice),
+			DiscountType:  discType,
+			DiscountValue: round2(r.LineDiscountTotal),
+			Amount:        round2(r.LineTotal),
+		})
+	}
+
+	docDate := sr.SoldAt
+	if docDate.IsZero() {
+		docDate = sr.CreatedAt
+	}
+	if docDate.IsZero() {
+		docDate = time.Now()
+	}
+
+	customerName := strings.TrimSpace(sr.CustomerName)
+	if customerName == "" {
+		customerName = "ลูกค้าทั่วไป"
+	}
+	// Enrich the buyer block from the customer master when the sale is tied to one
+	// (the sale snapshot has no address); fall back to the sale snapshot otherwise.
+	customerAddress := ""
+	if strings.TrimSpace(sr.CustomerID) != "" {
+		var cust struct {
+			FullName string `gorm:"column:full_name"`
+			Address  string `gorm:"column:address"`
+			Phone    string `gorm:"column:phone"`
+		}
+		if err := s.db.Raw(
+			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
+			sr.CustomerID, storeID,
+		).Scan(&cust).Error; err == nil && cust.FullName != "" {
+			customerName = cust.FullName
+			customerAddress = cust.Address
+			if strings.TrimSpace(sr.CustomerPhone) == "" {
+				sr.CustomerPhone = cust.Phone
+			}
+		}
+	}
+
+	var notes *string
+	if strings.TrimSpace(sr.Note) != "" {
+		n := sr.Note
+		notes = &n
+	}
+	var customerTaxID *string
+	if strings.TrimSpace(sr.CustomerTaxID) != "" {
+		t := sr.CustomerTaxID
+		customerTaxID = &t
+	}
+
+	doc := &Document{
+		ID:              idgen.Generate(PrefixDocument),
+		StoreID:         storeID,
+		Type:            dt,
+		Status:          StatusPending,
+		PaymentStatus:   PaymentUnpaid,
+		CustomerID:      sr.CustomerID,
+		CustomerName:    customerName,
+		CustomerTaxID:   customerTaxID,
+		CustomerAddress: customerAddress,
+		CustomerPhone:   sr.CustomerPhone,
+		StaffID:         actor.UserID,
+		StaffName:       actor.Name,
+		DocumentDate:    docDate,
+		InvoiceRefNo:    sr.SaleNumber,
+		// Money — copied verbatim from the sale, NOT recomputed.
+		Subtotal:     round2(sr.SubtotalAmount),
+		BillDiscount: round2(sr.BillDiscountAmount),
+		VatRate:      vatRate,
+		VatAmount:    vatAmount,
+		TotalAmount:  round2(sr.TotalAmount),
+		Notes:        notes,
+		Items:        items,
+		CreatedBy:    actor.UserID,
+	}
+
+	return s.assignNumberAndInsert(doc)
 }
 
 func (s Service) UpdateDocumentStatus(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateStatusRequest) error {
@@ -581,13 +774,78 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	if !canConvert(src.Type, target) {
 		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
+
+	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
+	// (customer snapshot, delivery / reference fields, dates, notes, lineage link).
 	req := buildConversionRequest(src, target)
 	// A DELIVERY_ORDER ships to the customer's saved delivery profile, not their
 	// billing snapshot — overlay it when one exists (blank fields keep the fallback).
 	if target == TypeDeliveryOrder && src.CustomerID != "" {
 		s.applyCustomerShipping(ctx, storeID, src.CustomerID, &req)
 	}
-	return s.CreateDocument(ctx, actor, storeID, req)
+
+	// Money + items are copied VERBATIM from the source — the source's stored totals are
+	// already authoritative (e.g. it may itself have come from a sale via CreateFromSale).
+	// Recomputing here would drop the whole-bill discount and re-derive VAT exclusively,
+	// the same defect CreateFromSale fixes for the sale → document path. CREDIT_NOTE keeps
+	// the positive amounts and is distinguished by type, not by negating values.
+	items := make([]DocumentItem, len(src.Items))
+	for i, it := range src.Items {
+		items[i] = DocumentItem{
+			ID:            idgen.Generate(PrefixDocumentItem),
+			ProductID:     it.ProductID,
+			Description:   it.Description,
+			Unit:          it.Unit,
+			Quantity:      it.Quantity,
+			UnitPrice:     it.UnitPrice,
+			DiscountType:  it.DiscountType,
+			DiscountValue: it.DiscountValue,
+			Amount:        it.Amount,
+		}
+	}
+
+	docDate, derr := time.Parse("2006-01-02", req.DocumentDate)
+	if derr != nil {
+		docDate = time.Now()
+	}
+	var dueDate *time.Time
+	if req.DueDate != nil && *req.DueDate != "" {
+		if t, perr := time.Parse("2006-01-02", *req.DueDate); perr == nil {
+			dueDate = &t
+		}
+	}
+
+	doc := &Document{
+		ID:              idgen.Generate(PrefixDocument),
+		StoreID:         storeID,
+		Type:            target,
+		Status:          StatusPending,
+		PaymentStatus:   PaymentUnpaid,
+		CustomerID:      src.CustomerID,
+		CustomerName:    src.CustomerName,
+		CustomerTaxID:   src.CustomerTaxID,
+		CustomerAddress: src.CustomerAddress,
+		CustomerPhone:   src.CustomerPhone,
+		StaffID:         actor.UserID,
+		StaffName:       actor.Name,
+		DocumentDate:    docDate,
+		DueDate:         dueDate,
+		DeliveryAddress: req.DeliveryAddress,
+		DeliveryContact: req.DeliveryContact,
+		DeliveryPhone:   req.DeliveryPhone,
+		InvoiceRefNo:     req.InvoiceRefNo,
+		SourceDocumentID: req.SourceDocumentID,
+		// Money — verbatim from the source, NOT recomputed.
+		Subtotal:     src.Subtotal,
+		BillDiscount: src.BillDiscount,
+		VatRate:      src.VatRate,
+		VatAmount:    src.VatAmount,
+		TotalAmount:  src.TotalAmount,
+		Notes:        req.Notes,
+		Items:        items,
+		CreatedBy:    actor.UserID,
+	}
+	return s.assignNumberAndInsert(doc)
 }
 
 // applyCustomerShipping overlays the customer's shipping profile onto a delivery
@@ -678,7 +936,9 @@ func buildConversionRequest(src *Document, target DocumentType) CreateDocumentRe
 }
 
 func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
-	return s.CreateDocument(ctx, actor, storeID, buildConversionRequest(src, TypeTaxInvoice))
+	// Delegate to Convert so the tax invoice inherits the invoice's totals verbatim
+	// (bill discount + VAT treatment preserved) instead of being recomputed.
+	return s.Convert(ctx, actor, storeID, src.ID, TypeTaxInvoice)
 }
 
 // ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
@@ -713,6 +973,10 @@ func toDocData(doc *Document) dochtml.DocData {
 	for _, it := range doc.Items {
 		totalDiscount += it.DiscountValue
 	}
+	// A whole-bill discount (set when the document was issued from a sale) is shown
+	// combined with the per-item discounts on the single "ส่วนลด" summary line, so the
+	// document matches the originating receipt.
+	totalDiscount += doc.BillDiscount
 
 	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
 

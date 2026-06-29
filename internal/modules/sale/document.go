@@ -44,7 +44,12 @@ func (s Service) GenerateSaleDocumentHTML(ctx context.Context, actor auth.Claims
 		return nil, err
 	}
 
-	docData := buildSaleDocData(saleRecord, docType)
+	// VAT is broken out on the document only when the store charges it exclusively —
+	// mirroring GenerateReceiptHTML — so a rendered tax invoice matches the receipt.
+	sv := s.loadSettings(ctx, storeID)
+	vatRate, vatAmount := documentVAT(saleRecord, sv)
+
+	docData := buildSaleDocData(saleRecord, docType, vatRate, vatAmount)
 	if strings.TrimSpace(saleRecord.StorePromptPayID) != "" {
 		docData.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(saleRecord.StorePromptPayID, saleRecord.TotalAmount)
 	}
@@ -90,9 +95,21 @@ func (s Service) StoreBankAccountInfos(ctx context.Context, storeID string) []do
 	return out
 }
 
+// documentVAT returns the VAT rate/amount a customer-facing document should display.
+// It mirrors the receipt (GenerateReceiptHTML): VAT is only broken out for stores that
+// charge it exclusively. Inclusive / no-VAT stores show no VAT line — the tax it
+// already embeds keeps the grand total equal to the amount the customer paid.
+func documentVAT(s Sale, sv ReceiptSettingsView) (rate, amount float64) {
+	if sv.TaxMode == "exclusive" && s.VATPercent > 0 {
+		return s.VATPercent, roundMoney(s.VATAmount)
+	}
+	return 0, 0
+}
+
 // buildSaleDocData maps a Sale onto the dochtml.DocData contract, mirroring the
 // document module's toDocData so the shared templates render consistently.
-func buildSaleDocData(s Sale, docType string) dochtml.DocData {
+// vatRate/vatAmount are the display values resolved by documentVAT (TaxMode-aware).
+func buildSaleDocData(s Sale, docType string, vatRate, vatAmount float64) dochtml.DocData {
 	items := make([]dochtml.DocItem, len(s.Items))
 	for i, it := range s.Items {
 		items[i] = dochtml.DocItem{
@@ -106,9 +123,12 @@ func buildSaleDocData(s Sale, docType string) dochtml.DocData {
 		}
 	}
 
-	totalDiscount := s.DiscountAmount + s.BillDiscountAmount
+	// DiscountAmount is ALREADY the combined item + bill discount (set by the sale
+	// repository). Do NOT add BillDiscountAmount again — that double-counted the bill
+	// discount and inflated the document's discount line vs the receipt.
+	totalDiscount := s.DiscountAmount
 	// Net of VAT — robust for both VAT-included and VAT-excluded sales.
-	preVat := math.Round((s.TotalAmount-s.VATAmount)*100) / 100
+	preVat := math.Round((s.TotalAmount-vatAmount)*100) / 100
 
 	docDate := s.SoldAt
 	if docDate.IsZero() {
@@ -144,8 +164,8 @@ func buildSaleDocData(s Sale, docType string) dochtml.DocData {
 		Items:          items,
 		Subtotal:       s.SubtotalAmount,
 		TotalDiscount:  totalDiscount,
-		VatRate:        s.VATPercent,
-		VatAmount:      s.VATAmount,
+		VatRate:        vatRate,
+		VatAmount:      vatAmount,
 		TotalAmount:    s.TotalAmount,
 		PreVatAmount:   preVat,
 		Notes:          notes,
