@@ -316,7 +316,7 @@ const receiptTpl = `<!DOCTYPE html>
     <div class="total-row"><span>ยอดรวมสินค้า</span><span class="v">{{baht .Sale.Subtotal}}</span></div>
     <div class="total-row"><span>ส่วนลด</span><span class="v">-{{baht .Sale.DiscountTotal}}</span></div>
     {{end}}
-    {{if eq .Cfg.TaxMode "exclusive"}}
+    {{if gt .Sale.VatAmount 0.0}}
     <div class="total-row"><span>รวมก่อน VAT</span><span class="v">{{baht .Sale.AfterDiscount}}</span></div>
     <div class="total-row"><span>{{.Cfg.TaxLabel}} {{printf "%.0f" .Cfg.VatRate}}%</span><span class="v">{{baht .Sale.VatAmount}}</span></div>
     {{end}}
