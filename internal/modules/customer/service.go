@@ -46,16 +46,16 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	}
 
 	item := Customer{
-		ID:        newID(),
-		StoreID:   storeID,
-		Level:     level,
-		FullName:  strings.TrimSpace(input.FullName),
-		Phone:     strings.TrimSpace(input.Phone),
-		Email:     email,
-		Address:   strings.TrimSpace(input.Address),
-		Note:      strings.TrimSpace(input.Note),
-		TaxID:     strings.TrimSpace(input.TaxID),
-		Branch:    strings.TrimSpace(input.Branch),
+		ID:                 newID(),
+		StoreID:            storeID,
+		Level:              level,
+		FullName:           strings.TrimSpace(input.FullName),
+		Phone:              strings.TrimSpace(input.Phone),
+		Email:              email,
+		Address:            strings.TrimSpace(input.Address),
+		Note:               strings.TrimSpace(input.Note),
+		TaxID:              strings.TrimSpace(input.TaxID),
+		Branch:             strings.TrimSpace(input.Branch),
 		ShippingContact:    strings.TrimSpace(input.ShippingContact),
 		ShippingPhone:      strings.TrimSpace(input.ShippingPhone),
 		ShippingAddress:    strings.TrimSpace(input.ShippingAddress),
@@ -63,14 +63,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		ShippingDistrict:   strings.TrimSpace(input.ShippingDistrict),
 		ShippingPostalCode: strings.TrimSpace(input.ShippingPostalCode),
 		DeliveryNote:       strings.TrimSpace(input.DeliveryNote),
-		IsActive:  isActive,
-		CreatedAt: time.Now().UTC(),
+		IsActive:           isActive,
+		CreatedAt:          time.Now().UTC(),
 	}
 
 	return s.repo.Create(ctx, item)
 }
 
-func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Customer, error) {
+func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]CustomerListItem, error) {
 	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
 		return nil, err
 	}

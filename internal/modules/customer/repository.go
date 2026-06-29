@@ -3,6 +3,7 @@ package customer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -10,7 +11,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, customer Customer) (Customer, error)
-	ListByStore(ctx context.Context, storeID string) ([]Customer, error)
+	ListByStore(ctx context.Context, storeID string) ([]CustomerListItem, error)
 	GetByID(ctx context.Context, storeID, customerID string) (Customer, error)
 	Update(ctx context.Context, customer Customer) (Customer, error)
 	Delete(ctx context.Context, storeID, customerID string) error
@@ -47,10 +48,23 @@ func setOrNull(m map[string]any, col, val string) {
 }
 
 func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Customer, error) {
+	// Auto-generate a per-store member code ("M00001", ...) when the caller did not
+	// supply one. The unique (store_id, member_code) index guards against the rare
+	// concurrent-count collision.
+	if strings.TrimSpace(customer.MemberCode) == "" {
+		code, err := r.nextMemberCode(ctx, customer.StoreID)
+		if err != nil {
+			return Customer{}, err
+		}
+		customer.MemberCode = code
+	}
+
 	payload := map[string]any{
 		"id":             customer.ID,
 		"store_id":       customer.StoreID,
 		"customer_level": customer.Level,
+		"member_code":    customer.MemberCode,
+		"points":         customer.Points,
 		"full_name":      customer.FullName,
 		"is_active":      customer.IsActive,
 		"created_at":     customer.CreatedAt,
@@ -77,17 +91,41 @@ func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Cust
 	return customer, nil
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Customer, error) {
-	var items []Customer
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]CustomerListItem, error) {
+	// total_purchase / total_bills come from completed sales aggregated per customer.
+	// LEFT JOIN a pre-grouped subquery so customers with no sales still return (0/0)
+	// instead of being dropped.
+	var items []CustomerListItem
 	err := r.db.WithContext(ctx).
+		Table("customers AS c").
+		Select(`c.*,
+			COALESCE(s.total_purchase, 0) AS total_purchase,
+			COALESCE(s.total_bills, 0)    AS total_bills`).
+		Joins(`LEFT JOIN (
+			SELECT customer_id,
+			       SUM(total_amount) AS total_purchase,
+			       COUNT(*)          AS total_bills
+			FROM sales
+			WHERE store_id = ? AND customer_id IS NOT NULL
+			GROUP BY customer_id
+		) s ON s.customer_id = c.id`, storeID).
+		Where("c.store_id = ?", storeID).
+		Order("c.created_at DESC").
+		Scan(&items).Error
+	return items, err
+}
+
+// nextMemberCode returns the next per-store member code in the "M00001" series,
+// matching the backfill format in migration 044.
+func (r PostgresRepository) nextMemberCode(ctx context.Context, storeID string) (string, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
 		Model(&Customer{}).
 		Where("store_id = ?", storeID).
-		Preload("ShippingAddresses", func(db *gorm.DB) *gorm.DB {
-			return db.Order("created_at ASC")
-		}).
-		Order("created_at DESC").
-		Find(&items).Error
-	return items, err
+		Count(&count).Error; err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("M%05d", count+1), nil
 }
 
 func (r PostgresRepository) GetByID(ctx context.Context, storeID, customerID string) (Customer, error) {

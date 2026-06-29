@@ -25,16 +25,18 @@ func (CustomerShippingAddress) TableName() string {
 }
 
 type Customer struct {
-	ID        string    `json:"id" gorm:"column:id;primaryKey"`
-	StoreID   string    `json:"store_id" gorm:"column:store_id"`
-	Level     int       `json:"level" gorm:"column:customer_level"`
-	FullName  string    `json:"full_name" gorm:"column:full_name"`
-	Phone     string    `json:"phone,omitempty" gorm:"column:phone"`
-	Email     string    `json:"email,omitempty" gorm:"column:email"`
-	Address   string    `json:"address,omitempty" gorm:"column:address"`
-	Note      string    `json:"note,omitempty" gorm:"column:note"`
-	TaxID     string    `json:"tax_id,omitempty" gorm:"column:tax_id"`
-	Branch    string    `json:"branch,omitempty" gorm:"column:branch"`
+	ID         string `json:"id" gorm:"column:id;primaryKey"`
+	StoreID    string `json:"store_id" gorm:"column:store_id"`
+	Level      int    `json:"level" gorm:"column:customer_level"`
+	MemberCode string `json:"member_code,omitempty" gorm:"column:member_code"`
+	FullName   string `json:"full_name" gorm:"column:full_name"`
+	Phone      string `json:"phone,omitempty" gorm:"column:phone"`
+	Email      string `json:"email,omitempty" gorm:"column:email"`
+	Address    string `json:"address,omitempty" gorm:"column:address"`
+	Note       string `json:"note,omitempty" gorm:"column:note"`
+	TaxID      string `json:"tax_id,omitempty" gorm:"column:tax_id"`
+	Branch     string `json:"branch,omitempty" gorm:"column:branch"`
+	Points     int    `json:"points" gorm:"column:points"`
 	// Shipping / delivery profile (Phase 3) — separate from the billing Address above.
 	ShippingContact    string `json:"shipping_contact,omitempty" gorm:"column:shipping_contact"`
 	ShippingPhone      string `json:"shipping_phone,omitempty" gorm:"column:shipping_phone"`
@@ -45,9 +47,19 @@ type Customer struct {
 	DeliveryNote       string `json:"delivery_note,omitempty" gorm:"column:delivery_note"`
 	// Multi-address shipping (Phase 4)
 	ShippingAddresses []CustomerShippingAddress `json:"shipping_addresses" gorm:"foreignKey:CustomerID"`
-	IsActive  bool      `json:"is_active" gorm:"column:is_active"`
-	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
+	IsActive          bool                      `json:"is_active" gorm:"column:is_active"`
+	CreatedAt         time.Time                 `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt         time.Time                 `json:"updated_at" gorm:"column:updated_at"`
+}
+
+// CustomerListItem augments a Customer with read-time aggregates from the sales
+// table (lifetime purchase value + completed bill count). These are not stored
+// columns; they are computed by the list query so the customers screen can show
+// "ยอดซื้อสะสม" / "จำนวนบิล" without an extra round-trip per row.
+type CustomerListItem struct {
+	Customer
+	TotalPurchase float64 `json:"total_purchase" gorm:"column:total_purchase"`
+	TotalBills    int     `json:"total_bills" gorm:"column:total_bills"`
 }
 
 type LevelDiscount struct {
@@ -59,14 +71,14 @@ type LevelDiscount struct {
 }
 
 type CreateCustomerRequest struct {
-	Level    *int   `json:"level"`
-	FullName string `json:"full_name"`
-	Phone    string `json:"phone"`
-	Email    string `json:"email"`
-	Address  string `json:"address"`
-	Note     string `json:"note"`
-	TaxID    string `json:"tax_id"`
-	Branch   string `json:"branch"`
+	Level              *int   `json:"level"`
+	FullName           string `json:"full_name"`
+	Phone              string `json:"phone"`
+	Email              string `json:"email"`
+	Address            string `json:"address"`
+	Note               string `json:"note"`
+	TaxID              string `json:"tax_id"`
+	Branch             string `json:"branch"`
 	ShippingContact    string `json:"shipping_contact"`
 	ShippingPhone      string `json:"shipping_phone"`
 	ShippingAddress    string `json:"shipping_address"`
@@ -74,18 +86,18 @@ type CreateCustomerRequest struct {
 	ShippingDistrict   string `json:"shipping_district"`
 	ShippingPostalCode string `json:"shipping_postal_code"`
 	DeliveryNote       string `json:"delivery_note"`
-	IsActive *bool  `json:"is_active"`
+	IsActive           *bool  `json:"is_active"`
 }
 
 type UpdateCustomerRequest struct {
-	Level    *int    `json:"level"`
-	FullName *string `json:"full_name"`
-	Phone    *string `json:"phone"`
-	Email    *string `json:"email"`
-	Address  *string `json:"address"`
-	Note     *string `json:"note"`
-	TaxID    *string `json:"tax_id"`
-	Branch   *string `json:"branch"`
+	Level              *int    `json:"level"`
+	FullName           *string `json:"full_name"`
+	Phone              *string `json:"phone"`
+	Email              *string `json:"email"`
+	Address            *string `json:"address"`
+	Note               *string `json:"note"`
+	TaxID              *string `json:"tax_id"`
+	Branch             *string `json:"branch"`
 	ShippingContact    *string `json:"shipping_contact"`
 	ShippingPhone      *string `json:"shipping_phone"`
 	ShippingAddress    *string `json:"shipping_address"`
@@ -93,7 +105,7 @@ type UpdateCustomerRequest struct {
 	ShippingDistrict   *string `json:"shipping_district"`
 	ShippingPostalCode *string `json:"shipping_postal_code"`
 	DeliveryNote       *string `json:"delivery_note"`
-	IsActive *bool   `json:"is_active"`
+	IsActive           *bool   `json:"is_active"`
 }
 
 type UpsertLevelDiscountRequest struct {
