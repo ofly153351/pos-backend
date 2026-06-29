@@ -147,18 +147,25 @@ func formatWholeBaht(v float64) string {
 }
 
 // PaymentLabel maps a payment-method code to a Thai display label.
+// Canonical — mirrors lib/payment-method.ts on the frontend so the printed receipt
+// matches the dashboard / reports. Legacy aliases collapse onto the canonical channel;
+// `credit` (sold-on-credit) is its own label, NOT a card.
 func PaymentLabel(method string) string {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "cash":
 		return "เงินสด"
-	case "promptpay", "qr", "transfer":
-		return "พร้อมเพย์ / QR"
-	case "bank_transfer":
+	case "bank_transfer", "transfer":
 		return "โอนเงิน"
-	case "card", "credit", "debit":
+	case "promptpay", "qr":
+		return "พร้อมเพย์ (QR)"
+	case "card", "credit_card", "debit_card", "debit":
 		return "บัตรเครดิต / เดบิต"
+	case "credit":
+		return "ขายเชื่อ / ค้างชำระ"
 	case "truemoney":
-		return "TrueMoney"
+		return "TrueMoney Wallet"
+	case "shopeepay":
+		return "ShopeePay"
 	case "":
 		return "-"
 	default:

@@ -158,16 +158,28 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 	err := r.db.WithContext(ctx).
 		Table("sales s").
 		Select(`
-			COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown') AS payment_method,
+			`+canonicalPaymentMethodSQL+` AS payment_method,
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS amount
 		`).
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
-		Group("COALESCE(NULLIF(TRIM(s.payment_method), ''), 'unknown')").
+		Group(canonicalPaymentMethodSQL).
 		Order("amount DESC").
 		Find(&items).Error
 	return items, err
 }
+
+// canonicalPaymentMethodSQL collapses legacy / duplicate payment_method values onto the
+// canonical channel keys (mirrors lib/payment-method.ts + dashboard repo):
+//   transfer → bank_transfer · qr → promptpay · credit_card|debit_card → card.
+// `credit` (sold-on-credit) is kept distinct — it is not a tender.
+const canonicalPaymentMethodSQL = `CASE
+	WHEN NULLIF(TRIM(s.payment_method), '') IS NULL THEN 'unknown'
+	WHEN LOWER(TRIM(s.payment_method)) = 'transfer' THEN 'bank_transfer'
+	WHEN LOWER(TRIM(s.payment_method)) = 'qr' THEN 'promptpay'
+	WHEN LOWER(TRIM(s.payment_method)) IN ('credit_card','debit_card') THEN 'card'
+	ELSE LOWER(TRIM(s.payment_method))
+END`
 
 // ── Executive summary aggregates ──────────────────────────────────────────────
 
