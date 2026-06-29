@@ -44,14 +44,14 @@ import (
 // =============================================================================
 
 type docProfile struct {
-	TitleTH, TitleEN string
-	Badge            string // "" = ไม่โชว์
-	ShowDiscount     bool   // คอลัมน์ส่วนลด
-	ShowPayBox       bool   // กล่องชำระเงิน + QR
-	ShowDeliveryBox  bool   // กล่อง "ที่อยู่จัดส่ง" (เฉพาะใบส่งของ)
-	IsDelivery       bool   // มี ค่าจัดส่ง + ยอดก่อน VAT ใน summary
-	PayCash          bool   // ติ๊ก "เงินสด" อัตโนมัติ (ใบเสร็จ)
-	SpecialLabel     string // ป้ายฟิลด์พิเศษหัวขวา ("" = ไม่มี)
+	TitleTH, TitleEN                             string
+	Badge                                        string // "" = ไม่โชว์
+	ShowDiscount                                 bool   // คอลัมน์ส่วนลด
+	ShowPayBox                                   bool   // กล่องชำระเงิน + QR
+	ShowDeliveryBox                              bool   // กล่อง "ที่อยู่จัดส่ง" (เฉพาะใบส่งของ)
+	IsDelivery                                   bool   // มี ค่าจัดส่ง + ยอดก่อน VAT ใน summary
+	PayCash                                      bool   // ติ๊ก "เงินสด" อัตโนมัติ (ใบเสร็จ)
+	SpecialLabel                                 string // ป้ายฟิลด์พิเศษหัวขวา ("" = ไม่มี)
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 }
 
@@ -75,9 +75,10 @@ func (p docProfile) footerBlockH(hasNotes bool) float64 {
 	}
 
 	h := gridH
-	if hasNotes {
-		h += hRemarks // remarks block is stacked below the grid
-	}
+	// กล่องหมายเหตุขึ้นเสมอ (เป็น form field สำหรับเขียน ไม่ผูกกับว่ามี Notes ไหม)
+	// จึงสำรองพื้นที่ทุกครั้ง — hasNotes ไม่ได้ใช้ตัดสินความสูงอีกต่อไป
+	_ = hasNotes
+	h += hRemarks  // remarks box (stacked below the grid)
 	h += hSigBlock // signatures stacked below remarks
 	return h
 }
@@ -150,6 +151,7 @@ type pageView struct {
 	FillerRows         []struct{} // empty rows padding the grid to the page's row capacity
 	PageNo, TotalPages int
 	IsFirst, IsLast    bool
+	FooterOnly         bool // หน้าสุดท้ายที่มีแต่ footer/สรุปยอด (ไม่มีตารางสินค้า)
 }
 
 type summaryLine struct {
@@ -163,9 +165,9 @@ type renderView struct {
 	// ร้าน
 	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch, LogoURL string
 	// หัวเอกสาร
-	TitleTH, TitleEN, Badge          string
-	DocNo, DocDate                   string
-	SpecialLabel, SpecialValue       string
+	TitleTH, TitleEN, Badge    string
+	DocNo, DocDate             string
+	SpecialLabel, SpecialValue string
 	// ลูกค้า / จัดส่ง
 	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
 	StaffName, SalespersonName, RefNo, DeliveryDate          string
@@ -247,12 +249,12 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	slices := paginate(g, len(d.Items))
 	totalPages := len(slices)
 
-	// Per-page-type row capacity — used to pad each page with empty grid rows so the
-	// table frame always reaches the bottom (no ragged blank space below the items).
-	capFM := g.rowsPerPage(g.headerFull, false)
-	capFL := g.rowsPerPage(g.headerFull, true)
-	capM := g.rowsPerPage(g.headerMini, false)
-	capML := g.rowsPerPage(g.headerMini, true)
+	// ความจุเชิงกายภาพต่อชนิดหน้า — ใช้ pad แถวเปล่า (ledger) ให้ตารางเต็มถึงล่าง/footer
+	// ทุกหน้าที่มีตาราง (รวมหน้าต่อเนื่อง) เพื่อไม่ให้เหลือ "ช่องว่างดิบ" ท้ายหน้า
+	capFM := g.rowsPerPage(g.headerFull, false) // หน้าแรกแบบต่อเนื่อง
+	capFL := g.rowsPerPage(g.headerFull, true)  // หน้าเดียว
+	capM := g.rowsPerPage(g.headerMini, false)  // หน้ากลาง
+	capML := g.rowsPerPage(g.headerMini, true)  // หน้าสุดท้ายแบบหัวย่อ
 
 	pages := make([]pageView, 0, totalPages)
 	for idx, sl := range slices {
@@ -278,25 +280,32 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 			})
 		}
 
-		// Pad the rest of the page with empty bordered rows to complete the grid.
-		pageCap := capM
-		switch {
-		case sl.IsFirst && sl.IsLast:
-			pageCap = capFL
-		case sl.IsFirst:
-			pageCap = capFM
-		case sl.IsLast:
-			pageCap = capML
-		}
-		fillerN := pageCap - len(items)
-		if fillerN < 0 {
-			fillerN = 0
+		// หน้าสุดท้ายที่ไม่มีสินค้า = footer-only (สินค้าเต็มอยู่หน้าก่อนหน้าแล้ว)
+		footerOnly := sl.IsLast && !sl.IsFirst && len(items) == 0
+
+		// เติมแถวเปล่า (ledger) ให้ตารางเต็มถึงล่างหน้า — ทุกหน้าที่มีตาราง
+		// (หน้า footer-only ไม่มีตาราง จึงข้าม). กันช่องว่างดิบท้ายหน้าเมื่อสินค้าไม่เต็ม
+		// เช่น 18 รายการในหน้าที่จุ 24 → เติม 6 แถวให้ตารางเต็ม
+		fillerN := 0
+		if !footerOnly {
+			pageCap := capM
+			switch {
+			case sl.IsFirst && sl.IsLast:
+				pageCap = capFL // หน้าเดียว
+			case sl.IsFirst:
+				pageCap = capFM // หน้าแรกต่อเนื่อง
+			case sl.IsLast:
+				pageCap = capML // หน้าสุดท้ายมีสินค้า
+			}
+			if fillerN = pageCap - len(items); fillerN < 0 {
+				fillerN = 0
+			}
 		}
 
 		pages = append(pages, pageView{
 			Items: items, FillerRows: make([]struct{}, fillerN),
 			PageNo: idx + 1, TotalPages: totalPages,
-			IsFirst: sl.IsFirst, IsLast: sl.IsLast,
+			IsFirst: sl.IsFirst, IsLast: sl.IsLast, FooterOnly: footerOnly,
 		})
 	}
 
@@ -375,6 +384,8 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 /* ---- footer-pin: spacer พองเฉพาะ "หน้าเดียว" → ลายเซ็นติดล่าง A4 ---- */
 .doc-body{ flex:0 0 auto; }
 .doc-spacer{ flex:0 0 auto; }
+/* หน้าเดียว: spacer พอง → footer/ลายเซ็นถูกดันชิดล่าง A4.
+   หน้า footer-only: ไม่ดันลง — ให้ footer อยู่ "ด้านบน" ต่อจากหัวย่อเลย (ช่องว่างไปอยู่ล่าง) */
 .page.single .doc-spacer{ flex:1 1 auto; }
 .doc-footer{ flex:0 0 auto; }
 
@@ -414,7 +425,7 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .items .desc .en{ color:var(--muted); font-size:10px; }
 .items .left{ text-align:left; } .items .num{ text-align:right; }
 .items tr.filler td{ height:var(--row-h); }
-.col-no{ width:9mm; } .col-sku{ width:22mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
+.col-no{ width:9mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
 tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
 /* ---- footer: summary + paybox + remarks + signatures ---- */
@@ -432,8 +443,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .pay-cheque-area{ display:flex; gap:2mm; align-items:flex-start; margin-top:0.5mm; }
 .pay-cheque-left{ flex:1; min-width:0; }
 .pay-qr-col{ display:flex; flex-direction:column; align-items:center; flex-shrink:0; padding:0 2mm; }
-.qr{ width:20mm; height:20mm; object-fit:contain; }
-.qr-placeholder{ width:20mm; height:20mm; border:1px dashed var(--line); }
+.qr{ width:16mm; height:16mm; object-fit:contain; }
+.qr-placeholder{ width:16mm; height:16mm; border:1px dashed var(--line); }
 .qr-lbl{ font-size:8px; color:var(--muted); text-align:center; margin-top:0.5mm; }
 .pay-cheque-right{ flex:1; min-width:0; }
 .c-row{ display:flex; align-items:baseline; gap:1mm; margin-bottom:1.5mm; font-size:9px; }
@@ -443,12 +454,12 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .summary{ width:78mm; margin-left:auto; }
 .sum-row{ display:flex; justify-content:space-between; padding:1mm 0; border-bottom:1px dashed var(--line); }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
-.remarks{ margin-top:3mm; border:1px solid var(--line); padding:2mm 3mm; font-size:10px; min-height:14mm; }
+.remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
 .remarks .rh{ color:var(--muted); }
-.signatures{ display:flex; gap:10mm; margin-top:6mm; break-inside:avoid; }
+.signatures{ display:flex; gap:10mm; margin-top:4mm; break-inside:avoid; }
 .sig{ flex:1; }
-.sig-t{ font-size:10px; font-weight:700; margin-bottom:4mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
-.sig-write{ display:flex; align-items:baseline; gap:1mm; margin-bottom:3mm; }
+.sig-t{ font-size:10px; font-weight:700; margin-bottom:3mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
+.sig-write{ display:flex; align-items:baseline; gap:1mm; margin-bottom:2mm; }
 .sig-write-lbl{ font-size:10px; white-space:nowrap; flex-shrink:0; }
 .sig-ln{ flex:1; border-bottom:1px solid var(--ink); }
 .sig-date-row{ display:flex; align-items:baseline; gap:1mm; font-size:9px; color:var(--muted); }
@@ -456,12 +467,11 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
 
 /* ---- bottom strip (absolute ทุกหน้า) ---- */
-.continued{ position:absolute; left:0; right:0; bottom:8mm; text-align:center; font-style:italic; font-size:10px; color:var(--muted); }
 .page-no{ position:absolute; right:12mm; bottom:6mm; font-size:9px; color:var(--muted); }
 </style></head>
 <body>
 {{range $pg := .Pages}}
-<div class="page{{if $root.IsSinglePage}} single{{end}}">
+<div class="page{{if $root.IsSinglePage}} single{{end}}{{if $pg.FooterOnly}} footer-only{{end}}">
 
   {{if $pg.IsFirst}}
   <header class="hdr">
@@ -520,11 +530,11 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </header>
   {{end}}
 
+  {{if not $pg.FooterOnly}}
   <div class="doc-body">
     <table class="items">
       <thead><tr>
         <th class="col-no">ลำดับ</th>
-        <th class="col-sku">รหัสสินค้า (SKU)</th>
         <th class="left">รายการสินค้า (Description)</th>
         <th class="col-qty">จำนวน</th>
         <th class="col-unit">หน่วย</th>
@@ -536,7 +546,6 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       {{range $it := $pg.Items}}
         <tr>
           <td>{{$it.No}}</td>
-          <td>{{$it.SKU}}</td>
           <td class="left"><div class="desc">{{$it.Desc}}{{if $it.DescEn}}<br><span class="en">({{$it.DescEn}})</span>{{end}}</div></td>
           <td>{{$it.Qty}}</td>
           <td>{{$it.Unit}}</td>
@@ -547,12 +556,13 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       {{end}}
       {{range $pg.FillerRows}}
         <tr class="filler">
-          <td>&nbsp;</td><td></td><td class="left"></td><td></td><td></td><td class="num"></td>{{if $root.ShowDiscount}}<td class="num"></td>{{end}}<td class="num"></td>
+          <td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td>{{if $root.ShowDiscount}}<td class="num"></td>{{end}}<td class="num"></td>
         </tr>
       {{end}}
       </tbody>
     </table>
   </div>
+  {{end}}
 
   <div class="doc-spacer"></div>
 
@@ -584,7 +594,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       </div>
     </div>
 
-    {{if $root.Notes}}<div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>{{end}}
+    <div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
 
     <div class="signatures">
       <div class="sig">
@@ -601,7 +611,6 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </footer>
   {{end}}
 
-  {{if not $pg.IsLast}}<div class="continued">รายการสินค้ายังไม่จบ · Continued on next page…</div>{{end}}
   <div class="page-no">หน้า {{$pg.PageNo}} / {{$pg.TotalPages}} · Page {{$pg.PageNo}} of {{$pg.TotalPages}}</div>
 </div>
 {{end}}

@@ -95,17 +95,17 @@ type BankAccountInfo struct {
 }
 
 type StoreInfo struct {
-	Name            string
-	Address         string
-	Phone           string
-	Fax             string
-	Email           string
-	Website         string
-	TaxID           string
-	LogoURL         string
-	Branch          string
-	PromptPayID     string
-	BankAccounts    []BankAccountInfo
+	Name         string
+	Address      string
+	Phone        string
+	Fax          string
+	Email        string
+	Website      string
+	TaxID        string
+	LogoURL      string
+	Branch       string
+	PromptPayID  string
+	BankAccounts []BankAccountInfo
 }
 
 // DocItem is a single line item for HTML rendering.
@@ -123,25 +123,25 @@ type DocItem struct {
 // DocData is a flat representation of a document for HTML rendering.
 // It is populated by the document service and passed to RenderDocumentHTML.
 type DocData struct {
-	Type           string // "INVOICE" | "BILL" | "TAX_INVOICE" | …
-	DocumentNo     string
-	DocumentNoFull string
-	DocumentDate   time.Time
-	DueDate        *time.Time
-	ValidUntil     *time.Time
-	CustomerName   string
+	Type            string // "INVOICE" | "BILL" | "TAX_INVOICE" | …
+	DocumentNo      string
+	DocumentNoFull  string
+	DocumentDate    time.Time
+	DueDate         *time.Time
+	ValidUntil      *time.Time
+	CustomerName    string
 	CustomerAddress string
 	CustomerPhone   string
 	CustomerTaxID   *string
 	CustomerBranch  *string // สาขาผู้ซื้อ (optional)
-	StaffName      string
-	Items          []DocItem
-	Subtotal       float64
-	TotalDiscount  float64
-	VatRate        float64
-	VatAmount      float64
-	TotalAmount    float64
-	Notes          *string
+	StaffName       string
+	Items           []DocItem
+	Subtotal        float64
+	TotalDiscount   float64
+	VatRate         float64
+	VatAmount       float64
+	TotalAmount     float64
+	Notes           *string
 	// Delivery order fields
 	DeliveryDate    *time.Time
 	DeliveryAddress string

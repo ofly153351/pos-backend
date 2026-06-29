@@ -40,9 +40,9 @@ type CustomerInfo struct {
 
 type SaleLineInput struct {
 	SKU, Description, DescriptionEn, Unit string
-	Quantity                             float64
-	UnitPriceInclVat                     float64 // ราคา/หน่วย "รวม VAT" (แบบ POS)
-	LineDiscountInclVat                  float64 // ส่วนลดรายบรรทัด บาท "รวม VAT" (0 = ไม่มี)
+	Quantity                              float64
+	UnitPriceInclVat                      float64 // ราคา/หน่วย "รวม VAT" (แบบ POS)
+	LineDiscountInclVat                   float64 // ส่วนลดรายบรรทัด บาท "รวม VAT" (0 = ไม่มี)
 }
 
 type SaleInput struct {
