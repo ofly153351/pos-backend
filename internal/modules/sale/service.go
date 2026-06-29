@@ -141,7 +141,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	return created, nil
 }
 
-func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Sale, error) {
+func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID, dateFrom, dateTo string) ([]Sale, error) {
 	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 	if !allowed {
 		return nil, ErrForbiddenStoreAccess
 	}
-	return s.repo.ListByStore(ctx, storeID)
+	return s.repo.ListByStore(ctx, storeID, dateFrom, dateTo)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, saleID string) (Sale, error) {

@@ -18,7 +18,7 @@ import (
 type Repository interface {
 	Create(ctx context.Context, sale Sale, discount DiscountInput) (Sale, error)
 	FindByIdempotencyKey(ctx context.Context, storeID, key string) (*Sale, error)
-	ListByStore(ctx context.Context, storeID string) ([]Sale, error)
+	ListByStore(ctx context.Context, storeID, dateFrom, dateTo string) ([]Sale, error)
 	GetByID(ctx context.Context, storeID, saleID string) (Sale, error)
 	VoidSale(ctx context.Context, storeID, saleID, actorUserID, reason, voidType string) error
 	CreateReturn(ctx context.Context, storeID, saleID, actorUserID string, req CreateReturnRequest) (SaleReturn, error)
@@ -458,19 +458,30 @@ func (r PostgresRepository) buildStoreExtraSelect(ctx context.Context) string {
 	return promptPay + ", " + taxID + ", " + logoURL
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]Sale, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID, dateFrom, dateTo string) ([]Sale, error) {
 	storeExtra := r.buildStoreExtraSelect(ctx)
 
-	var sales []Sale
-	err := r.db.WithContext(ctx).
+	q := r.db.WithContext(ctx).
 		Table("sales s").
 		Select(fmt.Sprintf("s.id, s.store_id, s.location_id, st.name AS store_name, COALESCE(st.address, '') AS store_address, COALESCE(st.phone, '') AS store_phone, %s, s.sale_number, s.cashier_user_id, COALESCE(u.full_name, '') AS cashier_name, s.status, s.payment_method, s.note, s.customer_id, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, COALESCE(c.tax_id, '') AS customer_tax_id, COALESCE(c.branch, '') AS customer_branch, s.customer_level, s.network_discount_percent, s.total_items, s.subtotal_amount, s.discount_amount, COALESCE(s.bill_discount_amount, 0) AS bill_discount_amount, s.vat_included, s.vat_percent, s.vat_amount, s.total_amount, s.paid_amount, s.change_amount, s.sold_at, s.created_at, s.voided_at, COALESCE(s.voided_by, '') AS voided_by, COALESCE(s.void_reason, '') AS void_reason, COALESCE(s.void_type, '') AS void_type", storeExtra)).
 		Joins("JOIN stores st ON st.id = s.store_id").
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
-		Where("s.store_id = ?", storeID).
-		Order("s.sold_at DESC, s.created_at DESC").
-		Find(&sales).Error
+		Where("s.store_id = ?", storeID)
+
+	// Date window is interpreted as Bangkok calendar days (the store's wall clock),
+	// matching the finance module's `AT TIME ZONE 'Asia/Bangkok'` convention. Comparing
+	// the sale's Bangkok-local date avoids the 7h UTC skew that would drop early-morning
+	// sales out of "today". Bounds are inclusive on both ends.
+	if d := validDateOnly(dateFrom); d != "" {
+		q = q.Where("(s.sold_at AT TIME ZONE 'Asia/Bangkok')::date >= ?", d)
+	}
+	if d := validDateOnly(dateTo); d != "" {
+		q = q.Where("(s.sold_at AT TIME ZONE 'Asia/Bangkok')::date <= ?", d)
+	}
+
+	var sales []Sale
+	err := q.Order("s.sold_at DESC, s.created_at DESC").Find(&sales).Error
 	return sales, err
 }
 

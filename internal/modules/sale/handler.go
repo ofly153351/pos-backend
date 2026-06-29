@@ -35,7 +35,10 @@ func (h Handler) Create(c *fiber.Ctx) error {
 }
 
 func (h Handler) ListByStore(c *fiber.Ctx) error {
-	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"))
+	result, err := h.service.ListByStore(
+		c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"),
+		c.Query("date_from"), c.Query("date_to"),
+	)
 	if err != nil {
 		return writeSaleError(c, err)
 	}

@@ -67,3 +67,17 @@ func normalizeDiscountType(value string) string {
 func roundMoney(v float64) float64 {
 	return math.Round(v*100) / 100
 }
+
+// validDateOnly trims and validates a YYYY-MM-DD query value. Returns the canonical
+// date string when well-formed, else "" so the caller skips the filter (never lets a
+// malformed value reach the SQL ::date comparison).
+func validDateOnly(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if _, err := time.Parse("2006-01-02", s); err != nil {
+		return ""
+	}
+	return s
+}
