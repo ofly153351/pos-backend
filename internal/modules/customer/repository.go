@@ -94,7 +94,9 @@ func (r PostgresRepository) Create(ctx context.Context, customer Customer) (Cust
 func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]CustomerListItem, error) {
 	// total_purchase / total_bills come from completed sales aggregated per customer.
 	// LEFT JOIN a pre-grouped subquery so customers with no sales still return (0/0)
-	// instead of being dropped.
+	// instead of being dropped. Voided sales and loans (ยืมสินค้า — borrowed goods, not
+	// revenue; a returned loan's sale row stays 'completed') are excluded so a customer's
+	// displayed lifetime spend/bill count reflects only real purchases incl. credit sales.
 	var items []CustomerListItem
 	err := r.db.WithContext(ctx).
 		Table("customers AS c").
@@ -107,6 +109,8 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 			       COUNT(*)          AS total_bills
 			FROM sales
 			WHERE store_id = ? AND customer_id IS NOT NULL
+			  AND status <> 'voided'
+			  AND NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = sales.id AND cs.type = 'loan')
 			GROUP BY customer_id
 		) s ON s.customer_id = c.id`, storeID).
 		Where("c.store_id = ?", storeID).

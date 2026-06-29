@@ -135,6 +135,10 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 	if err != nil {
 		return ExecutiveSummary{}, err
 	}
+	months, err := s.repo.GetSalesByMonth(ctx, storeID, from, to)
+	if err != nil {
+		return ExecutiveSummary{}, err
+	}
 
 	netRevenue := revenue.GrossRevenue - revenue.Refunds
 	prevNetRevenue := prevRevenue.GrossRevenue - prevRevenue.Refunds
@@ -151,6 +155,7 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 		PreviousRevenue:   prevNetRevenue,
 		Refunds:           revenue.Refunds,
 		COGS:              cogs.Total,
+		DiscountAmount:    revenue.DiscountAmount,
 		Expenses:          expenses,
 		GrossProfit:       grossProfit,
 		NetProfit:         netProfit,
@@ -159,6 +164,7 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 		Customers:         customers,
 		AverageOrderValue: aov,
 		SalesTrend:        salesTrend,
+		Months:            months,
 		TopProducts:       topProducts,
 		CategoryBreakdown: categoryBreakdown,
 		PaymentBreakdown:  paymentBreakdown,

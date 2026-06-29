@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"pos-backend/internal/platform/taxcalc"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -125,17 +127,8 @@ func (r PostgresRepository) Create(ctx context.Context, invoice Invoice) (Invoic
 	if invoice.VATPercent < 0 {
 		invoice.VATPercent = 0
 	}
-	if invoice.VATIncluded {
-		if invoice.VATPercent > 0 {
-			invoice.VATAmount = roundMoney(afterDiscount * invoice.VATPercent / (100 + invoice.VATPercent))
-		}
-		invoice.TotalAmount = afterDiscount
-	} else {
-		if invoice.VATPercent > 0 {
-			invoice.VATAmount = roundMoney(afterDiscount * invoice.VATPercent / 100)
-		}
-		invoice.TotalAmount = roundMoney(afterDiscount + invoice.VATAmount)
-	}
+	// Canonical VAT formula, shared with the sale module and the /vat/calculate preview.
+	invoice.VATAmount, invoice.TotalAmount = taxcalc.ComputeVAT(afterDiscount, invoice.VATPercent, invoice.VATIncluded)
 	invoice.RemainingAmount = invoice.TotalAmount
 	invoice.PaidAmount = 0
 	invoice.Status = StatusUnpaid

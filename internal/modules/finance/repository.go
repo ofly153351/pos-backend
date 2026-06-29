@@ -16,6 +16,13 @@ const expenseApprovedStatus = "approved"
 // reporting. Kept local to avoid a module dependency (same rationale as above).
 const saleVoidedStatus = "voided"
 
+// notLoanSaleSQL excludes sales backing a loan (ยืมสินค้า) receivable. Borrowed goods
+// are not revenue: lending creates a sale row only to deduct stock, and returning the
+// goods (ReturnGoods) restocks them WITHOUT voiding that sale — so loans would otherwise
+// inflate revenue/COGS/payment-mix. Real credit sales (credit_sales.type='credit') stay
+// counted. Correlate on the sales alias `s`; every aggregate below aliases sales as s.
+const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
+
 type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error)
@@ -30,6 +37,7 @@ type Repository interface {
 	GetOverstockItems(ctx context.Context, storeID string) ([]OverstockItem, error)
 	GetTopProducts(ctx context.Context, storeID string, from, to time.Time, limit int) ([]TopProduct, error)
 	GetSalesTrend(ctx context.Context, storeID string, from, to time.Time) ([]TrendPoint, int64, error)
+	GetSalesByMonth(ctx context.Context, storeID string, from, to time.Time) ([]MonthlyStat, error)
 	GetSalesCounters(ctx context.Context, storeID string, from, to time.Time) (int64, int64, error)
 	GetCategoryBreakdown(ctx context.Context, storeID string, from, to time.Time) ([]CategoryTotal, error)
 	GetSalesByHour(ctx context.Context, storeID string, from, to time.Time) ([]HourStat, error)
@@ -71,7 +79,7 @@ func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
 			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	if err != nil {
 		return result, err
@@ -103,7 +111,7 @@ func (r PostgresRepository) GetCOGS(ctx context.Context, storeID string, from, t
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	return result, err
 }
@@ -162,7 +170,7 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group(canonicalPaymentMethodSQL).
 		Order("amount DESC").
 		Find(&items).Error
@@ -212,7 +220,7 @@ func (r PostgresRepository) GetDeadStock(ctx context.Context, storeID string, so
 		Table("sale_items si").
 		Select("si.product_id AS product_id, MAX(s.sold_at) AS last_sold").
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ? AND s.status <> ?", storeID, saleVoidedStatus).
+		Where("s.store_id = ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, saleVoidedStatus).
 		Group("si.product_id")
 
 	inner := r.db.WithContext(ctx).
@@ -265,7 +273,7 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("si.product_id, si.product_name").
 		Order("quantity_sold DESC, revenue DESC").
 		Limit(limit).
@@ -280,7 +288,7 @@ func (r PostgresRepository) GetSalesCounters(ctx context.Context, storeID string
 	err := r.db.WithContext(ctx).
 		Table("sale_items si").
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Select("COALESCE(SUM(si.quantity), 0)").
 		Scan(&units).Error
 	if err != nil {
@@ -290,7 +298,7 @@ func (r PostgresRepository) GetSalesCounters(ctx context.Context, storeID string
 	var customers int64
 	err = r.db.WithContext(ctx).
 		Table("sales s").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Select("COUNT(DISTINCT s.customer_id)").
 		Scan(&customers).Error
 	return units, customers, err
@@ -307,7 +315,7 @@ func (r PostgresRepository) GetCategoryBreakdown(ctx context.Context, storeID st
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
 		Joins("LEFT JOIN product_types pt ON pt.id = p.product_type_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("COALESCE(p.product_type_id, ''), pt.name").
 		Order("total DESC").
 		Find(&rows).Error
@@ -323,7 +331,7 @@ func (r PostgresRepository) GetSalesByHour(ctx context.Context, storeID string, 
 	err := r.db.WithContext(ctx).
 		Table("sales s").
 		Select("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'Asia/Bangkok')::int AS hour, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("EXTRACT(HOUR FROM s.sold_at AT TIME ZONE 'Asia/Bangkok')").
 		Order("hour ASC").
 		Find(&rows).Error
@@ -343,7 +351,7 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 	err := r.db.WithContext(ctx).
 		Table("sales s").
 		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS day, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')").
 		Order("day ASC").
 		Find(&revRows).Error
@@ -361,7 +369,7 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD') AS day, COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS cogs").
 		Joins("JOIN sales s ON s.id = si.sale_id").
 		Joins("LEFT JOIN products p ON p.id = si.product_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')").
 		Find(&cogsRows).Error
 	if err != nil {
@@ -409,6 +417,84 @@ func (r PostgresRepository) GetSalesTrend(ctx context.Context, storeID string, f
 	return points, totalOrders, nil
 }
 
+// GetSalesByMonth aggregates the same revenue/COGS/refund/discount data as GetSalesTrend
+// but bucketed per calendar month (Asia/Bangkok) for the per-month P&L summary table.
+// Revenue is net of refunds; Profit is gross profit (revenue − COGS).
+func (r PostgresRepository) GetSalesByMonth(ctx context.Context, storeID string, from, to time.Time) ([]MonthlyStat, error) {
+	type saleRow struct {
+		Month    string  `gorm:"column:month"`
+		Revenue  float64 `gorm:"column:revenue"`
+		Orders   int64   `gorm:"column:orders"`
+		Discount float64 `gorm:"column:discount"`
+	}
+	var saleRows []saleRow
+	err := r.db.WithContext(ctx).
+		Table("sales s").
+		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') AS month, COALESCE(SUM(s.total_amount), 0) AS revenue, COUNT(*) AS orders, COALESCE(SUM(s.discount_amount), 0) AS discount").
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
+		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM')").
+		Order("month ASC").
+		Find(&saleRows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	type cogsRow struct {
+		Month string  `gorm:"column:month"`
+		COGS  float64 `gorm:"column:cogs"`
+	}
+	var cogsRows []cogsRow
+	err = r.db.WithContext(ctx).
+		Table("sale_items si").
+		Select("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') AS month, COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS cogs").
+		Joins("JOIN sales s ON s.id = si.sale_id").
+		Joins("LEFT JOIN products p ON p.id = si.product_id").
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
+		Group("to_char(s.sold_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM')").
+		Find(&cogsRows).Error
+	if err != nil {
+		return nil, err
+	}
+	cogsByMonth := make(map[string]float64, len(cogsRows))
+	for _, c := range cogsRows {
+		cogsByMonth[c.Month] = c.COGS
+	}
+
+	type refundRow struct {
+		Month   string  `gorm:"column:month"`
+		Refunds float64 `gorm:"column:refunds"`
+	}
+	var refundRows []refundRow
+	err = r.db.WithContext(ctx).
+		Table("sale_returns sr").
+		Select("to_char(sr.created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM') AS month, COALESCE(SUM(sr.refund_amount), 0) AS refunds").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ?", storeID, from, to).
+		Group("to_char(sr.created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM')").
+		Find(&refundRows).Error
+	if err != nil {
+		return nil, err
+	}
+	refundsByMonth := make(map[string]float64, len(refundRows))
+	for _, rf := range refundRows {
+		refundsByMonth[rf.Month] = rf.Refunds
+	}
+
+	months := make([]MonthlyStat, 0, len(saleRows))
+	for _, sr := range saleRows {
+		cogs := cogsByMonth[sr.Month]
+		netRev := sr.Revenue - refundsByMonth[sr.Month]
+		months = append(months, MonthlyStat{
+			Month:    sr.Month,
+			Orders:   sr.Orders,
+			Revenue:  netRev,
+			COGS:     cogs,
+			Profit:   netRev - cogs,
+			Discount: sr.Discount,
+		})
+	}
+	return months, nil
+}
+
 // GetStockVelocity returns the top 20 active in-stock products ordered by urgency
 // (fewest days of stock first). avg_daily_sales is computed over the last 30 days;
 // days_of_stock is NULL when there are no recent sales (no velocity data).
@@ -423,6 +509,7 @@ func (r PostgresRepository) GetStockVelocity(ctx context.Context, storeID string
 			WHERE s.store_id = ?
 			  AND s.sold_at >= NOW() - INTERVAL '30 days'
 			  AND s.status <> 'voided'
+			  AND NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')
 			GROUP BY si.product_id
 		)
 		SELECT

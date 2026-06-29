@@ -148,6 +148,18 @@ type TrendPoint struct {
 	Profit  float64 `json:"profit"`
 }
 
+// MonthlyStat is one row of the per-month P&L summary table (Reports → รายงานสรุป).
+// Revenue is net of refunds; Profit is gross profit (revenue − COGS). Discount is the
+// total bill+item discount granted that month.
+type MonthlyStat struct {
+	Month    string  `json:"month"` // YYYY-MM
+	Orders   int64   `json:"orders"`
+	Revenue  float64 `json:"revenue"`
+	COGS     float64 `json:"cogs"`
+	Profit   float64 `json:"profit"`
+	Discount float64 `json:"discount"`
+}
+
 type TopProduct struct {
 	ProductID    string  `json:"product_id"`
 	ProductName  string  `json:"product_name"`
@@ -176,6 +188,7 @@ type ExecutiveSummary struct {
 	PreviousRevenue   float64             `json:"previous_revenue"`
 	Refunds           float64             `json:"refunds"`
 	COGS              float64             `json:"cogs"`
+	DiscountAmount    float64             `json:"discount_amount"`
 	Expenses          float64             `json:"expenses"`
 	GrossProfit       float64             `json:"gross_profit"`
 	NetProfit         float64             `json:"net_profit"`
@@ -184,6 +197,7 @@ type ExecutiveSummary struct {
 	Customers         int64               `json:"customers"`
 	AverageOrderValue float64             `json:"average_order_value"`
 	SalesTrend        []TrendPoint        `json:"sales_trend"`
+	Months            []MonthlyStat       `json:"months"`
 	TopProducts       []TopProduct        `json:"top_products"`
 	CategoryBreakdown []CategoryTotal     `json:"category_breakdown"`
 	PaymentBreakdown  []PaymentMethodStat `json:"payment_breakdown"`
