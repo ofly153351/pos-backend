@@ -13,6 +13,13 @@ import (
 // finance/repository.go.
 const saleVoidedStatus = "voided"
 
+// notLoanSaleSQL excludes sales backing a loan (ยืมสินค้า) receivable — borrowed goods
+// are not revenue. A loan creates a sale row only to deduct stock; returning the goods
+// restocks them without voiding the sale, so loans would otherwise inflate the dashboard
+// revenue/payment-mix/recent-sales. Real credit sales (credit_sales.type='credit') stay.
+// Mirrors finance/repository.go. Correlates on the sales alias `s`.
+const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
+
 type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetSummary(ctx context.Context, storeID string, from, to time.Time) (Summary, error)
@@ -57,7 +64,7 @@ func (r PostgresRepository) GetSummary(ctx context.Context, storeID string, from
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
 			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
 	return result, err
 }
@@ -71,7 +78,7 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS amount
 		`).
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group(canonicalPaymentMethodSQL).
 		Order("amount DESC").
 		Find(&items).Error
@@ -102,7 +109,7 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 			COALESCE(SUM(si.line_total), 0) AS amount
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group("si.product_id, si.product_name").
 		Order("quantity_sold DESC, amount DESC").
 		Limit(limit).
@@ -145,7 +152,7 @@ func (r PostgresRepository) GetRecentSales(ctx context.Context, storeID string, 
 		`).
 		Joins("LEFT JOIN users u ON u.id = s.cashier_user_id").
 		Joins("LEFT JOIN customers c ON c.id = s.customer_id").
-		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ?", storeID, from, to, saleVoidedStatus).
+		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Order("s.sold_at DESC, s.created_at DESC").
 		Limit(limit).
 		Find(&items).Error

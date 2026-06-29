@@ -655,7 +655,9 @@ func (r PostgresRepository) Summary(ctx context.Context, storeID string) (DebtSu
 			COUNT(*) FILTER (WHERE status NOT IN ('cancelled','completed') AND remaining_amount > 0 AND due_date <> '' AND due_date < ?) AS overdue_count,
 			COALESCE(SUM(remaining_amount) FILTER (WHERE status NOT IN ('cancelled','completed') AND remaining_amount > 0 AND due_date <> '' AND due_date < ?), 0) AS overdue_amount
 		`, today, today).
-		Where("store_id = ?", storeID).
+		// Loans (type='loan') owe GOODS back, not cash — exclude from cash receivable
+		// outstanding/overdue totals so the "ยอดค้างชำระ" KPI reflects only real AR.
+		Where("store_id = ? AND type <> ?", storeID, typeLoan).
 		Take(&s).Error
 	return s, err
 }
@@ -680,6 +682,7 @@ func (r PostgresRepository) Aging(ctx context.Context, storeID string) (AgingSum
 			WHERE store_id = ?
 			  AND status NOT IN ('cancelled','completed')
 			  AND remaining_amount > 0
+			  AND type <> 'loan'
 		) sub
 		GROUP BY label
 	`, storeID).Scan(&buckets).Error
@@ -712,6 +715,7 @@ func (r PostgresRepository) Aging(ctx context.Context, storeID string) (AgingSum
 		WHERE cs.store_id = ?
 		  AND cs.status NOT IN ('cancelled','completed')
 		  AND cs.remaining_amount > 0
+		  AND cs.type <> 'loan'
 		GROUP BY cs.customer_id, c.full_name
 		ORDER BY outstanding DESC
 		LIMIT 10

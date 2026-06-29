@@ -92,6 +92,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	default:
 		return CreditSale{}, ErrInvalidType
 	}
+	// A loan (ยืมสินค้า) is settled by returning goods, not cash, and ReturnGoods force-
+	// settles the full total on a complete return — a cash down payment would be silently
+	// absorbed with no refund path. Reject it.
+	if saleType == typeLoan && req.DownPayment > 0 {
+		return CreditSale{}, ErrInvalidDownPayment
+	}
 
 	// Build the underlying sale. Discount/VAT/location intent flows through verbatim
 	// so the receivable total matches exactly what the cashier saw (POS "open credit

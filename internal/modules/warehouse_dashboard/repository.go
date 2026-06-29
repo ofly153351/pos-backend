@@ -295,6 +295,7 @@ func (r PostgresRepository) GetTopSellers(ctx context.Context, storeID string) (
 			  AND sm.type IN ('SALE','OUT')
 			  AND sm.quantity_change < 0
 			  AND sm.created_at >= NOW() - INTERVAL '14 days'
+			  AND NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = sm.reference_id AND cs.type = 'loan')
 			GROUP BY sm.product_id
 		)
 		SELECT
