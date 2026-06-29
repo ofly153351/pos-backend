@@ -102,3 +102,24 @@ are stored as the wrong byte sequence and returned as `à¸à¸...` mojibake.
 After adding a new module and wiring its routes in `internal/app/`, the process must be restarted
 for the new routes to be registered. Symptom: route returns `Cannot GET /api/v1/stores/.../new-route`
 even though the source file is correct.
+
+### Activity Center — change capture (extend to a new module)
+
+The activity log derives **severity + category** from `(action, module)` in
+`internal/modules/activity_log/taxonomy.go` (single source — the list filters
+translate back through the same functions, so they can never drift; unit-tested).
+
+To capture a `{before, after}` field diff for a module's update (drives the
+Activity Center timeline + forward-only restore):
+1. Add `internal/modules/<mod>/activity.go` with `activitySnapshot(entity)` →
+   `map[string]any` keyed by the **API field names** the update endpoint accepts.
+2. In the service `Update`, snapshot `before` right after loading current state,
+   then after a successful write call
+   `activitycapture.Record(ctx, "<kind>", beforeSnapshot, activitySnapshot(updated))`.
+   The handler must pass `c.UserContext()` to the service (all do).
+3. `<kind>` is the restore dispatch key (frontend) — distinct from `module`
+   because the middleware canonicalises member/store/receipt to `module=settings`.
+
+`changes` is a nullable JSONB column (migration 054); the Go field is `JSONText`
+(its `Value()` returns a string so pgx stores real jsonb, not bytea). Historical
+rows stay NULL → the UI shows "not captured before upgrade", never a fake diff.
