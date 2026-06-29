@@ -62,6 +62,7 @@ func (h Handler) Create(c *fiber.Ctx) error {
 	if err := httpx.DecodeJSON(c, &req); err != nil {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
+	req.IdempotencyKey = c.Get("Idempotency-Key")
 	result, err := h.service.Create(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
 	if err != nil {
 		return writeError(c, err)
@@ -91,6 +92,22 @@ func (h Handler) Cancel(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	return httpx.Success(c, fiber.StatusOK, "credit sale cancelled", result)
+}
+
+// ReturnGoods restocks borrowed goods (loan type) and settles the receivable by their
+// value. Body: { "items": [{ "product_id": "...", "quantity": N }] }.
+func (h Handler) ReturnGoods(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("creditSaleID")
+	var req ReturnGoodsRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	result, err := h.service.ReturnGoods(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "goods returned", result)
 }
 
 func (h Handler) Statement(c *fiber.Ctx) error {
@@ -131,13 +148,13 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.ErrNotFound(c, err.Error())
 	case errors.Is(err, ErrCustomerRequired):
 		return httpx.Err422(c, "customer_id", err.Error())
-	case errors.Is(err, ErrNoItems), errors.Is(err, ErrInvalidItem):
+	case errors.Is(err, ErrNoItems), errors.Is(err, ErrInvalidItem), errors.Is(err, ErrNoReturnItems), errors.Is(err, ErrReturnExceedsLent):
 		return httpx.Err422(c, "items", err.Error())
-	case errors.Is(err, ErrInvalidType):
+	case errors.Is(err, ErrInvalidType), errors.Is(err, ErrNotALoan):
 		return httpx.Err422(c, "type", err.Error())
 	case errors.Is(err, ErrInvalidDownPayment), errors.Is(err, ErrInvalidAmount), errors.Is(err, ErrOverpayment):
 		return httpx.Err422(c, "amount", err.Error())
-	case errors.Is(err, ErrAlreadyCancelled), errors.Is(err, ErrPaymentAfterCancel), errors.Is(err, ErrCannotCancelPaid):
+	case errors.Is(err, ErrAlreadyCancelled), errors.Is(err, ErrPaymentAfterCancel), errors.Is(err, ErrCannotCancelPaid), errors.Is(err, ErrReturnAfterCancel):
 		return httpx.ErrConflict(c, err.Error())
 	// Errors bubbling up from the underlying sale create (client-fixable):
 	case errors.Is(err, sale.ErrInsufficientStock):

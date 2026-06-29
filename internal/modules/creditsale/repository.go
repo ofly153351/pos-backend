@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -16,6 +17,8 @@ import (
 type Repository interface {
 	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	CreateReceivable(ctx context.Context, cs CreditSale, initial *CreditPayment) (CreditSale, error)
+	FindBySaleID(ctx context.Context, storeID, saleID string) (CreditSale, bool, error)
+	ReturnGoods(ctx context.Context, storeID, creditSaleID, actorUserID string, items []ReturnGoodsItem) (CreditSale, error)
 	List(ctx context.Context, storeID string) ([]CreditSale, error)
 	Get(ctx context.Context, storeID, creditSaleID string) (CreditSale, error)
 	AddPayment(ctx context.Context, storeID string, p CreditPayment) (CreditSale, error)
@@ -91,6 +94,30 @@ func (r PostgresRepository) Get(ctx context.Context, storeID, creditSaleID strin
 	return one[0], nil
 }
 
+// FindBySaleID returns the receivable backed by the given underlying sale, if one
+// exists. Used to make credit-sale creation idempotent: when the underlying sale was
+// deduped by its Idempotency-Key, the receivable already exists and must not be
+// minted twice.
+func (r PostgresRepository) FindBySaleID(ctx context.Context, storeID, saleID string) (CreditSale, bool, error) {
+	if saleID == "" {
+		return CreditSale{}, false, nil
+	}
+	var cs CreditSale
+	err := r.baseQuery(ctx, storeID).Where("cs.sale_id = ?", saleID).Take(&cs).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return CreditSale{}, false, nil
+	}
+	if err != nil {
+		return CreditSale{}, false, err
+	}
+	one := []CreditSale{cs}
+	if err := r.hydrate(ctx, one); err != nil {
+		return CreditSale{}, false, err
+	}
+	one[0].Status = displayStatus(one[0])
+	return one[0], true, nil
+}
+
 // hydrate loads each receivable's items (from the underlying sale's sale_items)
 // and its payment timeline (credit_payments) in two batched queries.
 func (r PostgresRepository) hydrate(ctx context.Context, sales []CreditSale) error {
@@ -134,11 +161,40 @@ func (r PostgresRepository) hydrate(ctx context.Context, sales []CreditSale) err
 		paymentsByCredit[p.CreditSaleID] = append(paymentsByCredit[p.CreditSaleID], p)
 	}
 
+	// Already-returned quantities per (credit sale, product) — RETURN stock_movements are
+	// referenced by the credit-sale id. Lets the UI show how many units remain returnable.
+	var returns []struct {
+		CreditID  string `gorm:"column:reference_id"`
+		ProductID string `gorm:"column:product_id"`
+		Qty       int    `gorm:"column:qty"`
+	}
+	err = r.db.WithContext(ctx).
+		Table("stock_movements").
+		Select("reference_id, product_id, COALESCE(SUM(quantity_change), 0) AS qty").
+		Where("reference_id IN ? AND type = ?", creditIDs, "RETURN").
+		Group("reference_id, product_id").
+		Find(&returns).Error
+	if err != nil {
+		return err
+	}
+	returnedByCredit := make(map[string]map[string]int)
+	for _, rr := range returns {
+		if returnedByCredit[rr.CreditID] == nil {
+			returnedByCredit[rr.CreditID] = make(map[string]int)
+		}
+		returnedByCredit[rr.CreditID][rr.ProductID] = rr.Qty
+	}
+
 	for i := range sales {
 		if v := itemsBySale[sales[i].SaleID]; v != nil {
 			sales[i].Items = v
 		} else {
 			sales[i].Items = []CreditSaleItem{}
+		}
+		if rmap := returnedByCredit[sales[i].ID]; rmap != nil {
+			for j := range sales[i].Items {
+				sales[i].Items[j].ReturnedQty = rmap[sales[i].Items[j].ProductID]
+			}
 		}
 		if v := paymentsByCredit[sales[i].ID]; v != nil {
 			sales[i].Payments = v
@@ -371,6 +427,211 @@ func (r PostgresRepository) Cancel(ctx context.Context, storeID, creditSaleID, a
 			"status":       StatusCancelled,
 			"cancelled_at": nowStr,
 			"updated_at":   nowStr,
+		}).Error; err != nil {
+		return CreditSale{}, err
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return CreditSale{}, err
+	}
+	return r.Get(ctx, storeID, creditSaleID)
+}
+
+// ── Loan return: restock + settle ───────────────────────────────────────────
+
+// ReturnGoods restocks borrowed goods (loan type only) and settles the receivable by the
+// value of what came back. Partial returns are allowed; each return is capped at the
+// not-yet-returned lent quantity. Goods are restocked at their originating SALE location
+// (UPSERT, mirrors Cancel) and the settled value is recorded as a "return" entry on the
+// payment timeline so paid_amount/remaining/status reflect it. The underlying sale's
+// recognised revenue is intentionally left unchanged (loans book revenue at lend time).
+func (r PostgresRepository) ReturnGoods(ctx context.Context, storeID, creditSaleID, actorUserID string, items []ReturnGoodsItem) (CreditSale, error) {
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return CreditSale{}, tx.Error
+	}
+	defer tx.Rollback()
+
+	var header CreditSale
+	if err := tx.Table("credit_sales").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("store_id = ? AND id = ?", storeID, creditSaleID).
+		Take(&header).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return CreditSale{}, ErrNotFound
+		}
+		return CreditSale{}, err
+	}
+	if header.Status == StatusCancelled {
+		return CreditSale{}, ErrReturnAfterCancel
+	}
+	if header.Type != typeLoan {
+		return CreditSale{}, ErrNotALoan
+	}
+	if len(items) == 0 {
+		return CreditSale{}, ErrNoReturnItems
+	}
+
+	// Lent quantity + net value per product from the underlying sale's items.
+	type lentRow struct {
+		ProductID string  `gorm:"column:product_id"`
+		Quantity  int     `gorm:"column:quantity"`
+		LineTotal float64 `gorm:"column:line_total"`
+	}
+	var lentRows []lentRow
+	if err := tx.Table("sale_items").
+		Select("product_id, quantity, line_total").
+		Where("sale_id = ?", header.SaleID).
+		Find(&lentRows).Error; err != nil {
+		return CreditSale{}, err
+	}
+	lentQty := make(map[string]int)
+	lineTotalByProduct := make(map[string]float64)
+	var netSubtotal float64
+	for _, lr := range lentRows {
+		lentQty[lr.ProductID] += lr.Quantity
+		lineTotalByProduct[lr.ProductID] += lr.LineTotal
+		netSubtotal += lr.LineTotal
+	}
+	// Scale net line value up to the receivable total so VAT + bill discount spread
+	// proportionally; a full return then settles the receivable exactly.
+	scale := 1.0
+	if netSubtotal > 0 {
+		scale = header.TotalAmount / netSubtotal
+	}
+
+	// Originating SALE location + already-returned quantity, per product.
+	type mvRow struct {
+		ProductID  string `gorm:"column:product_id"`
+		LocationID string `gorm:"column:location_id"`
+		Qty        int    `gorm:"column:quantity_change"`
+		Type       string `gorm:"column:type"`
+	}
+	var mvs []mvRow
+	if err := tx.Table("stock_movements").
+		Select("product_id, location_id, quantity_change, type").
+		Where("(reference_id = ? AND type = ?) OR (reference_id = ? AND type = ?)", header.SaleID, "SALE", creditSaleID, "RETURN").
+		Order("product_id, location_id").
+		Find(&mvs).Error; err != nil {
+		return CreditSale{}, err
+	}
+	saleLoc := make(map[string]string)
+	alreadyReturned := make(map[string]int)
+	for _, m := range mvs {
+		if m.Type == "SALE" {
+			if _, ok := saleLoc[m.ProductID]; !ok {
+				saleLoc[m.ProductID] = m.LocationID
+			}
+		} else {
+			alreadyReturned[m.ProductID] += m.Qty
+		}
+	}
+
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	var returnValue float64
+	var totalReturnedQty int
+	for _, it := range items {
+		pid := strings.TrimSpace(it.ProductID)
+		if pid == "" || it.Quantity <= 0 {
+			return CreditSale{}, ErrNoReturnItems
+		}
+		lent, ok := lentQty[pid]
+		if !ok || alreadyReturned[pid]+it.Quantity > lent {
+			return CreditSale{}, ErrReturnExceedsLent
+		}
+		loc := saleLoc[pid]
+		if loc == "" {
+			return CreditSale{}, ErrReturnExceedsLent // no SALE movement to safely reverse
+		}
+		res := tx.Exec(`UPDATE stocks SET quantity = quantity + ?, updated_at = NOW() WHERE product_id = ? AND location_id = ?`,
+			it.Quantity, pid, loc)
+		if res.Error != nil {
+			return CreditSale{}, res.Error
+		}
+		if res.RowsAffected == 0 {
+			if err := tx.Exec(`INSERT INTO stocks (id, store_id, product_id, location_id, quantity, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+				ON CONFLICT (product_id, location_id) DO UPDATE SET quantity = stocks.quantity + EXCLUDED.quantity, updated_at = NOW()`,
+				idgen.Generate(idgen.PrefixStock), storeID, pid, loc, it.Quantity).Error; err != nil {
+				return CreditSale{}, err
+			}
+		}
+		if err := tx.Table("stock_movements").Create(map[string]any{
+			"id":              idgen.Generate(idgen.PrefixStockMovement),
+			"store_id":        storeID,
+			"product_id":      pid,
+			"location_id":     loc,
+			"quantity_change": it.Quantity,
+			"type":            "RETURN",
+			"reference_id":    creditSaleID,
+			"note":            "loan goods return",
+			"created_by":      actorUserID,
+			"created_at":      now,
+			"updated_at":      now,
+		}).Error; err != nil {
+			return CreditSale{}, err
+		}
+		if v := lineTotalByProduct[pid]; lent > 0 {
+			returnValue += (v / float64(lent)) * float64(it.Quantity) * scale
+		}
+		totalReturnedQty += it.Quantity
+		alreadyReturned[pid] += it.Quantity
+	}
+
+	returnValue = roundMoney(returnValue)
+	newPaid := roundMoney(header.PaidAmount + returnValue)
+
+	// If every lent unit is now back, settle the receivable exactly (no rounding residue).
+	allReturned := true
+	for pid, q := range lentQty {
+		if alreadyReturned[pid] < q {
+			allReturned = false
+			break
+		}
+	}
+	if allReturned {
+		newPaid = header.TotalAmount
+	}
+	if newPaid > header.TotalAmount {
+		newPaid = header.TotalAmount
+	}
+	remaining := roundMoney(header.TotalAmount - newPaid)
+	if remaining < 0 {
+		remaining = 0
+	}
+	status := StatusPartial
+	if remaining <= 0 {
+		status = StatusCompleted
+	}
+
+	// Record the return on the payment timeline (credit_payments.amount has a > 0 CHECK,
+	// so skip a zero-value return — e.g. a ฿0 line — but the goods are still restocked).
+	settled := roundMoney(newPaid - header.PaidAmount)
+	if settled > 0 {
+		rp := CreditPayment{
+			ID:           newCreditPaymentID(),
+			CreditSaleID: creditSaleID,
+			StoreID:      storeID,
+			Amount:       settled,
+			Method:       "return",
+			Note:         fmt.Sprintf("คืนสินค้า %d ชิ้น", totalReturnedQty),
+			PaidAt:       nowStr,
+			CreatedBy:    actorUserID,
+		}
+		if err := tx.Table("credit_payments").Create(paymentRow(rp)).Error; err != nil {
+			return CreditSale{}, err
+		}
+	}
+
+	if err := tx.Table("credit_sales").
+		Where("store_id = ? AND id = ?", storeID, creditSaleID).
+		Updates(map[string]any{
+			"paid_amount":      newPaid,
+			"remaining_amount": remaining,
+			"status":           status,
+			"updated_at":       nowStr,
 		}).Error; err != nil {
 		return CreditSale{}, err
 	}

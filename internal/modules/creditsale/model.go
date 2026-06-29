@@ -26,6 +26,9 @@ type CreditSaleItem struct {
 	Price       float64 `json:"price" gorm:"column:price"`
 	Quantity    int     `json:"quantity" gorm:"column:quantity"`
 	Total       float64 `json:"total" gorm:"column:total"`
+	// ReturnedQty is how many of this line's units have already been returned to stock
+	// (loan returns). Derived from RETURN stock_movements; not persisted on the item.
+	ReturnedQty int `json:"returned_qty" gorm:"-"`
 }
 
 // CreditPayment is one collection against a receivable (the payment-history timeline).
@@ -74,18 +77,44 @@ type CreateCreditItem struct {
 }
 
 type CreateCreditSaleRequest struct {
-	Type        string             `json:"type"`
-	CustomerID  string             `json:"customer_id"`
-	DueDate     string             `json:"due_date"`
-	Note        string             `json:"note"`
-	DownPayment float64            `json:"down_payment"`
-	Items       []CreateCreditItem `json:"items"`
+	Type           string             `json:"type"`
+	CustomerID     string             `json:"customer_id"`
+	DueDate        string             `json:"due_date"`
+	Note           string             `json:"note"`
+	DownPayment    float64            `json:"down_payment"`
+	IdempotencyKey string             `json:"-"` // set from the Idempotency-Key header; dedupes a retried submit
+	Items          []CreateCreditItem `json:"items"`
+
+	// Optional pricing controls. When nil the underlying sale falls back to the
+	// store's POS defaults (e.g. store VAT rate). These let the credit-sale form —
+	// and POS "open credit bill" — carry the same discount/VAT/location intent as a
+	// normal sale so the receivable total matches what the cashier saw.
+	BillDiscount  *float64 `json:"bill_discount"`  // explicit end-of-bill discount
+	VATPercent    *float64 `json:"vat_percent"`    // VAT rate %; nil → store POS default
+	VATIncluded   *bool    `json:"vat_included"`   // true = prices already include VAT; nil → store default
+	LocationID    string   `json:"location_id"`    // sale-point location (else store default)
+	PromoDiscount *float64 `json:"promo_discount"` // promotion-derived discount (server-verified)
+	PromotionIDs  []string `json:"promotion_ids"`  // applied active promotion ids
 }
 
 type AddPaymentRequest struct {
 	Amount float64 `json:"amount"`
 	Method string  `json:"method"`
 	Note   string  `json:"note"`
+}
+
+// ReturnGoodsItem is one product+quantity being returned against a loan.
+type ReturnGoodsItem struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
+// ReturnGoodsRequest records the return of borrowed goods (loan type only): the listed
+// quantities are restocked at their original sale location and the receivable is settled
+// by the value of the returned goods.
+type ReturnGoodsRequest struct {
+	Items []ReturnGoodsItem `json:"items"`
+	Note  string            `json:"note"`
 }
 
 // DebtSummary powers the credit-sales KPI cards.

@@ -20,4 +20,9 @@ var (
 	ErrPaymentAfterCancel = errors.New("ไม่สามารถรับชำระได้ เนื่องจากรายการเครดิตถูกยกเลิกแล้ว")
 	// Phase W5 — cannot cancel a receivable that has collected payment (no reversal model).
 	ErrCannotCancelPaid = errors.New("ไม่สามารถยกเลิกรายการเครดิตที่มีการรับชำระแล้วได้")
+	// Loan returns — restock borrowed goods and settle the receivable by their value.
+	ErrNotALoan          = errors.New("คืนสินค้าได้เฉพาะรายการประเภทยืมเท่านั้น")
+	ErrNoReturnItems     = errors.New("ต้องระบุสินค้าที่จะคืนอย่างน้อย 1 รายการ")
+	ErrReturnExceedsLent = errors.New("จำนวนที่คืนเกินจำนวนที่ยืมไป")
+	ErrReturnAfterCancel = errors.New("ไม่สามารถคืนสินค้าได้ เนื่องจากรายการถูกยกเลิกแล้ว")
 )

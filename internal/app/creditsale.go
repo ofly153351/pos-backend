@@ -31,6 +31,7 @@ func registerCreditSaleRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/credit-sales", handler.Create)
 	protected.Get("/stores/:storeID/credit-sales/:creditSaleID", handler.GetByID)
 	protected.Post("/stores/:storeID/credit-sales/:creditSaleID/payments", handler.AddPayment)
+	protected.Post("/stores/:storeID/credit-sales/:creditSaleID/returns", handler.ReturnGoods)
 	protected.Post("/stores/:storeID/credit-sales/:creditSaleID/cancel", handler.Cancel)
 	protected.Get("/stores/:storeID/credit-sales/:creditSaleID/statement", handler.Statement)
 	protected.Get("/stores/:storeID/credit-sales/:creditSaleID/bill", handler.Bill)

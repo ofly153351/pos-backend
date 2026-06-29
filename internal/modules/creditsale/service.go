@@ -93,8 +93,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return CreditSale{}, ErrInvalidType
 	}
 
-	// Build and create the underlying sale (no VAT — matches the store's POS config).
-	vatIncluded := false
+	// Build the underlying sale. Discount/VAT/location intent flows through verbatim
+	// so the receivable total matches exactly what the cashier saw (POS "open credit
+	// bill" and the credit-sales form both feed these). When VATPercent/VATIncluded
+	// are nil the sale falls back to the store's POS defaults.
 	saleItems := make([]sale.CreateSaleItemRequest, 0, len(req.Items))
 	for _, it := range req.Items {
 		saleItems = append(saleItems, sale.CreateSaleItemRequest{
@@ -105,15 +107,28 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		})
 	}
 	createdSale, err := s.saleService.Create(ctx, actor, storeID, sale.CreateSaleRequest{
-		PaymentMethod: creditPaymentMethod,
-		PaidAmount:    roundMoney(req.DownPayment),
-		VATIncluded:   &vatIncluded,
-		Note:          strings.TrimSpace(req.Note),
-		CustomerID:    strings.TrimSpace(req.CustomerID),
-		Items:         saleItems,
+		PaymentMethod:  creditPaymentMethod,
+		LocationID:     strings.TrimSpace(req.LocationID),
+		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		PaidAmount:     roundMoney(req.DownPayment),
+		ManualDiscount: req.BillDiscount,
+		PromoDiscount:  req.PromoDiscount,
+		PromotionIDs:   req.PromotionIDs,
+		VATIncluded:    req.VATIncluded,
+		VATPercent:     req.VATPercent,
+		Note:           strings.TrimSpace(req.Note),
+		CustomerID:     strings.TrimSpace(req.CustomerID),
+		Items:          saleItems,
 	})
 	if err != nil {
 		return CreditSale{}, err
+	}
+
+	// Idempotent replay: when the underlying sale was deduped by its Idempotency-Key,
+	// a receivable already exists for it — return that instead of minting a duplicate
+	// credit_sales row for the same sale.
+	if existing, found, ferr := s.repo.FindBySaleID(ctx, storeID, createdSale.ID); ferr == nil && found {
+		return existing, nil
 	}
 
 	// The sale is committed (stock deducted); compute the receivable from its total.
@@ -189,6 +204,23 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, cre
 		CreatedBy:    actor.UserID,
 	}
 	return s.repo.AddPayment(ctx, storeID, p)
+}
+
+// ReturnGoods restocks borrowed goods (loan type only) and settles the receivable by the
+// value of what came back. Any store member may record a return (mirrors AddPayment).
+func (s Service) ReturnGoods(ctx context.Context, actor auth.Claims, storeID, creditSaleID string, req ReturnGoodsRequest) (CreditSale, error) {
+	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
+		return CreditSale{}, err
+	}
+	if len(req.Items) == 0 {
+		return CreditSale{}, ErrNoReturnItems
+	}
+	for _, it := range req.Items {
+		if strings.TrimSpace(it.ProductID) == "" || it.Quantity <= 0 {
+			return CreditSale{}, ErrNoReturnItems
+		}
+	}
+	return s.repo.ReturnGoods(ctx, storeID, creditSaleID, actor.UserID, req.Items)
 }
 
 // Cancel restocks the goods and voids the underlying sale, removing its revenue and
