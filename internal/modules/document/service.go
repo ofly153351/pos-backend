@@ -349,6 +349,19 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 		return nil, err
 	}
 
+	// Refuse to mint a customer-facing document (tax invoice / receipt) from a loan
+	// (ยืมสินค้า) sale: a loan's sale row stays status='completed' even after the goods are
+	// returned, so issuing a tax invoice would recognize VAT/revenue for borrowed goods.
+	var loanCount int64
+	if err := s.db.Table("credit_sales").
+		Where("sale_id = ? AND type = ?", saleID, "loan").
+		Count(&loanCount).Error; err != nil {
+		return nil, err
+	}
+	if loanCount > 0 {
+		return nil, ErrNotFound
+	}
+
 	// 2. Sale line items (UnitPrice is gross/pre-discount; LineTotal is what the
 	//    customer paid for the line; LineDiscountTotal is the per-line discount × qty).
 	var rows []struct {
@@ -377,7 +390,7 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 	var rsv struct {
 		TaxMode string `gorm:"column:tax_mode"`
 	}
-	if err := s.db.Table("receipt_settings").
+	if err := s.db.Table("store_receipt_settings").
 		Select("tax_mode").
 		Where("store_id = ?", storeID).
 		Take(&rsv).Error; err == nil && strings.TrimSpace(rsv.TaxMode) != "" {
@@ -498,6 +511,20 @@ func (s Service) UpdateDocumentStatus(ctx context.Context, actor auth.Claims, st
 	return s.repo.UpdateStatus(id, req.Status)
 }
 
+// UpdatePaymentStatus sets the manual payment flag (paid/unpaid/partial) on a
+// document. It does NOT touch revenue/finance — purely a tracking aid.
+func (s Service) UpdatePaymentStatus(ctx context.Context, actor auth.Claims, storeID, id string, req UpdatePaymentStatusRequest) error {
+	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
+		return err
+	}
+	switch req.PaymentStatus {
+	case PaymentUnpaid, PaymentPartial, PaymentPaid:
+	default:
+		return ErrInvalidInput
+	}
+	return s.repo.SetPaymentStatus(id, req.PaymentStatus)
+}
+
 func (s Service) DeleteDocument(ctx context.Context, actor auth.Claims, storeID, id string) error {
 	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
 		return err
@@ -505,7 +532,7 @@ func (s Service) DeleteDocument(ctx context.Context, actor auth.Claims, storeID,
 	return s.repo.Delete(id)
 }
 
-func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string) (string, error) {
+func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) (string, error) {
 	doc, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return "", err
@@ -535,7 +562,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		}
 	}
 
-	return dochtml.RenderDocumentHTML(docData, dochtml.StoreInfo{
+	return dochtml.RenderUnifiedDocumentCopies(docData, dochtml.StoreInfo{
 		Name:         doc.StoreName,
 		Address:      doc.StoreAddress,
 		Phone:        doc.StorePhone,
@@ -546,7 +573,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		LogoURL:      doc.StoreLogoURL,
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
-	})
+	}, copyIdx)
 }
 
 // RelatedDocuments returns every document in the same conversion family as id —

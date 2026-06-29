@@ -43,6 +43,10 @@ type UpdateStatusRequest struct {
 	Status DocumentStatus `json:"status"`
 }
 
+type UpdatePaymentStatusRequest struct {
+	PaymentStatus PaymentStatus `json:"payment_status"`
+}
+
 type ConvertRequest struct {
 	TargetType DocumentType `json:"target_type"`
 }

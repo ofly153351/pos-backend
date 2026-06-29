@@ -32,7 +32,11 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"regexp"
 	"strconv"
+	"strings"
+
+	"pos-backend/internal/platform/doccopy"
 )
 
 // NOTE: GEOMETRY (§1) + PAGINATOR (§2) ย้ายไปไฟล์ pagination.go แล้ว
@@ -166,6 +170,8 @@ type renderView struct {
 	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch, LogoURL string
 	// หัวเอกสาร
 	TitleTH, TitleEN, Badge    string
+	Purpose                    string // copy purpose tag e.g. "(สำหรับลูกค้า)"
+	ShowSignature              bool   // render the signature block on this copy
 	DocNo, DocDate             string
 	SpecialLabel, SpecialValue string
 	// ลูกค้า / จัดส่ง
@@ -321,7 +327,9 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: store.LogoURL,
 
 		TitleTH: p.TitleTH, TitleEN: p.TitleEN, Badge: p.Badge,
-		DocNo: d.DocumentNoFull, DocDate: thaiDate(d.DocumentDate),
+		// Single-render default: signatures shown (copy renderer overrides per variant).
+		ShowSignature: true,
+		DocNo:         d.DocumentNoFull, DocDate: thaiDate(d.DocumentDate),
 		SpecialLabel: p.SpecialLabel, SpecialValue: specialValue(d, d.Type),
 
 		CustomerName: d.CustomerName, CustomerTaxID: derefStr(d.CustomerTaxID),
@@ -365,6 +373,67 @@ func RenderUnifiedDocumentHTML(d DocData, store StoreInfo) (string, error) {
 	return buf.String(), nil
 }
 
+// renderOneCopy renders the document with a specific copy variant applied
+// (Original/Copy badge + purpose tag + conditional signature block).
+func renderOneCopy(d DocData, store StoreInfo, v doccopy.CopyVariant) (string, error) {
+	vm := BuildDocumentView(d, store)
+	vm.Badge = v.BadgeLabel()
+	vm.Purpose = v.Purpose
+	vm.ShowSignature = v.ShowSignature
+	var buf bytes.Buffer
+	if err := unifiedTmpl.Execute(&buf, vm); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+var (
+	bodyRe = regexp.MustCompile(`(?is)<body[^>]*>(.*?)</body>`)
+	headRe = regexp.MustCompile(`(?is)<head[^>]*>(.*?)</head>`)
+)
+
+// RenderUnifiedDocumentCopies renders the full print set for a document type
+// (per doccopy.SpecFor) as ONE HTML document: each copy is a page-broken sheet,
+// every sheet carrying its own "ต้นฉบับ (Original)" / "สำเนา (Copy)" badge.
+// A single browser print job therefore yields the whole legal copy set.
+func RenderUnifiedDocumentCopies(d DocData, store StoreInfo, copyIdx int) (string, error) {
+	specs := doccopy.SpecFor(d.Type)
+	// copyIdx >= 0 selects a single copy (0-based); -1 (or out of range) = whole set.
+	if copyIdx >= 0 && copyIdx < len(specs) {
+		return renderOneCopy(d, store, specs[copyIdx])
+	}
+	if len(specs) == 0 {
+		return RenderUnifiedDocumentHTML(d, store)
+	}
+
+	head := ""
+	var sheets []string
+	for i, v := range specs {
+		html, err := renderOneCopy(d, store, v)
+		if err != nil {
+			return "", err
+		}
+		if head == "" {
+			if m := headRe.FindStringSubmatch(html); m != nil {
+				head = m[1]
+			}
+		}
+		body := html
+		if m := bodyRe.FindStringSubmatch(html); m != nil {
+			body = m[1]
+		}
+		brk := "page-break-after:always;"
+		if i == len(specs)-1 {
+			brk = ""
+		}
+		sheets = append(sheets, fmt.Sprintf(`<div style="%s">%s</div>`, brk, body))
+	}
+	return fmt.Sprintf(
+		`<!DOCTYPE html><html lang="th"><head>%s</head><body>%s</body></html>`,
+		head, strings.Join(sheets, "\n"),
+	), nil
+}
+
 const unifiedDocHTML = `{{$root := .}}<!DOCTYPE html>
 <html lang="th"><head><meta charset="utf-8"><title>{{.TitleTH}} {{.DocNo}}</title>
 <style>
@@ -398,7 +467,8 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .hdr-right{ text-align:right; min-width:62mm; }
 .doc-title{ font-size:22px; font-weight:700; letter-spacing:.5px; }
 .doc-title-en{ font-size:11px; color:var(--muted); margin-bottom:1mm; }
-.doc-badge{ display:inline-block; border:1px solid var(--ink); padding:.5mm 2mm; font-size:9px; margin-bottom:2mm; }
+.doc-badge{ display:inline-block; border:1.2px solid var(--ink); border-radius:1mm; padding:.5mm 2mm; font-size:9px; font-weight:bold; margin-bottom:1mm; }
+.doc-purpose{ font-size:8px; color:var(--muted); margin-bottom:2mm; }
 .doc-meta{ width:100%; border-collapse:collapse; font-size:10px; }
 .doc-meta td{ border:1px solid var(--line); padding:1mm 2mm; text-align:left; }
 .doc-meta td:first-child{ color:var(--muted); background:#f6f6f6; white-space:nowrap; }
@@ -489,6 +559,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <div class="doc-title">{{$root.TitleTH}}</div>
       <div class="doc-title-en">{{$root.TitleEN}}</div>
       {{if $root.Badge}}<div class="doc-badge">{{$root.Badge}}</div>{{end}}
+      {{if $root.Purpose}}<div class="doc-purpose">{{$root.Purpose}}</div>{{end}}
       <table class="doc-meta">
         <tr><td>เลขที่ (No.)</td><td class="b">{{$root.DocNo}}</td></tr>
         <tr><td>วันที่ (Date)</td><td class="b">{{$root.DocDate}}</td></tr>
@@ -596,6 +667,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
     <div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
 
+    {{if $root.ShowSignature}}
     <div class="signatures">
       <div class="sig">
         <div class="sig-t">{{$root.SigLeftTH}} / {{$root.SigLeftEN}}</div>
@@ -608,6 +680,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
         <div class="sig-date-row"><span>วันที่</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span></div>
       </div>
     </div>
+    {{end}}
   </footer>
   {{end}}
 

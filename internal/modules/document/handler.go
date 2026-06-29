@@ -90,6 +90,19 @@ func (h Handler) UpdateDocumentStatus(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "status updated", nil)
 }
 
+func (h Handler) UpdateDocumentPaymentStatus(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	var req UpdatePaymentStatusRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if err := h.service.UpdatePaymentStatus(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req); err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "payment status updated", nil)
+}
+
 func (h Handler) DeleteDocument(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
@@ -102,7 +115,8 @@ func (h Handler) DeleteDocument(c *fiber.Ctx) error {
 func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
-	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	// ?copy=N selects a single copy (0-based); absent/-1 prints the whole set.
+	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
 	if err != nil {
 		return writeError(c, err)
 	}

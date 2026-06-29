@@ -14,6 +14,7 @@ type Repository interface {
 	Create(doc *Document) error
 	UpdateStatus(id string, status DocumentStatus) error
 	MarkPaid(id string) error
+	SetPaymentStatus(id string, status PaymentStatus) error
 	Delete(id string) error
 	BulkDelete(storeID string, ids []string) error
 	BulkSetStatus(storeID string, ids []string, status DocumentStatus) error
@@ -126,6 +127,17 @@ func (r *repository) MarkPaid(id string) error {
 		Updates(map[string]any{
 			"status":         StatusCompleted,
 			"payment_status": PaymentPaid,
+			"updated_at":     time.Now(),
+		}).Error
+}
+
+// SetPaymentStatus updates ONLY the payment_status flag (independent of the
+// document lifecycle status) — backs the one-click paid/unpaid toggle.
+func (r *repository) SetPaymentStatus(id string, status PaymentStatus) error {
+	return r.db.Model(&Document{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"payment_status": status,
 			"updated_at":     time.Now(),
 		}).Error
 }

@@ -28,6 +28,7 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Get("/stores/:storeID/documents/:docID/wht-cert", h.PrintWHTCert)
 	protected.Get("/stores/:storeID/documents/:docID/pdf", h.GetDocumentPDF)
 	protected.Put("/stores/:storeID/documents/:docID/status", h.UpdateDocumentStatus)
+	protected.Put("/stores/:storeID/documents/:docID/payment-status", h.UpdateDocumentPaymentStatus)
 	protected.Delete("/stores/:storeID/documents/:docID", h.DeleteDocument)
 	protected.Post("/stores/:storeID/documents/bulk", h.BulkAction)
 	protected.Post("/stores/:storeID/documents/:docID/pay", h.PayInvoice)
