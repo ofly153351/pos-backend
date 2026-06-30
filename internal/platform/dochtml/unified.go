@@ -411,7 +411,7 @@ func RenderUnifiedDocumentCopies(d DocData, store StoreInfo, copyIdx int) (strin
 
 	head := ""
 	var sheets []string
-	for i, v := range specs {
+	for _, v := range specs {
 		html, err := renderOneCopy(d, store, v)
 		if err != nil {
 			return "", err
@@ -425,11 +425,10 @@ func RenderUnifiedDocumentCopies(d DocData, store StoreInfo, copyIdx int) (strin
 		if m := bodyRe.FindStringSubmatch(html); m != nil {
 			body = m[1]
 		}
-		brk := "page-break-after:always;"
-		if i == len(specs)-1 {
-			brk = ""
-		}
-		sheets = append(sheets, fmt.Sprintf(`<div style="%s">%s</div>`, brk, body))
+		// Each copy is its own sheet. .copy-break forces a print page break between
+		// copies AND adds a clear gap + divider on screen, so the preview drawer
+		// visually separates ต้นฉบับ / สำเนา instead of running them together.
+		sheets = append(sheets, fmt.Sprintf(`<div class="copy-break">%s</div>`, body))
 	}
 	return fmt.Sprintf(
 		`<!DOCTYPE html><html lang="th"><head>%s</head><body>%s</body></html>`,
@@ -451,6 +450,11 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
   display:flex; flex-direction:column; page-break-after:always;
 }
 .page:last-of-type{ page-break-after:auto; margin-bottom:0; }
+/* copy-set: แต่ละ copy (ต้นฉบับ/สำเนา) เป็นชีตของตัวเอง — แยกหน้าตอน print และ
+   แยกชัดบนจอ (preview drawer) ด้วยช่องว่าง + เส้นประ */
+.copy-break{ page-break-after:always; }
+.copy-break:last-child{ page-break-after:auto; }
+@media screen{ .copy-break:not(:last-child){ margin-bottom:16mm; border-bottom:2px dashed #94a3b8; } }
 @media print{ body{background:#fff;} .page{ margin:0; box-shadow:none; } }
 
 /* ---- footer-pin: spacer พองเฉพาะ "หน้าเดียว" → ลายเซ็นติดล่าง A4 ---- */

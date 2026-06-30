@@ -136,3 +136,19 @@ func TestUnifiedRender_SinglePagePin(t *testing.T) {
 		t.Fatalf("expected single page footer")
 	}
 }
+
+// A copy set (ต้นฉบับ/สำเนา) must wrap each copy in .copy-break so it page-breaks
+// in print AND is visually separated on screen (preview drawer).
+func TestUnifiedRender_CopySeparation(t *testing.T) {
+	html, err := RenderUnifiedDocumentCopies(makeDoc("TAX_INVOICE", 3), StoreInfo{Name: "ร้านทดสอบ"}, -1)
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if got := strings.Count(html, `class="copy-break"`); got < 2 {
+		t.Fatalf("copy set should wrap each copy in .copy-break (>=2), got %d", got)
+	}
+	// screen separator must be present so the preview drawer splits the copies
+	if !strings.Contains(html, "copy-break:not(:last-child)") {
+		t.Fatalf("missing on-screen separator between copies")
+	}
+}
