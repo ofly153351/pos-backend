@@ -124,6 +124,31 @@ mkdir -p bin
 go build -o bin/api cmd/api.go
 ok "Binary: $BACKEND_DIR/bin/api"
 
+# Document "Download PDF" renders via headless Chrome (chromedp) → the host needs a
+# Chrome/Chromium/Edge binary. Without it, only that one button fails (print still works).
+info "ตรวจ Chrome/Chromium สำหรับสร้าง PDF เอกสาร..."
+CHROME_FOUND=""
+if [ -n "$CHROME_PATH" ] && [ -x "$CHROME_PATH" ]; then
+  CHROME_FOUND="$CHROME_PATH (CHROME_PATH)"
+else
+  for c in google-chrome google-chrome-stable chromium chromium-browser chrome msedge; do
+    if command -v "$c" >/dev/null 2>&1; then CHROME_FOUND="$(command -v "$c")"; break; fi
+  done
+  for p in \
+    "/usr/bin/google-chrome" "/usr/bin/chromium" "/usr/bin/chromium-browser" \
+    "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+    "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"; do
+    [ -z "$CHROME_FOUND" ] && [ -x "$p" ] && CHROME_FOUND="$p"
+  done
+fi
+if [ -n "$CHROME_FOUND" ]; then
+  ok "พบ Chrome: $CHROME_FOUND"
+else
+  warn "ไม่พบ Chrome/Chromium บนเครื่องนี้ — ปุ่ม 'ดาวน์โหลด PDF' จะใช้ไม่ได้"
+  warn "  แก้: ติดตั้ง chromium (Linux: sudo apt install -y chromium) หรือ set CHROME_PATH=/path/to/chrome"
+  warn "  (ปุ่ม 'พิมพ์' ยังใช้งานได้ปกติ — มี fallback ฝั่งหน้าเว็บให้อัตโนมัติ)"
+fi
+
 # ── 4. Build Next.js frontend ────────────────────────────────────────────────
 step "Build Next.js frontend"
 cd "$FRONTEND_DIR"

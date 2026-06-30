@@ -11,6 +11,7 @@ package htmlpdf
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
@@ -26,6 +27,11 @@ func Render(parent context.Context, html string) ([]byte, error) {
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-gpu", true),
 	)
+	// Prod override: point at a specific Chrome/Chromium/Edge binary when the host
+	// keeps it outside the default search paths (set CHROME_PATH in the env).
+	if p := os.Getenv("CHROME_PATH"); p != "" {
+		opts = append(opts, chromedp.ExecPath(p))
+	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(parent, opts...)
 	defer cancelAlloc()
 
