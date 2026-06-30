@@ -526,12 +526,12 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
 .remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
 .remarks .rh{ color:var(--muted); }
-.signatures{ display:flex; gap:10mm; margin-top:4mm; break-inside:avoid; }
-.sig{ flex:1; }
+.signatures{ display:flex; justify-content:center; gap:20mm; margin-top:7mm; break-inside:avoid; }
+.sig{ width:56mm; flex-shrink:0; }
 .sig-t{ font-size:10px; font-weight:700; margin-bottom:3mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
-.sig-write{ display:flex; align-items:baseline; gap:1mm; margin-bottom:2mm; }
+.sig-write{ display:flex; align-items:baseline; gap:1.5mm; margin-bottom:2mm; }
 .sig-write-lbl{ font-size:10px; white-space:nowrap; flex-shrink:0; }
-.sig-ln{ flex:1; border-bottom:1px solid var(--ink); }
+.sig-ln{ width:40mm; border-bottom:1px solid var(--ink); }
 .sig-date-row{ display:flex; align-items:baseline; gap:1mm; font-size:9px; color:var(--muted); }
 .sig-date-seg{ width:10mm; border-bottom:1px solid var(--ink); position:relative; top:-2px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
