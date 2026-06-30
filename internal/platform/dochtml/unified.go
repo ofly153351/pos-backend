@@ -167,7 +167,10 @@ type bankView struct{ Name, No, Holder string }
 
 type renderView struct {
 	// ร้าน
-	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch, LogoURL string
+	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch string
+	// LogoURL is template.URL so a base64 data: URI (embedded logo) is not stripped
+	// to #ZgotmplZ by html/template's URL sanitizer.
+	LogoURL template.URL
 	// หัวเอกสาร
 	TitleTH, TitleEN, Badge    string
 	Purpose                    string // copy purpose tag e.g. "(สำหรับลูกค้า)"
@@ -324,7 +327,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
-		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: store.LogoURL,
+		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: template.URL(store.LogoURL),
 
 		TitleTH: p.TitleTH, TitleEN: p.TitleEN, Badge: p.Badge,
 		// Single-render default: signatures shown (copy renderer overrides per variant).
@@ -532,7 +535,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .signatures{ display:flex; justify-content:center; gap:20mm; margin-top:7mm; break-inside:avoid; }
 .sig{ width:56mm; flex-shrink:0; }
 .sig-t{ font-size:10px; font-weight:700; margin-bottom:3mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
-.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1.5mm; margin-bottom:2mm; }
+.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1.5mm; margin-top:7mm; margin-bottom:3mm; }
 .sig-write-lbl{ font-size:10px; white-space:nowrap; flex-shrink:0; }
 .sig-ln{ width:40mm; border-bottom:1px solid var(--ink); }
 .sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:1mm; font-size:9px; color:var(--muted); }

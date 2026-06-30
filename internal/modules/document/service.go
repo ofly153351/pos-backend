@@ -2,9 +2,12 @@ package document
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"strings"
 	"time"
 
@@ -228,38 +231,38 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	totalAmount := round2(subtotal + vatAmount)
 
 	doc := &Document{
-		ID:              idgen.Generate(PrefixDocument),
-		StoreID:         storeID,
-		Type:            req.Type,
-		Status:          StatusPending,
-		PaymentStatus:   PaymentUnpaid,
-		CustomerID:      req.CustomerID,
-		CustomerName:    cust.FullName,
-		CustomerAddress: cust.Address,
-		CustomerPhone:   cust.Phone,
-		StaffID:         actor.UserID,
-		StaffName:       actor.Name,
-		DocumentDate:    docDate,
-		DueDate:         dueDate,
-		ValidUntil:      validUntil,
-		DeliveryDate:    deliveryDate,
-		DeliveryAddress: req.DeliveryAddress,
-		DeliveryContact: req.DeliveryContact,
-		DeliveryPhone:   req.DeliveryPhone,
-		SalesZone:       req.SalesZone,
-		SalespersonName: req.SalespersonName,
+		ID:               idgen.Generate(PrefixDocument),
+		StoreID:          storeID,
+		Type:             req.Type,
+		Status:           StatusPending,
+		PaymentStatus:    PaymentUnpaid,
+		CustomerID:       req.CustomerID,
+		CustomerName:     cust.FullName,
+		CustomerAddress:  cust.Address,
+		CustomerPhone:    cust.Phone,
+		StaffID:          actor.UserID,
+		StaffName:        actor.Name,
+		DocumentDate:     docDate,
+		DueDate:          dueDate,
+		ValidUntil:       validUntil,
+		DeliveryDate:     deliveryDate,
+		DeliveryAddress:  req.DeliveryAddress,
+		DeliveryContact:  req.DeliveryContact,
+		DeliveryPhone:    req.DeliveryPhone,
+		SalesZone:        req.SalesZone,
+		SalespersonName:  req.SalespersonName,
 		InvoiceRefNo:     req.InvoiceRefNo,
 		PORefNo:          req.PORefNo,
 		SourceDocumentID: req.SourceDocumentID,
-		ShippingFee:     round2(req.ShippingFee),
-		CreditTermDays:  req.CreditTermDays,
-		Subtotal:       subtotal,
-		VatRate:        req.VatRate,
-		VatAmount:      vatAmount,
-		TotalAmount:    totalAmount,
-		Notes:          req.Notes,
-		Items:          items,
-		CreatedBy:      actor.UserID,
+		ShippingFee:      round2(req.ShippingFee),
+		CreditTermDays:   req.CreditTermDays,
+		Subtotal:         subtotal,
+		VatRate:          req.VatRate,
+		VatAmount:        vatAmount,
+		TotalAmount:      totalAmount,
+		Notes:            req.Notes,
+		Items:            items,
+		CreatedBy:        actor.UserID,
 	}
 
 	return s.assignNumberAndInsert(doc)
@@ -571,10 +574,44 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		Email:        doc.StoreEmail,
 		Website:      doc.StoreWebsite,
 		TaxID:        doc.StoreTaxID,
-		LogoURL:      doc.StoreLogoURL,
+		LogoURL:      inlineImageDataURI(ctx, doc.StoreLogoURL),
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
 	}, copyIdx)
+}
+
+// inlineImageDataURI fetches an image URL and returns it as a base64 data: URI so
+// it embeds directly in the HTML. The store logo lives on an internal asset host
+// (MinIO, e.g. http://127.0.0.1:9000) that headless Chrome can't reliably reach
+// when generating the PDF — embedding it guarantees the logo shows in both the
+// preview and the downloaded PDF. On any failure it returns the URL unchanged.
+func inlineImageDataURI(ctx context.Context, rawURL string) string {
+	if rawURL == "" || strings.HasPrefix(rawURL, "data:") {
+		return rawURL
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return rawURL
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return rawURL
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20)) // 5MB safety cap
+	if err != nil || len(data) == 0 {
+		return rawURL
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = http.DetectContentType(data)
+	}
+	return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // RenderDocumentPDF produces the downloadable PDF by rendering the SAME unified
@@ -856,23 +893,23 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	}
 
 	doc := &Document{
-		ID:              idgen.Generate(PrefixDocument),
-		StoreID:         storeID,
-		Type:            target,
-		Status:          StatusPending,
-		PaymentStatus:   PaymentUnpaid,
-		CustomerID:      src.CustomerID,
-		CustomerName:    src.CustomerName,
-		CustomerTaxID:   src.CustomerTaxID,
-		CustomerAddress: src.CustomerAddress,
-		CustomerPhone:   src.CustomerPhone,
-		StaffID:         actor.UserID,
-		StaffName:       actor.Name,
-		DocumentDate:    docDate,
-		DueDate:         dueDate,
-		DeliveryAddress: req.DeliveryAddress,
-		DeliveryContact: req.DeliveryContact,
-		DeliveryPhone:   req.DeliveryPhone,
+		ID:               idgen.Generate(PrefixDocument),
+		StoreID:          storeID,
+		Type:             target,
+		Status:           StatusPending,
+		PaymentStatus:    PaymentUnpaid,
+		CustomerID:       src.CustomerID,
+		CustomerName:     src.CustomerName,
+		CustomerTaxID:    src.CustomerTaxID,
+		CustomerAddress:  src.CustomerAddress,
+		CustomerPhone:    src.CustomerPhone,
+		StaffID:          actor.UserID,
+		StaffName:        actor.Name,
+		DocumentDate:     docDate,
+		DueDate:          dueDate,
+		DeliveryAddress:  req.DeliveryAddress,
+		DeliveryContact:  req.DeliveryContact,
+		DeliveryPhone:    req.DeliveryPhone,
 		InvoiceRefNo:     req.InvoiceRefNo,
 		SourceDocumentID: req.SourceDocumentID,
 		// Money — verbatim from the source, NOT recomputed.

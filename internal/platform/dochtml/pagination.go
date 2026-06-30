@@ -41,7 +41,7 @@ const (
 	hSumExtra = 8.0  // ระยะเน้น grand total
 	hPayBox   = 44.0 // กล่องชำระเงิน + QR(16mm) + cheque sub-fields — ย่อลงให้ footer เล็กลง (จุหน้าเดียวได้มากขึ้น)
 	hRemarks  = 16.0 // กล่องหมายเหตุ (min-height 9mm) — ย่อลง
-	hSigBlock = 23.0 // แถวลายเซ็น — ย่อ margin ลง (ลงชื่อ+line + วันที่)
+	hSigBlock = 31.0 // แถวลายเซ็น — เผื่อ margin-top ช่องลงชื่อให้กรอกได้ไม่แคบ (signatures+sig-t+sig-write+date)
 )
 
 type geometry struct {

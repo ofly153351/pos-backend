@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -51,6 +52,23 @@ func Render(parent context.Context, html string) ([]byte, error) {
 				return err
 			}
 			return page.SetDocumentContent(tree.Frame.ID, html).Do(ctx)
+		}),
+		// Wait for all images (store logo, PromptPay QR) to finish loading. They are
+		// fetched over the network (e.g. MinIO), so printing immediately would drop
+		// them — the logo/QR would be missing from the PDF. Resolves on load OR error,
+		// with a 5s safety cap so an unreachable asset can never hang the render.
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var ready bool
+			return chromedp.Evaluate(`new Promise((resolve) => {
+				const imgs = Array.from(document.images);
+				let pending = imgs.filter((i) => !i.complete).length;
+				if (pending === 0) { resolve(true); return; }
+				const done = () => { if (--pending <= 0) resolve(true); };
+				imgs.forEach((i) => { if (!i.complete) { i.addEventListener('load', done); i.addEventListener('error', done); } });
+				setTimeout(() => resolve(true), 5000);
+			})`, &ready, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+				return p.WithAwaitPromise(true)
+			}).Do(ctx)
 		}),
 		// Give web fonts / layout a moment to settle before printing.
 		chromedp.Sleep(250*time.Millisecond),
