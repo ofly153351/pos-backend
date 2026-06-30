@@ -100,7 +100,7 @@ func profileFor(docType string) docProfile {
 		return docProfile{
 			TitleTH: "ใบแจ้งหนี้", TitleEN: "Invoice",
 			ShowDiscount: true, ShowPayBox: true, SpecialLabel: "ครบกำหนด (Due)",
-			SigLeftTH: "ผู้จัดทำ", SigLeftEN: "Issued By", SigRightTH: "ผู้รับวางบิล", SigRightEN: "Received By",
+			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับเอกสาร", SigRightEN: "Document Receiver",
 		}
 	case "RECEIPT":
 		return docProfile{
@@ -112,25 +112,25 @@ func profileFor(docType string) docProfile {
 		return docProfile{
 			TitleTH: "ใบกำกับภาษี", TitleEN: "Tax Invoice",
 			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: true, SpecialLabel: "",
-			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Received By",
+			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Goods Receiver",
 		}
 	case "QUOTATION":
 		return docProfile{
 			TitleTH: "ใบเสนอราคา", TitleEN: "Quotation",
 			ShowDiscount: true, ShowPayBox: false, SpecialLabel: "ยืนราคาถึง (Valid Until)",
-			SigLeftTH: "ผู้เสนอราคา", SigLeftEN: "Quoted By", SigRightTH: "ผู้สั่งซื้อ", SigRightEN: "Customer",
+			SigLeftTH: "ผู้จัดทำ", SigLeftEN: "Prepared By", SigRightTH: "ผู้อนุมัติ", SigRightEN: "Approved By",
 		}
 	case "BILL":
 		return docProfile{
 			TitleTH: "ใบวางบิล", TitleEN: "Billing Notice",
 			ShowDiscount: true, ShowPayBox: true, SpecialLabel: "ครบกำหนด (Due)",
-			SigLeftTH: "ผู้วางบิล", SigLeftEN: "Issued By", SigRightTH: "ผู้รับวางบิล", SigRightEN: "Received By",
+			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับวางบิล", SigRightEN: "Billing Receiver",
 		}
 	case "CREDIT_NOTE":
 		return docProfile{
 			TitleTH: "ใบลดหนี้", TitleEN: "Credit Note",
 			ShowDiscount: false, ShowPayBox: false, SpecialLabel: "อ้างอิงใบกำกับ (Ref.)",
-			SigLeftTH: "ผู้จัดทำ", SigLeftEN: "Issued By", SigRightTH: "ผู้รับ", SigRightEN: "Received By",
+			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับเอกสาร", SigRightEN: "Document Receiver",
 		}
 	default:
 		return profileFor("INVOICE")

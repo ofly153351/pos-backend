@@ -38,7 +38,15 @@ th, td { border:1px solid #ddd; padding:8px; font-size:12px; vertical-align:top;
 th { background:#f5f5f5; }
 .summary { margin-top: 16px; width: 320px; margin-left: auto; }
 .summary td { border:none; padding:4px 0; }
-.footer { margin-top: 32px; display:flex; justify-content:space-between; }
+.signatures { display:flex; justify-content:center; gap:20mm; margin-top:12mm; }
+.sig { width:56mm; text-align:center; }
+.sig-t { font-size:9pt; font-weight:700; margin-bottom:3mm; border-bottom:1px solid #000; padding-bottom:1mm; }
+.sig-write { display:flex; align-items:baseline; gap:2mm; margin-bottom:2mm; font-size:9pt; }
+.sig-write-lbl { white-space:nowrap; flex-shrink:0; }
+.sig-ln { flex:1; border-bottom:1px solid #000; padding-top:14mm; }
+.sig-date-row { display:flex; align-items:baseline; gap:1mm; font-size:8pt; color:#666; margin-top:1mm; }
+.sig-date-seg { width:12mm; border-bottom:1px solid #000; }
+.sig-sub { font-size:8pt; color:#555; margin-top:3mm; }
 </style>
 </head>
 <body>
@@ -81,10 +89,19 @@ th { background:#f5f5f5; }
 		<tr><td>VAT %.2f%%</td><td style="text-align:right">%.2f</td></tr>
 		<tr><td><strong>Total</strong></td><td style="text-align:right"><strong>%.2f</strong></td></tr>
 	</table>
-	<div class="footer">
-		<div>Prepared by: %s</div>
-		<div>Confirmed by: %s</div>
+	<div class="signatures">
+		<div class="sig">
+			<div class="sig-t">ผู้ส่งมอบ / Delivered By</div>
+			<div class="sig-write"><span class="sig-write-lbl">ลงชื่อ</span><span class="sig-ln"></span></div>
+			<div class="sig-date-row"><span>วันที่</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span></div>
+		</div>
+		<div class="sig">
+			<div class="sig-t">ผู้ตรวจรับ / Inspected By</div>
+			<div class="sig-write"><span class="sig-write-lbl">ลงชื่อ</span><span class="sig-ln"></span></div>
+			<div class="sig-date-row"><span>วันที่</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span><span>/</span><span class="sig-date-seg"></span></div>
+			<div class="sig-sub">%s</div>
+		</div>
 	</div>
 </body>
-</html>`, html.EscapeString(receipt.DocumentNo), html.EscapeString(receipt.DocumentNo), html.EscapeString(string(receipt.Status)), html.EscapeString(receipt.ReceivedAt.In(time.Local).Format("02 Jan 2006 15:04")), html.EscapeString(receipt.WarehouseName), html.EscapeString(receipt.SupplierName), html.EscapeString(receipt.PurchaseOrderNo), html.EscapeString(receipt.ReferenceNo), html.EscapeString(receipt.Note), rows.String(), receipt.SubtotalAmount, receipt.DiscountAmount, receipt.NetAmount, receipt.VATPercent, receipt.VATAmount, receipt.TotalAmount, html.EscapeString(receipt.CreatedByName), html.EscapeString(receipt.ConfirmedByName))
+</html>`, html.EscapeString(receipt.DocumentNo), html.EscapeString(receipt.DocumentNo), html.EscapeString(string(receipt.Status)), html.EscapeString(receipt.ReceivedAt.In(time.Local).Format("02 Jan 2006 15:04")), html.EscapeString(receipt.WarehouseName), html.EscapeString(receipt.SupplierName), html.EscapeString(receipt.PurchaseOrderNo), html.EscapeString(receipt.ReferenceNo), html.EscapeString(receipt.Note), rows.String(), receipt.SubtotalAmount, receipt.DiscountAmount, receipt.NetAmount, receipt.VATPercent, receipt.VATAmount, receipt.TotalAmount, html.EscapeString(receipt.ConfirmedByName))
 }
