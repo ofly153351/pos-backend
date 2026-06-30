@@ -41,10 +41,11 @@ th { background:#f5f5f5; }
 .signatures { display:flex; justify-content:center; gap:20mm; margin-top:12mm; }
 .sig { width:56mm; text-align:center; }
 .sig-t { font-size:9pt; font-weight:700; margin-bottom:3mm; border-bottom:1px solid #000; padding-bottom:1mm; }
-.sig-write { display:flex; align-items:baseline; gap:2mm; margin-bottom:2mm; font-size:9pt; }
+/* justify-content:center keeps the signing content centered inside each 56mm column */
+.sig-write { display:flex; justify-content:center; align-items:baseline; gap:2mm; margin-bottom:2mm; font-size:9pt; }
 .sig-write-lbl { white-space:nowrap; flex-shrink:0; }
-.sig-ln { flex:1; border-bottom:1px solid #000; padding-top:14mm; }
-.sig-date-row { display:flex; align-items:baseline; gap:1mm; font-size:8pt; color:#666; margin-top:1mm; }
+.sig-ln { width:40mm; flex-shrink:0; border-bottom:1px solid #000; padding-top:14mm; }
+.sig-date-row { display:flex; justify-content:center; align-items:baseline; gap:1mm; font-size:8pt; color:#666; margin-top:1mm; }
 .sig-date-seg { width:12mm; border-bottom:1px solid #000; }
 .sig-sub { font-size:8pt; color:#555; margin-top:3mm; }
 </style>
