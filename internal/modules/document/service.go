@@ -11,6 +11,7 @@ import (
 	"pos-backend/internal/idgen"
 	"pos-backend/internal/modules/auth"
 	"pos-backend/internal/platform/dochtml"
+	"pos-backend/internal/platform/htmlpdf"
 
 	"gorm.io/gorm"
 )
@@ -574,6 +575,18 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
 	}, copyIdx)
+}
+
+// RenderDocumentPDF produces the downloadable PDF by rendering the SAME unified
+// HTML as the on-screen preview / print, then converting it with headless Chrome.
+// The PDF is therefore byte-for-byte the same layout as the preview (no separate
+// gofpdf renderer to drift). copyIdx selects one copy or the whole set.
+func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) ([]byte, error) {
+	html, err := s.RenderDocumentPrint(ctx, actor, storeID, id, copyIdx)
+	if err != nil {
+		return nil, err
+	}
+	return htmlpdf.Render(ctx, html)
 }
 
 // RelatedDocuments returns every document in the same conversion family as id —

@@ -125,31 +125,18 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	return c.SendString(html)
 }
 
-// GetDocumentPDF generates and streams an Invoice PDF for the given document.
-// Query params (all optional):
-//
-//	customer_address, customer_tax_id, credit_term, reference_do,
-//	discount_percent, default_unit, bank_name, account_number, promptpay
+// GetDocumentPDF renders the document to PDF via headless Chrome from the SAME
+// unified HTML as the preview/print, so the download matches exactly.
+// ?copy=N selects a single copy (0-based); absent/-1 returns the whole copy set.
 func (h Handler) GetDocumentPDF(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
-	opts := InvoicePDFOptions{
-		CustomerAddress: c.Query("customer_address"),
-		CustomerTaxID:   c.Query("customer_tax_id"),
-		CreditTerm:      c.QueryInt("credit_term", 0),
-		ReferenceDO:     c.Query("reference_do"),
-		DiscountPercent: float64(c.QueryInt("discount_percent", 0)),
-		DefaultUnit:     c.Query("default_unit", "ชิ้น"),
-		BankName:        c.Query("bank_name"),
-		AccountNumber:   c.Query("account_number"),
-		PromptPay:       c.Query("promptpay"),
-	}
-	data, _, err := h.service.GenerateDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, opts)
+	data, err := h.service.RenderDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
 	if err != nil {
 		return writeError(c, err)
 	}
 	c.Set("Content-Type", "application/pdf")
-	c.Set("Content-Disposition", "inline; filename=\"invoice.pdf\"")
+	c.Set("Content-Disposition", "inline; filename=\"document.pdf\"")
 	c.Set("Cache-Control", "no-store")
 	return c.Send(data)
 }
