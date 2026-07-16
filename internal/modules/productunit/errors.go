@@ -7,4 +7,5 @@ var (
 	ErrProductUnitNotFound  = errors.New("product unit not found")
 	ErrProductUnitInUse     = errors.New("product unit is in use by products")
 	ErrForbiddenStoreAccess = errors.New("user cannot manage this store")
+	ErrDuplicateName        = errors.New("name already exists for this store")
 )

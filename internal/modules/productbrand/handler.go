@@ -2,6 +2,7 @@ package productbrand
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -56,11 +57,14 @@ func writeError(c *fiber.Ctx, err error) error {
 	switch {
 	case errors.Is(err, ErrInvalidName):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
+	case errors.Is(err, ErrDuplicateName):
+		return httpx.Error(c, fiber.StatusConflict, err.Error(), nil)
 	case errors.Is(err, ErrForbiddenStoreAccess):
 		return httpx.Error(c, fiber.StatusForbidden, err.Error(), nil)
 	case errors.Is(err, ErrProductBrandNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
 	default:
+		log.Printf("[productbrand] unhandled error: %v", err)
 		return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 	}
 }
