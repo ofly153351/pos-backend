@@ -26,6 +26,7 @@ var (
 	ErrProductNotFound            = errors.New("product not found")
 	ErrGenerateSKUFailed          = errors.New("unable to generate unique barcode")
 	ErrProductInUse               = errors.New("cannot delete product: it is referenced by active purchase orders or other records")
+	ErrDuplicateSKU               = errors.New("sku or barcode already exists for this store")
 )
 
 // ProductHasStockError is returned when deletion is attempted on a product that still has

@@ -2,17 +2,25 @@ package product
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
 	"pos-backend/internal/modules/auth"
 	"pos-backend/internal/modules/stock_movement"
 	"pos-backend/internal/platform/activitycapture"
 )
+
+// isDuplicateKey reports whether err is a PostgreSQL unique-constraint violation (SQLSTATE 23505).
+func isDuplicateKey(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 type Service struct {
 	repo    Repository
@@ -177,8 +185,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 				)
 			}
 		}
-		return Product{}, txErr
+	// Detect duplicate SKU/barcode before returning a generic 500.
+	if isDuplicateKey(txErr) {
+		return Product{}, ErrDuplicateSKU
 	}
+	return Product{}, txErr
+}
 	// Re-fetch post-commit so the response reflects the opening-balance stock totals.
 	if input.InitialStock > 0 {
 		if refreshed, err := s.repo.GetByID(ctx, storeID, created.ID); err == nil {

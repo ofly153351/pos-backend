@@ -122,6 +122,8 @@ func writeProductError(c *fiber.Ctx, err error) error {
 		return httpx.ErrNotFound(c, err.Error())
 	case errors.Is(err, ErrProductInUse):
 		return httpx.ErrConflict(c, err.Error())
+	case errors.Is(err, ErrDuplicateSKU):
+		return httpx.ErrConflict(c, err.Error())
 	default:
 		claims := middleware.ClaimsFromContext(c)
 		log.Printf("[product] internal error: method=%s path=%s store=%s product=%s user=%s err=%v",
