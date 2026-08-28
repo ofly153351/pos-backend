@@ -22,54 +22,26 @@ func NewService(repo Repository, saleService sale.Service) Service {
 
 // Access: any store member (owner/manager/cashier) may grant credit and record
 // payments — mirrors the expense create policy.
-func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if strings.TrimSpace(storeID) == "" {
-		return ErrStoreIDRequired
-	}
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrForbidden
-	}
-	return nil
-}
 
 func (s Service) List(ctx context.Context, actor auth.Claims, storeID string) ([]CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.List(ctx, storeID)
 }
 
 func (s Service) Get(ctx context.Context, actor auth.Claims, storeID, creditSaleID string) (CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CreditSale{}, err
-	}
 	return s.repo.Get(ctx, storeID, creditSaleID)
 }
 
 func (s Service) Summary(ctx context.Context, actor auth.Claims, storeID string) (DebtSummary, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return DebtSummary{}, err
-	}
 	return s.repo.Summary(ctx, storeID)
 }
 
 func (s Service) Aging(ctx context.Context, actor auth.Claims, storeID string) (AgingSummary, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return AgingSummary{}, err
-	}
 	return s.repo.Aging(ctx, storeID)
 }
 
 // Create mints a REAL product-backed sale (deducts stock, accrual revenue) tagged
 // payment_method='credit', then records the receivable + an optional down-payment.
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, req CreateCreditSaleRequest) (CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CreditSale{}, err
-	}
 	if strings.TrimSpace(req.CustomerID) == "" {
 		return CreditSale{}, ErrCustomerRequired
 	}
@@ -188,9 +160,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, creditSaleID string, req AddPaymentRequest) (CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CreditSale{}, err
-	}
 	amount := roundMoney(req.Amount)
 	if amount <= 0 {
 		return CreditSale{}, ErrInvalidAmount
@@ -215,9 +184,6 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, cre
 // ReturnGoods restocks borrowed goods (loan type only) and settles the receivable by the
 // value of what came back. Any store member may record a return (mirrors AddPayment).
 func (s Service) ReturnGoods(ctx context.Context, actor auth.Claims, storeID, creditSaleID string, req ReturnGoodsRequest) (CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CreditSale{}, err
-	}
 	if len(req.Items) == 0 {
 		return CreditSale{}, ErrNoReturnItems
 	}
@@ -232,9 +198,6 @@ func (s Service) ReturnGoods(ctx context.Context, actor auth.Claims, storeID, cr
 // Cancel restocks the goods and voids the underlying sale, removing its revenue and
 // COGS from finance reports. No bad-debt expense is booked — the goods came back.
 func (s Service) Cancel(ctx context.Context, actor auth.Claims, storeID, creditSaleID string) (CreditSale, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CreditSale{}, err
-	}
 	return s.repo.Cancel(ctx, storeID, creditSaleID, actor.UserID)
 }
 
@@ -243,9 +206,6 @@ func (s Service) Cancel(ctx context.Context, actor auth.Claims, storeID, creditS
 // credit_sales (one per receivable) and the payment timeline is summarised in the
 // note. No new PDF engine is introduced.
 func (s Service) Statement(ctx context.Context, actor auth.Claims, storeID, creditSaleID string) ([]byte, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	sc, err := s.repo.StatementContext(ctx, storeID, creditSaleID)
 	if err != nil {
 		return nil, err

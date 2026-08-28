@@ -23,8 +23,6 @@ type Repository interface {
 	GetByID(ctx context.Context, storeID, saleID string) (Sale, error)
 	VoidSale(ctx context.Context, storeID, saleID, actorUserID, reason, voidType string) error
 	CreateReturn(ctx context.Context, storeID, saleID, actorUserID string, req CreateReturnRequest) (SaleReturn, error)
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetStoreBankAccounts(ctx context.Context, storeID string) []StoreBankAccount
 }
 
@@ -550,10 +548,10 @@ func (r PostgresRepository) VoidSale(ctx context.Context, storeID, saleID, actor
 
 	// Lock the sale row to serialize concurrent void attempts.
 	var header struct {
-		ID            string  `gorm:"column:id"`
-		Status        string  `gorm:"column:status"`
-		PaymentMethod string  `gorm:"column:payment_method"`
-		StoreID       string  `gorm:"column:store_id"`
+		ID            string `gorm:"column:id"`
+		Status        string `gorm:"column:status"`
+		PaymentMethod string `gorm:"column:payment_method"`
+		StoreID       string `gorm:"column:store_id"`
 	}
 	if err := tx.Table("sales").
 		Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -932,37 +930,6 @@ func (r PostgresRepository) GetStoreBankAccounts(ctx context.Context, storeID st
 		storeID,
 	).Scan(&rows).Error
 	return rows
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	// status <> 'suspended' mirrors the member module's canonical access check
-	// (member/repository.go) so a suspended store member cannot operate the POS.
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// UserCanManageStore reports whether the user is owner/manager of the store (or a
-// platform admin) — used to lift the cashier manual-discount cap.
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	return count > 0, err
 }
 
 // resolveBillDiscount turns the request's (manual, promo, promotion_ids) — or the

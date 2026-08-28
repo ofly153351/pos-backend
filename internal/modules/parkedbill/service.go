@@ -35,14 +35,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		}
 	}
 
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ParkedBillResponse{}, err
-	}
-	if !allowed {
-		return ParkedBillResponse{}, ErrForbiddenStoreAccess
-	}
-
 	now := time.Now().UTC()
 	bill := ParkedBill{
 		ID:                     newID(),
@@ -107,24 +99,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]ParkedBill, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 	return s.repo.ListByStore(ctx, storeID)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, billID string) (ParkedBillResponse, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ParkedBillResponse{}, err
-	}
-	if !allowed {
-		return ParkedBillResponse{}, ErrForbiddenStoreAccess
-	}
 
 	bill, err := s.repo.GetByID(ctx, billID)
 	if err != nil {
@@ -142,13 +120,6 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, billID
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, billID string) error {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 
 	bill, err := s.repo.GetByID(ctx, billID)
 	if err != nil {

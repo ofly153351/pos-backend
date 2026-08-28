@@ -24,10 +24,11 @@ func newProductHandler(cfg config.Config, db *gorm.DB) product.Handler {
 
 func registerProductRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.productHandler.(product.Handler)
-	protected.Post("/stores/:storeID/products", handler.Create)
-	protected.Post("/stores/:storeID/products/generate-missing-barcodes", handler.GenerateMissingBarcodes)
-	protected.Get("/stores/:storeID/products", handler.ListByStore)
-	protected.Get("/stores/:storeID/products/:productID", handler.GetByID)
-	protected.Patch("/stores/:storeID/products/:productID", handler.Update)
-	protected.Delete("/stores/:storeID/products/:productID", handler.Delete)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/products", g.manage, handler.Create)
+	protected.Post("/stores/:storeID/products/generate-missing-barcodes", g.manage, handler.GenerateMissingBarcodes)
+	protected.Get("/stores/:storeID/products", g.operate, handler.ListByStore)
+	protected.Get("/stores/:storeID/products/:productID", g.manage, handler.GetByID)
+	protected.Patch("/stores/:storeID/products/:productID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/products/:productID", g.manage, handler.Delete)
 }

@@ -24,18 +24,6 @@ func NewService(repo Repository, db *gorm.DB) Service {
 	return Service{repo: repo, db: db}
 }
 
-func (s Service) canManage(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := s.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	return count > 0, err
-}
-
 func (s Service) productExistsInStore(ctx context.Context, storeID, productID string) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).
@@ -162,14 +150,6 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 		return AdditionResult{}, fmt.Errorf("storeID is required")
 	}
 
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return AdditionResult{}, err
-	}
-	if !allowed {
-		return AdditionResult{}, ErrStockForbidden
-	}
-
 	if len(input.Items) == 0 {
 		return AdditionResult{}, ErrStockNoItems
 	}
@@ -189,7 +169,7 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 
 	// Wrap every movement + stock write in one transaction so a mid-loop failure
 	// rolls back all of them (no movement-without-stock drift, no partial add).
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		txRepo := NewPostgresRepository(tx)
 		for _, item := range input.Items {
 			exists, err := s.productExistsInStore(ctx, storeID, item.ProductID)
@@ -284,13 +264,6 @@ func (s Service) AddStock(ctx context.Context, actor auth.Claims, storeID string
 func (s Service) RemoveStock(ctx context.Context, actor auth.Claims, storeID string, req RemoveStockRequest) (StockMovement, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return StockMovement{}, fmt.Errorf("storeID is required")
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return StockMovement{}, err
-	}
-	if !allowed {
-		return StockMovement{}, ErrStockForbidden
 	}
 	if req.Quantity <= 0 {
 		return StockMovement{}, ErrStockBadQty
@@ -458,13 +431,6 @@ func (s Service) loadTransferResult(ctx context.Context, t StockTransfer) (Trans
 func (s Service) TransferStock(ctx context.Context, actor auth.Claims, storeID string, req TransferStockRequest) (TransferResult, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return TransferResult{}, fmt.Errorf("storeID is required")
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return TransferResult{}, err
-	}
-	if !allowed {
-		return TransferResult{}, ErrTransferForbidden
 	}
 	if req.Quantity <= 0 {
 		return TransferResult{}, ErrStockBadQty
@@ -688,13 +654,6 @@ func (s Service) AdjustStock(ctx context.Context, actor auth.Claims, storeID str
 	if strings.TrimSpace(storeID) == "" {
 		return StockMovement{}, fmt.Errorf("storeID is required")
 	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return StockMovement{}, err
-	}
-	if !allowed {
-		return StockMovement{}, ErrStockForbidden
-	}
 
 	if req.PhysicalQty < 0 {
 		return StockMovement{}, ErrStockBadQty
@@ -856,13 +815,6 @@ func (s Service) RecordSaleMovement(ctx context.Context, actor auth.Claims, stor
 func (s Service) ListMovements(ctx context.Context, actor auth.Claims, storeID string, q ListMovementsQuery) (MovementResponse, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return MovementResponse{}, fmt.Errorf("storeID is required")
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return MovementResponse{}, err
-	}
-	if !allowed {
-		return MovementResponse{}, ErrStockForbidden
 	}
 	return s.repo.ListByStore(ctx, storeID, q)
 }

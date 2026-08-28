@@ -31,10 +31,8 @@ type Repository interface {
 	// is non-empty and no longer matches the locked assessment it returns
 	// ErrEntityStateChanged. Archiving an already-archived warehouse is a success no-op.
 	ApplyDeletion(ctx context.Context, storeID, warehouseID, expected string) (lifecycle.Assessment, string, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	// UserCanOperateStore reports whether an active member may READ operational data
 	// (owner/manager/cashier/warehouse, excluding suspended). Used by read-only endpoints.
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	// ListWarehouseStockRows returns one row per product that has stock in the warehouse,
 	// with ready/storage already split (SUM split on locations.is_sale_point) and scoped to
 	// locations.warehouse_id. Includes active AND inactive locations. One grouped query.
@@ -216,38 +214,6 @@ func (r PostgresRepository) ProductTotalQtyInWarehouse(ctx context.Context, ware
 		Where("locations.warehouse_id = ? AND stocks.product_id = ?", warehouseID, productID).
 		Scan(&total).Error
 	return total, err
-}
-
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// UserCanOperateStore mirrors UserCanManageStore but uses the broader operate-level role
-// set (read access for operational endpoints). Suspended members and non-members → false.
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 // ListWarehouseStockRows computes warehouse-scoped ready/storage stock per product in ONE

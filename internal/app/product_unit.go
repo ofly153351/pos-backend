@@ -15,8 +15,9 @@ func newProductUnitHandler(db *gorm.DB) productunit.Handler {
 
 func registerProductUnitRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.productUnitHandler.(productunit.Handler)
-	protected.Post("/stores/:storeID/product-units", handler.Create)
-	protected.Get("/stores/:storeID/product-units", handler.List)
-	protected.Patch("/stores/:storeID/product-units/:unitID", handler.Update)
-	protected.Delete("/stores/:storeID/product-units/:unitID", handler.Delete)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/product-units", g.manage, handler.Create)
+	protected.Get("/stores/:storeID/product-units", g.manage, handler.List)
+	protected.Patch("/stores/:storeID/product-units/:unitID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/product-units/:unitID", g.manage, handler.Delete)
 }

@@ -15,5 +15,6 @@ func newDashboardHandler(db *gorm.DB) dashboard.Handler {
 
 func registerDashboardRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.dashboardHandler.(dashboard.Handler)
-	protected.Get("/stores/:storeID/dashboard", handler.GetOverview)
+	g := newStoreGuards(deps)
+	protected.Get("/stores/:storeID/dashboard", g.operate, handler.GetOverview)
 }

@@ -17,13 +17,6 @@ func NewService(repo Repository) Service {
 
 // GetDashboard authorises the request then assembles the full dashboard payload.
 func (s Service) GetDashboard(ctx context.Context, actor auth.Claims, storeID string, q Query) (DashboardData, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return DashboardData{}, err
-	}
-	if !allowed {
-		return DashboardData{}, ErrForbidden
-	}
 
 	from, to := periodBounds(q.Period)
 
@@ -70,7 +63,7 @@ func (s Service) GetDashboard(ctx context.Context, actor auth.Claims, storeID st
 // periodBounds returns [from, to) UTC bounds for the requested period.
 func periodBounds(p Period) (time.Time, time.Time) {
 	now := time.Now().UTC()
-	to := now.Truncate(24*time.Hour).Add(24 * time.Hour) // start of tomorrow
+	to := now.Truncate(24 * time.Hour).Add(24 * time.Hour) // start of tomorrow
 	switch p {
 	case Period30d:
 		return to.Add(-30 * 24 * time.Hour), to

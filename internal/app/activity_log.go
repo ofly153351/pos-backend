@@ -14,5 +14,6 @@ func newActivityLogHandler(db *gorm.DB) activity_log.Handler {
 }
 
 func registerActivityLogRoutes(router fiber.Router, deps appDependencies) {
-	router.Get("/stores/:storeID/activity-logs", deps.activityLogHandler.List)
+	g := newStoreGuards(deps)
+	router.Get("/stores/:storeID/activity-logs", g.operate, deps.activityLogHandler.List)
 }

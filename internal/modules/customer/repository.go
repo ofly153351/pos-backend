@@ -20,7 +20,6 @@ type Repository interface {
 	ListLevelDiscounts(ctx context.Context, storeID string) ([]LevelDiscount, error)
 	UpsertLevelDiscount(ctx context.Context, item LevelDiscount) (LevelDiscount, error)
 	DeleteLevelDiscount(ctx context.Context, storeID string, level int) error
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	// Shipping addresses
 	ListShippingAddresses(ctx context.Context, customerID string) ([]CustomerShippingAddress, error)
 	CreateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error)
@@ -259,23 +258,6 @@ func (r PostgresRepository) DeleteLevelDiscount(ctx context.Context, storeID str
 		Where("store_id = ? AND level = ?", storeID, level).
 		Delete(&LevelDiscount{})
 	return result.Error
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	// status <> 'suspended' mirrors the canonical operate check (sale/member modules) so a
-	// suspended store member cannot read operational customer/tier-discount data.
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) ListShippingAddresses(ctx context.Context, customerID string) ([]CustomerShippingAddress, error) {

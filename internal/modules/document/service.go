@@ -63,9 +63,6 @@ func NewService(repo Repository, db *gorm.DB) Service {
 }
 
 func (s Service) ListDocuments(ctx context.Context, actor auth.Claims, q ListQuery) (DocumentListResponse, error) {
-	if err := s.ensureAccess(actor, q.StoreID); err != nil {
-		return DocumentListResponse{}, err
-	}
 	items, total, stats, err := s.repo.List(q)
 	if err != nil {
 		return DocumentListResponse{}, err
@@ -88,9 +85,6 @@ func (s Service) ListDocuments(ctx context.Context, actor auth.Claims, q ListQue
 }
 
 func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return nil, err
-	}
 	doc, err := s.repo.FindByID(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -131,9 +125,6 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 }
 
 func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID string, req CreateDocumentRequest) (*Document, error) {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return nil, err
-	}
 	if len(req.Items) == 0 {
 		return nil, ErrNoItems
 	}
@@ -318,9 +309,6 @@ func isDuplicateDocNo(err error) bool {
 // with the wrong subtotal, a dropped discount and a spurious VAT line. Here every money
 // figure is taken verbatim from the sale row the cashier already collected against.
 func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID, saleID, docType string) (*Document, error) {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return nil, err
-	}
 	dt := DocumentType(strings.ToUpper(strings.TrimSpace(docType)))
 	if dt == "" {
 		dt = TypeTaxInvoice
@@ -632,9 +620,6 @@ func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, store
 // the whole subtree, ordered chronologically for a timeline view. Both walks are
 // bounded so a malformed/cyclic link graph can never loop forever.
 func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeID, id string) ([]RelatedDoc, error) {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return nil, err
-	}
 
 	// 1. Climb to the family root following source_document_id.
 	root := id
@@ -690,9 +675,6 @@ func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeI
 }
 
 func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) error {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return err
-	}
 	switch req.Action {
 	case "DELETE":
 		return s.repo.BulkDelete(storeID, req.IDs)
@@ -779,25 +761,6 @@ type WHTCertOptions struct {
 	IncomeType   string  // e.g. "เงินได้ตามมาตรา 40(8) บริการ"
 	IncomeDesc   string  // optional extra description
 	WHTRate      float64 // percentage, e.g. 3 (default 3)
-}
-
-func (s Service) ensureAccess(actor auth.Claims, storeID string) error {
-	if storeID == "" {
-		return ErrInvalidInput
-	}
-	if actor.Role == auth.RolePlatformAdmin {
-		return nil
-	}
-	var count int64
-	if err := s.db.Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, actor.UserID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return ErrForbidden
-	}
-	return nil
 }
 
 // PayInvoice marks an INVOICE as paid.

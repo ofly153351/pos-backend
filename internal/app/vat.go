@@ -14,5 +14,6 @@ func newVATHandler(db *gorm.DB) vat.Handler {
 
 func registerVATRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.vatHandler.(vat.Handler)
-	protected.Post("/stores/:storeID/vat/calculate", handler.Calculate)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/vat/calculate", g.operate, handler.Calculate)
 }

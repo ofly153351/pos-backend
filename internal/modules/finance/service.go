@@ -26,13 +26,6 @@ func NewService(repo Repository) Service {
 // Raw revenue/COGS/expense components are returned; the client derives gross
 // profit, net profit and the margin ratios.
 func (s Service) GetPnL(ctx context.Context, actor auth.Claims, storeID string, query PnLQuery) (PnLReport, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return PnLReport{}, err
-	}
-	if !allowed {
-		return PnLReport{}, ErrForbiddenStoreAccess
-	}
 
 	period, from, to, err := normalizeRange(query)
 	if err != nil {
@@ -79,13 +72,6 @@ const (
 // COGS/expense components are summed in SQL and reused from the P&L queries;
 // inventory figures are a current snapshot (not period-filtered).
 func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID string, query PnLQuery) (ExecutiveSummary, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ExecutiveSummary{}, err
-	}
-	if !allowed {
-		return ExecutiveSummary{}, ErrForbiddenStoreAccess
-	}
 
 	period, from, to, err := normalizeRange(query)
 	if err != nil {
@@ -176,13 +162,6 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 // dead-stock count/value for the given idle threshold (default 30 days). Both are
 // SQL aggregates over the full dataset — no capped client-side movement scan.
 func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, storeID string, deadDays int) (InventoryReport, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return InventoryReport{}, err
-	}
-	if !allowed {
-		return InventoryReport{}, ErrForbiddenStoreAccess
-	}
 
 	if deadDays <= 0 {
 		deadDays = 30

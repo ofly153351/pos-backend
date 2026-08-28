@@ -9,8 +9,6 @@ import (
 )
 
 type Repository interface {
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	List(ctx context.Context, storeID string) ([]json.RawMessage, error)
 	GetData(ctx context.Context, storeID, id string) (string, error)
 	Insert(ctx context.Context, row PromotionRow) error
@@ -24,40 +22,6 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// UserCanManageStore reports whether the user is owner/manager of the store (or a
-// platform admin). Creating/editing/deleting promotions is a management action —
-// cashiers may only LIST promotions (for checkout), never mint or alter them, so a
-// cashier cannot fabricate an 'active' promotion to bypass the discount cap.
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) List(ctx context.Context, storeID string) ([]json.RawMessage, error) {

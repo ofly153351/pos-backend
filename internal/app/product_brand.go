@@ -15,8 +15,9 @@ func newProductBrandHandler(db *gorm.DB) productbrand.Handler {
 
 func registerProductBrandRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.productBrandHandler.(productbrand.Handler)
-	protected.Post("/stores/:storeID/product-brands", handler.Create)
-	protected.Get("/stores/:storeID/product-brands", handler.ListByStore)
-	protected.Patch("/stores/:storeID/product-brands/:brandID", handler.Update)
-	protected.Delete("/stores/:storeID/product-brands/:brandID", handler.Delete)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/product-brands", g.manage, handler.Create)
+	protected.Get("/stores/:storeID/product-brands", g.manage, handler.ListByStore)
+	protected.Patch("/stores/:storeID/product-brands/:brandID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/product-brands/:brandID", g.manage, handler.Delete)
 }

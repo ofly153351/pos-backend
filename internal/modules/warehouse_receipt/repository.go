@@ -14,8 +14,6 @@ import (
 type Repository interface {
 	WithTx(tx *gorm.DB) Repository
 	FindPrimaryStoreIDByUserID(ctx context.Context, userID string) (string, error)
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GenerateDocumentNo(ctx context.Context, now time.Time) (string, error)
 	ListByStore(ctx context.Context, storeID string, status *ReceiptStatus, page, limit int) ([]WarehouseReceipt, int64, error)
 	Create(ctx context.Context, receipt WarehouseReceipt) (WarehouseReceipt, error)
@@ -76,24 +74,6 @@ func (r PostgresRepository) FindPrimaryStoreIDByUserID(ctx context.Context, user
 	}
 
 	return member.StoreID, nil
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).Count(&count).Error
-	return count > 0, err
-}
-
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).Table("store_members").Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager"}).Count(&count).Error
-	return count > 0, err
 }
 
 func (r PostgresRepository) GenerateDocumentNo(ctx context.Context, now time.Time) (string, error) {

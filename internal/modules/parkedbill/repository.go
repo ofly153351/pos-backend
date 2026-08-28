@@ -21,7 +21,6 @@ type Repository interface {
 	GetByID(ctx context.Context, billID string) (ParkedBill, error)
 	GetItemsByBillID(ctx context.Context, billID string) ([]ParkedBillItem, error)
 	Delete(ctx context.Context, billID string) error
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetProductByID(ctx context.Context, productID string) (productSnapshot, error)
 }
 
@@ -140,21 +139,6 @@ func (r PostgresRepository) Delete(ctx context.Context, billID string) error {
 	}
 
 	return tx.Commit().Error
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) GetProductByID(ctx context.Context, productID string) (productSnapshot, error) {

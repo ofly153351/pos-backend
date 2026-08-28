@@ -15,8 +15,9 @@ func newMemberHandler(db *gorm.DB) member.Handler {
 
 func registerMemberRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.memberHandler.(member.Handler)
-	protected.Get("/stores/:storeID/members", handler.List)
-	protected.Post("/stores/:storeID/members", handler.Add)
-	protected.Patch("/stores/:storeID/members/:userID", handler.Update)
-	protected.Delete("/stores/:storeID/members/:userID", handler.Remove)
+	g := newStoreGuards(deps)
+	protected.Get("/stores/:storeID/members", g.manage, handler.List)
+	protected.Post("/stores/:storeID/members", g.manage, handler.Add)
+	protected.Patch("/stores/:storeID/members/:userID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/members/:userID", g.manage, handler.Remove)
 }

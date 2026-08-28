@@ -31,13 +31,6 @@ func NewService(repo Repository) Service {
 }
 
 func (s Service) GetOverview(ctx context.Context, actor auth.Claims, storeID string, query OverviewQuery) (Overview, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Overview{}, err
-	}
-	if !allowed {
-		return Overview{}, ErrForbiddenStoreAccess
-	}
 
 	period, from, to, err := normalizeRange(query)
 	if err != nil {

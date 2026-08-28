@@ -18,9 +18,6 @@ import (
 // (name/address/phone/tax id/logo/PromptPay) and bank accounts are pulled from that
 // sale so the billing notice is byte-for-byte consistent with a sale-issued document.
 func (s Service) BillHTML(ctx context.Context, actor auth.Claims, storeID, creditSaleID string) (string, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return "", err
-	}
 	cs, err := s.repo.Get(ctx, storeID, creditSaleID)
 	if err != nil {
 		return "", err

@@ -14,6 +14,7 @@ import (
 type appDependencies struct {
 	tokenManager              auth.TokenManager
 	authUserRepo              auth.UserRepository
+	storeAuthorizer           *middleware.StoreAuthorizer
 	authHandler               auth.Handler
 	storeHandler              any
 	productTypeHandler        any
@@ -45,6 +46,27 @@ type appDependencies struct {
 	activityLogHandler        activity_log.Handler
 	userSettingsHandler       usersettings.Handler
 	paymentHandler            payment.Handler
+}
+
+// storeGuards bundles the four store-scoped permission middleware so a route
+// registration can declare its required level inline, e.g.
+//
+//	protected.Get("/stores/:storeID/products", g.operate, handler.ListByStore)
+type storeGuards struct {
+	owner   fiber.Handler
+	manage  fiber.Handler
+	operate fiber.Handler
+	access  fiber.Handler
+}
+
+func newStoreGuards(deps appDependencies) storeGuards {
+	req := deps.storeAuthorizer.Require
+	return storeGuards{
+		owner:   req(auth.StoreLevelOwner),
+		manage:  req(auth.StoreLevelManage),
+		operate: req(auth.StoreLevelOperate),
+		access:  req(auth.StoreLevelAccess),
+	}
 }
 
 func registerBaseRoutes(app *fiber.App, cfg config.Config) {

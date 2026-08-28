@@ -4,6 +4,7 @@ import (
 	"gorm.io/gorm"
 
 	"pos-backend/internal/config"
+	"pos-backend/internal/middleware"
 	"pos-backend/internal/modules/payment"
 )
 
@@ -13,6 +14,7 @@ func newDependencies(cfg config.Config, db *gorm.DB) appDependencies {
 	return appDependencies{
 		tokenManager:              tokenManager,
 		authUserRepo:              authRepo,
+		storeAuthorizer:           middleware.NewStoreAuthorizer(db),
 		authHandler:               authHandler,
 		storeHandler:              newStoreHandler(cfg, db),
 		productTypeHandler:        newProductTypeHandler(db),

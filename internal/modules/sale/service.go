@@ -32,14 +32,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Sale{}, err
 	}
 
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Sale{}, err
-	}
-	if !allowed {
-		return Sale{}, ErrForbiddenStoreAccess
-	}
-
 	// Phase W4B — request idempotency. A retried sale-create carrying the same
 	// Idempotency-Key must NOT create a second sale / second payment / second stock
 	// deduction. Fingerprint the business intent; if a sale already exists under this
@@ -110,10 +102,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 
 	// Owner/manager (or platform_admin) may apply a manual bill discount up to the
 	// remaining subtotal; cashiers are capped at 20% (enforced in resolveBillDiscount).
-	isElevated, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Sale{}, err
-	}
+	// The resolved role comes from the store authorization middleware.
+	isElevated := auth.StoreAccessFromContext(ctx).CanManage()
 
 	created, err := s.repo.Create(ctx, sale, DiscountInput{
 		ManualDiscount: req.ManualDiscount,
@@ -142,35 +132,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID, dateFrom, dateTo string) ([]Sale, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 	return s.repo.ListByStore(ctx, storeID, dateFrom, dateTo)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, saleID string) (Sale, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Sale{}, err
-	}
-	if !allowed {
-		return Sale{}, ErrForbiddenStoreAccess
-	}
 	return s.repo.GetByID(ctx, storeID, saleID)
 }
 
 func (s Service) VoidSale(ctx context.Context, actor auth.Claims, storeID, saleID string, req VoidSaleRequest) error {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 	voidType := strings.TrimSpace(req.Type)
 	if voidType == "" {
 		voidType = "void"
@@ -185,13 +154,6 @@ func (s Service) VoidSale(ctx context.Context, actor auth.Claims, storeID, saleI
 // only, mirroring void). The sale is NOT voided; the repository restocks the
 // returned quantities and recomputes the sale status.
 func (s Service) CreateReturn(ctx context.Context, actor auth.Claims, storeID, saleID string, req CreateReturnRequest) (SaleReturn, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return SaleReturn{}, err
-	}
-	if !allowed {
-		return SaleReturn{}, ErrForbiddenStoreAccess
-	}
 	if len(req.Items) == 0 {
 		return SaleReturn{}, ErrInvalidReturnItems
 	}

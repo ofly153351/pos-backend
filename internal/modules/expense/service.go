@@ -24,46 +24,9 @@ func NewService(repo Repository) Service {
 //   - owner only can delete (soft-void) expenses
 // Enforced here in the service layer — the UI hiding buttons is cosmetic only.
 
-func (s Service) ensureStoreAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if strings.TrimSpace(storeID) == "" {
-		return ErrExpenseStoreIDRequired
-	}
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrExpenseForbidden
-	}
-	return nil
-}
-
-func (s Service) ensureManageAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if actor.Role == auth.RolePlatformAdmin {
-		return nil
-	}
-	if actor.Role != auth.RoleOwner && actor.Role != auth.RoleManager {
-		return ErrExpenseEditForbidden
-	}
-	return s.ensureStoreAccess(ctx, actor, storeID)
-}
-
-func (s Service) ensureDeleteAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if actor.Role == auth.RolePlatformAdmin {
-		return nil
-	}
-	if actor.Role != auth.RoleOwner {
-		return ErrExpenseDeleteForbidden
-	}
-	return s.ensureStoreAccess(ctx, actor, storeID)
-}
-
 // ── Categories ──────────────────────────────────────────────────────────────
 
 func (s Service) ListCategories(ctx context.Context, actor auth.Claims, storeID string) ([]ExpenseCategory, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	items, err := s.repo.ListCategories(ctx, storeID)
 	if err != nil {
 		return nil, err
@@ -79,9 +42,6 @@ func (s Service) ListCategories(ctx context.Context, actor auth.Claims, storeID 
 }
 
 func (s Service) CreateCategory(ctx context.Context, actor auth.Claims, storeID string, input CreateCategoryRequest) (ExpenseCategory, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return ExpenseCategory{}, err
-	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return ExpenseCategory{}, ErrCategoryNameRequired
@@ -111,9 +71,6 @@ func (s Service) CreateCategory(ctx context.Context, actor auth.Claims, storeID 
 }
 
 func (s Service) UpdateCategory(ctx context.Context, actor auth.Claims, storeID, categoryID string, input UpdateCategoryRequest) (ExpenseCategory, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return ExpenseCategory{}, err
-	}
 	if _, err := s.repo.GetCategory(ctx, storeID, categoryID); err != nil {
 		return ExpenseCategory{}, err
 	}
@@ -148,9 +105,6 @@ func (s Service) UpdateCategory(ctx context.Context, actor auth.Claims, storeID,
 
 // DeactivateCategory soft-disables a category (expenses keep referencing it).
 func (s Service) DeactivateCategory(ctx context.Context, actor auth.Claims, storeID, categoryID string) error {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	return s.repo.UpdateCategory(ctx, storeID, categoryID, map[string]any{
 		"is_active":  false,
 		"updated_at": time.Now().UTC(),
@@ -183,9 +137,6 @@ func (s Service) validateCategory(ctx context.Context, storeID, categoryID strin
 }
 
 func (s Service) ListExpenses(ctx context.Context, actor auth.Claims, storeID string, query ExpenseListQuery) (ExpenseListResult, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return ExpenseListResult{}, err
-	}
 	if query.Page <= 0 {
 		query.Page = 1
 	}
@@ -212,16 +163,10 @@ func (s Service) ListExpenses(ctx context.Context, actor auth.Claims, storeID st
 }
 
 func (s Service) GetExpense(ctx context.Context, actor auth.Claims, storeID, expenseID string) (Expense, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return Expense{}, err
-	}
 	return s.repo.GetExpense(ctx, storeID, expenseID)
 }
 
 func (s Service) CreateExpense(ctx context.Context, actor auth.Claims, storeID string, input CreateExpenseRequest) (Expense, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return Expense{}, err
-	}
 
 	expenseDate, err := parseExpenseDate(input.ExpenseDate)
 	if err != nil {
@@ -273,9 +218,6 @@ func (s Service) CreateExpense(ctx context.Context, actor auth.Claims, storeID s
 }
 
 func (s Service) UpdateExpense(ctx context.Context, actor auth.Claims, storeID, expenseID string, input UpdateExpenseRequest) (Expense, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return Expense{}, err
-	}
 	if _, err := s.repo.GetExpense(ctx, storeID, expenseID); err != nil {
 		return Expense{}, err
 	}
@@ -336,9 +278,6 @@ func (s Service) UpdateExpense(ctx context.Context, actor auth.Claims, storeID, 
 
 // VoidExpense soft-deletes (audit-safe) — owner only.
 func (s Service) VoidExpense(ctx context.Context, actor auth.Claims, storeID, expenseID string) error {
-	if err := s.ensureDeleteAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	affected, err := s.repo.VoidExpense(ctx, storeID, expenseID, actor.UserID)
 	if err != nil {
 		return err
@@ -353,9 +292,6 @@ func (s Service) VoidExpense(ctx context.Context, actor auth.Claims, storeID, ex
 
 // Summary aggregates the current month KPIs + a 6-month trend, server-side.
 func (s Service) Summary(ctx context.Context, actor auth.Claims, storeID string) (ExpenseSummary, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return ExpenseSummary{}, err
-	}
 
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)

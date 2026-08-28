@@ -17,7 +17,8 @@ func newReceiptSettingsHandler(db *gorm.DB) receipt_settings.Handler {
 
 func registerReceiptSettingsRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.receiptSettingsHandler.(receipt_settings.Handler)
-	protected.Get("/stores/:storeID/receipt-settings", handler.Get)
-	protected.Put("/stores/:storeID/receipt-settings", handler.Update)
-	protected.Post("/stores/:storeID/receipt-settings/preview", handler.PreviewHTML)
+	g := newStoreGuards(deps)
+	protected.Get("/stores/:storeID/receipt-settings", g.manage, handler.Get)
+	protected.Put("/stores/:storeID/receipt-settings", g.manage, handler.Update)
+	protected.Post("/stores/:storeID/receipt-settings/preview", g.manage, handler.PreviewHTML)
 }

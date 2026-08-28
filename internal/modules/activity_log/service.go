@@ -48,14 +48,6 @@ func (s Service) Log(ctx context.Context, req LogRequest) {
 }
 
 func (s Service) List(ctx context.Context, actor auth.Claims, q ListQuery) (ListResponse, error) {
-	ok, err := s.repo.UserCanOperateStore(ctx, q.StoreID, actor.UserID, actor.Role)
-	if err != nil {
-		return ListResponse{}, err
-	}
-	if !ok {
-		return ListResponse{}, ErrForbidden
-	}
-
 	if q.Page < 1 {
 		q.Page = 1
 	}

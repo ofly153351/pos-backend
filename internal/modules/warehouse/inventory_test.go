@@ -201,9 +201,8 @@ func TestValidateInventoryQuery(t *testing.T) {
 
 func TestService_ListInventoryProducts_CashierAllowed(t *testing.T) {
 	repo := &stubRepo{
-		operateAllowed: true,
-		warehouse:      Warehouse{ID: "wh1", Name: "คลังหลัก", Code: "WH-MAIN"},
-		rows:           []WarehouseStockRow{{ProductID: "p1", ProductName: "X", ReadyStock: 5, StorageStock: 5, MinStock: 2}},
+		warehouse: Warehouse{ID: "wh1", Name: "คลังหลัก", Code: "WH-MAIN"},
+		rows:      []WarehouseStockRow{{ProductID: "p1", ProductName: "X", ReadyStock: 5, StorageStock: 5, MinStock: 2}},
 	}
 	svc := NewService(repo)
 	resp, err := svc.ListInventoryProducts(context.Background(), auth.Claims{UserID: "u-cashier", Role: "cashier"}, "store1", "wh1", WarehouseInventoryQuery{Page: 1, PageSize: 20})
@@ -218,19 +217,8 @@ func TestService_ListInventoryProducts_CashierAllowed(t *testing.T) {
 	}
 }
 
-func TestService_ListInventoryProducts_NonMemberRejected(t *testing.T) {
-	// operateAllowed=false covers both suspended members and non-members (the SQL
-	// distinguishes them; the service simply denies when not allowed).
-	repo := &stubRepo{operateAllowed: false}
-	svc := NewService(repo)
-	_, err := svc.ListInventoryProducts(context.Background(), auth.Claims{UserID: "u-x", Role: "cashier"}, "store1", "wh1", WarehouseInventoryQuery{Page: 1, PageSize: 20})
-	if !errors.Is(err, ErrForbiddenStoreAccess) {
-		t.Fatalf("expected ErrForbiddenStoreAccess, got %v", err)
-	}
-}
-
 func TestService_ListInventoryProducts_WarehouseNotFound(t *testing.T) {
-	repo := &stubRepo{operateAllowed: true, getByIDErr: ErrWarehouseNotFound}
+	repo := &stubRepo{getByIDErr: ErrWarehouseNotFound}
 	svc := NewService(repo)
 	_, err := svc.ListInventoryProducts(context.Background(), auth.Claims{UserID: "u1", Role: "owner"}, "store1", "missing", WarehouseInventoryQuery{Page: 1, PageSize: 20})
 	if !errors.Is(err, ErrWarehouseNotFound) {
@@ -258,17 +246,12 @@ func ids(items []WarehouseInventoryProduct) []string {
 // stubRepo implements warehouse.Repository for service-layer tests. Only the methods used
 // by ListInventoryProducts are configurable; the rest are inert.
 type stubRepo struct {
-	operateAllowed bool
-	operateErr     error
-	warehouse      Warehouse
-	getByIDErr     error
-	rows           []WarehouseStockRow
-	rowsErr        error
+	warehouse  Warehouse
+	getByIDErr error
+	rows       []WarehouseStockRow
+	rowsErr    error
 }
 
-func (s *stubRepo) UserCanOperateStore(_ context.Context, _, _, _ string) (bool, error) {
-	return s.operateAllowed, s.operateErr
-}
 func (s *stubRepo) GetByID(_ context.Context, _, _ string) (Warehouse, error) {
 	if s.getByIDErr != nil {
 		return Warehouse{}, s.getByIDErr
@@ -291,9 +274,6 @@ func (s *stubRepo) GatherDeletionBlockers(_ context.Context, _, _ string) (lifec
 }
 func (s *stubRepo) ApplyDeletion(_ context.Context, _, _, _ string) (lifecycle.Assessment, string, error) {
 	return lifecycle.Assessment{}, "", nil
-}
-func (s *stubRepo) UserCanManageStore(_ context.Context, _, _, _ string) (bool, error) {
-	return false, nil
 }
 func (s *stubRepo) AddProduct(_ context.Context, _, _, _ string, _ int) (WarehouseProduct, error) {
 	return WarehouseProduct{}, nil

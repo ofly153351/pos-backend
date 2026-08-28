@@ -27,30 +27,6 @@ func NewService(repo Repository, db *gorm.DB) Service {
 	return Service{repo: repo, db: db}
 }
 
-func (s Service) canManage(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := s.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	return count > 0, err
-}
-
-func (s Service) canView(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := s.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ?", storeID, userID).
-		Count(&count).Error
-	return count > 0, err
-}
-
 func (s Service) warehouseBelongsToStore(ctx context.Context, storeID, warehouseID string) (bool, error) {
 	var count int64
 	err := s.db.WithContext(ctx).
@@ -62,13 +38,6 @@ func (s Service) warehouseBelongsToStore(ctx context.Context, storeID, warehouse
 
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, input CreateLocationRequest) (Location, error) {
 	if strings.TrimSpace(storeID) == "" {
-		return Location{}, ErrLocationForbidden
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Location{}, err
-	}
-	if !allowed {
 		return Location{}, ErrLocationForbidden
 	}
 	if strings.TrimSpace(input.Name) == "" {
@@ -102,13 +71,6 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 		return ListResult{}, ErrLocationForbidden
 	}
 	filter.WarehouseID = strings.TrimSpace(filter.WarehouseID)
-	allowed, err := s.canView(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ListResult{}, err
-	}
-	if !allowed {
-		return ListResult{}, ErrLocationForbidden
-	}
 	if filter.WarehouseID != "" {
 		ok, err := s.warehouseBelongsToStore(ctx, storeID, filter.WarehouseID)
 		if err != nil {
@@ -123,13 +85,6 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 
 func (s Service) ListTree(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]TreeZone, error) {
 	if strings.TrimSpace(storeID) == "" {
-		return nil, ErrLocationForbidden
-	}
-	allowed, err := s.canView(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
 		return nil, ErrLocationForbidden
 	}
 	warehouseID = strings.TrimSpace(warehouseID)
@@ -149,13 +104,6 @@ func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, l
 	if strings.TrimSpace(storeID) == "" {
 		return nil, 0, ErrLocationForbidden
 	}
-	allowed, err := s.canView(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, 0, err
-	}
-	if !allowed {
-		return nil, 0, ErrLocationForbidden
-	}
 	// Confirm location belongs to store
 	if _, err := s.repo.GetByID(ctx, storeID, locationID); err != nil {
 		return nil, 0, err
@@ -167,25 +115,11 @@ func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, locati
 	if strings.TrimSpace(storeID) == "" {
 		return Location{}, ErrLocationForbidden
 	}
-	allowed, err := s.canView(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Location{}, err
-	}
-	if !allowed {
-		return Location{}, ErrLocationForbidden
-	}
 	return s.repo.GetByID(ctx, storeID, locationID)
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, locationID string, input UpdateLocationRequest) (Location, error) {
 	if strings.TrimSpace(storeID) == "" {
-		return Location{}, ErrLocationForbidden
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Location{}, err
-	}
-	if !allowed {
 		return Location{}, ErrLocationForbidden
 	}
 	current, err := s.repo.GetByID(ctx, storeID, locationID)
@@ -232,13 +166,6 @@ func (s Service) AssessDeletion(ctx context.Context, actor auth.Claims, storeID,
 	if strings.TrimSpace(storeID) == "" {
 		return lifecycle.Assessment{}, ErrLocationForbidden
 	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return lifecycle.Assessment{}, err
-	}
-	if !allowed {
-		return lifecycle.Assessment{}, ErrLocationForbidden
-	}
 	// Confirm the location exists and is in this store (→ 404 otherwise).
 	if _, err := s.repo.GetByID(ctx, storeID, locationID); err != nil {
 		return lifecycle.Assessment{}, err
@@ -259,13 +186,6 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, locatio
 	if strings.TrimSpace(storeID) == "" {
 		return DeleteOutcome{}, ErrLocationForbidden
 	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return DeleteOutcome{}, err
-	}
-	if !allowed {
-		return DeleteOutcome{}, ErrLocationForbidden
-	}
 	// Confirm existence + store scope before the locked apply (→ 404 otherwise).
 	if _, err := s.repo.GetByID(ctx, storeID, locationID); err != nil {
 		return DeleteOutcome{}, err
@@ -281,13 +201,6 @@ func (s Service) RenameZone(ctx context.Context, actor auth.Claims, storeID, war
 	if strings.TrimSpace(storeID) == "" {
 		return ErrLocationForbidden
 	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrLocationForbidden
-	}
 	if warehouseID != "" {
 		if ok, err := s.warehouseBelongsToStore(ctx, storeID, warehouseID); err != nil {
 			return err
@@ -295,19 +208,12 @@ func (s Service) RenameZone(ctx context.Context, actor auth.Claims, storeID, war
 			return ErrInvalidWarehouse
 		}
 	}
-	_, err = s.repo.RenameZone(ctx, storeID, warehouseID, oldZone, newZone)
+	_, err := s.repo.RenameZone(ctx, storeID, warehouseID, oldZone, newZone)
 	return err
 }
 
 func (s Service) DeleteZone(ctx context.Context, actor auth.Claims, storeID, warehouseID, zoneName string) error {
 	if strings.TrimSpace(storeID) == "" {
-		return ErrLocationForbidden
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
 		return ErrLocationForbidden
 	}
 	if warehouseID != "" {
@@ -324,13 +230,6 @@ func (s Service) RenameFloor(ctx context.Context, actor auth.Claims, storeID, wa
 	if strings.TrimSpace(storeID) == "" {
 		return ErrLocationForbidden
 	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrLocationForbidden
-	}
 	if warehouseID != "" {
 		if ok, err := s.warehouseBelongsToStore(ctx, storeID, warehouseID); err != nil {
 			return err
@@ -338,19 +237,12 @@ func (s Service) RenameFloor(ctx context.Context, actor auth.Claims, storeID, wa
 			return ErrInvalidWarehouse
 		}
 	}
-	_, err = s.repo.RenameFloor(ctx, storeID, warehouseID, zoneName, oldFloor, newFloor)
+	_, err := s.repo.RenameFloor(ctx, storeID, warehouseID, zoneName, oldFloor, newFloor)
 	return err
 }
 
 func (s Service) DeleteFloor(ctx context.Context, actor auth.Claims, storeID, warehouseID, zoneName, floorName string) error {
 	if strings.TrimSpace(storeID) == "" {
-		return ErrLocationForbidden
-	}
-	allowed, err := s.canManage(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
 		return ErrLocationForbidden
 	}
 	if warehouseID != "" {

@@ -25,13 +25,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if strings.TrimSpace(req.Name) == "" {
 		return ProductType{}, ErrInvalidName
 	}
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ProductType{}, err
-	}
-	if !allowed {
-		return ProductType{}, ErrForbiddenStoreAccess
-	}
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
@@ -44,7 +37,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		IsActive:    isActive,
 		CreatedAt:   time.Now().UTC(),
 	}
-	item, err = s.repo.Create(ctx, item)
+	item, err := s.repo.Create(ctx, item)
 	if isDuplicateKey(err) {
 		return ProductType{}, ErrDuplicateName
 	}
@@ -52,24 +45,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]ProductType, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 	return s.repo.ListByStore(ctx, storeID)
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateProductTypeRequest) (ProductType, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ProductType{}, err
-	}
-	if !allowed {
-		return ProductType{}, ErrForbiddenStoreAccess
-	}
 	item, err := s.repo.GetByID(ctx, storeID, id)
 	if err != nil {
 		return ProductType{}, err
@@ -95,12 +74,5 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id string) error {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 	return s.repo.Delete(ctx, storeID, id)
 }

@@ -7,6 +7,9 @@ const (
 	RoleOwner         = "owner"
 	RoleManager       = "manager"
 	RoleCashier       = "cashier"
+	// RoleWarehouse is a store_members role (back-of-house inventory/receiving
+	// staff). It is not a global users.role value.
+	RoleWarehouse = "warehouse"
 )
 
 type User struct {

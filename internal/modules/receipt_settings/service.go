@@ -23,13 +23,6 @@ func NewService(repo Repository, storeRepo store.Repository) Service {
 }
 
 func (s Service) Get(ctx context.Context, actor auth.Claims, storeID string) (ReceiptSettings, error) {
-	ok, err := s.storeRepo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ReceiptSettings{}, err
-	}
-	if !ok {
-		return ReceiptSettings{}, ErrForbidden
-	}
 
 	settings, err := s.repo.GetByStoreID(ctx, storeID)
 	if err == ErrNotFound {
@@ -39,13 +32,6 @@ func (s Service) Get(ctx context.Context, actor auth.Claims, storeID string) (Re
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) (ReceiptSettings, error) {
-	ok, err := s.storeRepo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ReceiptSettings{}, err
-	}
-	if !ok {
-		return ReceiptSettings{}, ErrForbidden
-	}
 
 	current, err := s.repo.GetByStoreID(ctx, storeID)
 	if err == ErrNotFound {
@@ -124,13 +110,6 @@ func defaultChannels() PaymentChannels {
 
 // PreviewHTML renders a preview receipt using the provided settings override + real store info.
 func (s Service) PreviewHTML(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) ([]byte, error) {
-	ok, err := s.storeRepo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, ErrForbidden
-	}
 
 	// Load the current saved settings as the base, then apply overrides.
 	base, err := s.repo.GetByStoreID(ctx, storeID)
@@ -236,30 +215,82 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 }
 
 func applyUpdate(s *ReceiptSettings, in UpdateReceiptSettingsRequest) {
-	if in.TemplateKey != nil         { s.TemplateKey = *in.TemplateKey }
-	if in.PaperSize != nil           { s.PaperSize = *in.PaperSize }
-	if in.PaperLength != nil         { s.PaperLength = *in.PaperLength }
-	if in.TaxMode != nil             { s.TaxMode = *in.TaxMode }
-	if in.VatRate != nil             { s.VatRate = *in.VatRate }
-	if in.TaxLabel != nil            { s.TaxLabel = *in.TaxLabel }
-	if in.ShowLogo != nil            { s.ShowLogo = *in.ShowLogo }
-	if in.LogoPosition != nil        { s.LogoPosition = *in.LogoPosition }
-	if in.ShowStoreName != nil       { s.ShowStoreName = *in.ShowStoreName }
-	if in.ShowAddress != nil         { s.ShowAddress = *in.ShowAddress }
-	if in.ShowPhone != nil           { s.ShowPhone = *in.ShowPhone }
-	if in.ShowTaxId != nil           { s.ShowTaxId = *in.ShowTaxId }
-	if in.FooterText != nil          { s.FooterText = *in.FooterText }
-	if len(in.PaymentChannels) > 0   { s.PaymentChannels = PaymentChannels(in.PaymentChannels) }
-	if in.PrinterType != nil         { s.PrinterType = *in.PrinterType }
-	if in.PrinterName != nil         { s.PrinterName = *in.PrinterName }
-	if in.AutoPrint != nil           { s.AutoPrint = *in.AutoPrint }
-	if in.Copies != nil              { s.Copies = *in.Copies }
-	if in.ShowQr != nil              { s.ShowQr = *in.ShowQr }
-	if in.QrSize != nil              { s.QrSize = *in.QrSize }
-	if in.ShowCustomerDisplay != nil { s.ShowCustomerDisplay = *in.ShowCustomerDisplay }
-	if in.ShowProductImages != nil   { s.ShowProductImages = *in.ShowProductImages }
-	if in.DateFormat != nil          { s.DateFormat = *in.DateFormat }
-	if in.TimeFormat != nil          { s.TimeFormat = *in.TimeFormat }
-	if in.CurrencyPosition != nil    { s.CurrencyPosition = *in.CurrencyPosition }
-	if in.RoundAmount != nil         { s.RoundAmount = *in.RoundAmount }
+	if in.TemplateKey != nil {
+		s.TemplateKey = *in.TemplateKey
+	}
+	if in.PaperSize != nil {
+		s.PaperSize = *in.PaperSize
+	}
+	if in.PaperLength != nil {
+		s.PaperLength = *in.PaperLength
+	}
+	if in.TaxMode != nil {
+		s.TaxMode = *in.TaxMode
+	}
+	if in.VatRate != nil {
+		s.VatRate = *in.VatRate
+	}
+	if in.TaxLabel != nil {
+		s.TaxLabel = *in.TaxLabel
+	}
+	if in.ShowLogo != nil {
+		s.ShowLogo = *in.ShowLogo
+	}
+	if in.LogoPosition != nil {
+		s.LogoPosition = *in.LogoPosition
+	}
+	if in.ShowStoreName != nil {
+		s.ShowStoreName = *in.ShowStoreName
+	}
+	if in.ShowAddress != nil {
+		s.ShowAddress = *in.ShowAddress
+	}
+	if in.ShowPhone != nil {
+		s.ShowPhone = *in.ShowPhone
+	}
+	if in.ShowTaxId != nil {
+		s.ShowTaxId = *in.ShowTaxId
+	}
+	if in.FooterText != nil {
+		s.FooterText = *in.FooterText
+	}
+	if len(in.PaymentChannels) > 0 {
+		s.PaymentChannels = PaymentChannels(in.PaymentChannels)
+	}
+	if in.PrinterType != nil {
+		s.PrinterType = *in.PrinterType
+	}
+	if in.PrinterName != nil {
+		s.PrinterName = *in.PrinterName
+	}
+	if in.AutoPrint != nil {
+		s.AutoPrint = *in.AutoPrint
+	}
+	if in.Copies != nil {
+		s.Copies = *in.Copies
+	}
+	if in.ShowQr != nil {
+		s.ShowQr = *in.ShowQr
+	}
+	if in.QrSize != nil {
+		s.QrSize = *in.QrSize
+	}
+	if in.ShowCustomerDisplay != nil {
+		s.ShowCustomerDisplay = *in.ShowCustomerDisplay
+	}
+	if in.ShowProductImages != nil {
+		s.ShowProductImages = *in.ShowProductImages
+	}
+	if in.DateFormat != nil {
+		s.DateFormat = *in.DateFormat
+	}
+	if in.TimeFormat != nil {
+		s.TimeFormat = *in.TimeFormat
+	}
+	if in.CurrencyPosition != nil {
+		s.CurrencyPosition = *in.CurrencyPosition
+	}
+	if in.RoundAmount != nil {
+		s.RoundAmount = *in.RoundAmount
+	}
 }

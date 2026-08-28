@@ -18,12 +18,13 @@ func newSaleHandler(db *gorm.DB) sale.Handler {
 
 func registerSaleRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.saleHandler.(sale.Handler)
-	protected.Post("/stores/:storeID/sales", handler.Create)
-	protected.Get("/stores/:storeID/sales", handler.ListByStore)
-	protected.Get("/stores/:storeID/sales/:saleID", handler.GetByID)
-	protected.Get("/stores/:storeID/sales/:saleID/receipt", handler.Receipt)
-	protected.Get("/stores/:storeID/sales/:saleID/receipt/preview", handler.ReceiptPreview)
-	protected.Get("/stores/:storeID/sales/:saleID/document", handler.Document)
-	protected.Post("/stores/:storeID/sales/:saleID/void", handler.VoidSale)
-	protected.Post("/stores/:storeID/sales/:saleID/returns", handler.CreateReturn)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/sales", g.operate, handler.Create)
+	protected.Get("/stores/:storeID/sales", g.operate, handler.ListByStore)
+	protected.Get("/stores/:storeID/sales/:saleID", g.operate, handler.GetByID)
+	protected.Get("/stores/:storeID/sales/:saleID/receipt", g.operate, handler.Receipt)
+	protected.Get("/stores/:storeID/sales/:saleID/receipt/preview", g.operate, handler.ReceiptPreview)
+	protected.Get("/stores/:storeID/sales/:saleID/document", g.operate, handler.Document)
+	protected.Post("/stores/:storeID/sales/:saleID/void", g.manage, handler.VoidSale)
+	protected.Post("/stores/:storeID/sales/:saleID/returns", g.manage, handler.CreateReturn)
 }

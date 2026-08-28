@@ -25,13 +25,6 @@ func (s Service) AdminListAll(ctx context.Context) ([]StoreSubscription, error) 
 }
 
 func (s Service) GetCurrentByStore(ctx context.Context, actor auth.Claims, storeID string) (StoreSubscription, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return StoreSubscription{}, err
-	}
-	if !allowed {
-		return StoreSubscription{}, ErrForbiddenStoreAccess
-	}
 
 	return s.repo.GetCurrentByStore(ctx, storeID)
 }
@@ -39,14 +32,6 @@ func (s Service) GetCurrentByStore(ctx context.Context, actor auth.Claims, store
 func (s Service) ChangePlan(ctx context.Context, actor auth.Claims, storeID string, input ChangeSubscriptionRequest) (StoreSubscription, error) {
 	if strings.TrimSpace(input.PlanCode) == "" {
 		return StoreSubscription{}, ErrInvalidPlanCode
-	}
-
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return StoreSubscription{}, err
-	}
-	if !allowed {
-		return StoreSubscription{}, ErrForbiddenStoreAccess
 	}
 
 	return s.repo.ChangePlan(ctx, storeID, strings.TrimSpace(input.PlanCode), time.Now().UTC())

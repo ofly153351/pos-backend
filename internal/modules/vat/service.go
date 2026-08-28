@@ -17,13 +17,6 @@ func NewService(repo Repository) Service {
 }
 
 func (s Service) CalculateForStore(ctx context.Context, actor auth.Claims, storeID string, req CalculateVATRequest) (VATSummary, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return VATSummary{}, err
-	}
-	if !allowed {
-		return VATSummary{}, ErrForbiddenStoreAccess
-	}
 	return s.Calculate(req)
 }
 

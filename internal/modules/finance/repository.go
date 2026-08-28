@@ -24,7 +24,6 @@ const saleVoidedStatus = "voided"
 const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
 
 type Repository interface {
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error)
 	GetCOGS(ctx context.Context, storeID string, from, to time.Time) (COGS, error)
 	GetOperatingExpenses(ctx context.Context, storeID string, from, to time.Time) (float64, error)
@@ -49,21 +48,6 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 // GetRevenue sums sale totals over [from, to), excluding voided sales.
@@ -179,7 +163,9 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 
 // canonicalPaymentMethodSQL collapses legacy / duplicate payment_method values onto the
 // canonical channel keys (mirrors lib/payment-method.ts + dashboard repo):
-//   transfer → bank_transfer · qr → promptpay · credit_card|debit_card → card.
+//
+//	transfer → bank_transfer · qr → promptpay · credit_card|debit_card → card.
+//
 // `credit` (sold-on-credit) is kept distinct — it is not a tender.
 const canonicalPaymentMethodSQL = `CASE
 	WHEN NULLIF(TRIM(s.payment_method), '') IS NULL THEN 'unknown'

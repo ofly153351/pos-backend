@@ -37,14 +37,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return Product{}, err
 	}
 
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Product{}, err
-	}
-	if !allowed {
-		return Product{}, ErrForbiddenStoreAccess
-	}
-
 	ok, err := s.repo.ProductTypeExists(ctx, storeID, strings.TrimSpace(input.ProductTypeID))
 	if err != nil {
 		return Product{}, err
@@ -185,12 +177,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 				)
 			}
 		}
-	// Detect duplicate SKU/barcode before returning a generic 500.
-	if isDuplicateKey(txErr) {
-		return Product{}, ErrDuplicateSKU
+		// Detect duplicate SKU/barcode before returning a generic 500.
+		if isDuplicateKey(txErr) {
+			return Product{}, ErrDuplicateSKU
+		}
+		return Product{}, txErr
 	}
-	return Product{}, txErr
-}
 	// Re-fetch post-commit so the response reflects the opening-balance stock totals.
 	if input.InitialStock > 0 {
 		if refreshed, err := s.repo.GetByID(ctx, storeID, created.ID); err == nil {
@@ -204,13 +196,6 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 	// POS cashiers must be able to READ the product catalog (names/prices/sku/barcode/
 	// category) in order to sell, so listing is gated at operate level. Product writes
 	// (Create/Update/Delete) remain manage-gated in their own methods.
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return ProductListResult{}, err
-	}
-	if !allowed {
-		return ProductListResult{}, ErrForbiddenStoreAccess
-	}
 	if query.Page < 1 || query.Limit < 1 {
 		return ProductListResult{}, ErrInvalidPagination
 	}
@@ -240,24 +225,10 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, productID string) (Product, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Product{}, err
-	}
-	if !allowed {
-		return Product{}, ErrForbiddenStoreAccess
-	}
 	return s.repo.GetByID(ctx, storeID, productID)
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, productID string, input UpdateProductRequest) (Product, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Product{}, err
-	}
-	if !allowed {
-		return Product{}, ErrForbiddenStoreAccess
-	}
 
 	current, err := s.repo.GetByID(ctx, storeID, productID)
 	if err != nil {
@@ -428,13 +399,6 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, product
 	if strings.TrimSpace(storeID) == "" || strings.TrimSpace(productID) == "" {
 		return ErrProductNotFound
 	}
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 
 	// Verify product exists and belongs to store
 	exists, err := s.repo.ExistsByID(ctx, storeID, productID)
@@ -461,13 +425,6 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, product
 }
 
 func (s Service) GenerateMissingSKU(ctx context.Context, actor auth.Claims, storeID string) (GenerateMissingSKUResult, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return GenerateMissingSKUResult{}, err
-	}
-	if !allowed {
-		return GenerateMissingSKUResult{}, ErrForbiddenStoreAccess
-	}
 
 	ids, err := s.repo.ListProductIDsWithoutSKU(ctx, storeID)
 	if err != nil {

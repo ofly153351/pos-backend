@@ -15,15 +15,16 @@ func newExpenseHandler(db *gorm.DB) expense.Handler {
 
 func registerExpenseRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.expenseHandler.(expense.Handler)
+	g := newStoreGuards(deps)
 	// NOTE: register /summary before /:expenseID so Fiber matches it first.
-	protected.Get("/stores/:storeID/expenses/summary", handler.Summary)
-	protected.Get("/stores/:storeID/expenses", handler.List)
-	protected.Post("/stores/:storeID/expenses", handler.Create)
-	protected.Get("/stores/:storeID/expenses/:expenseID", handler.GetByID)
-	protected.Patch("/stores/:storeID/expenses/:expenseID", handler.Update)
-	protected.Delete("/stores/:storeID/expenses/:expenseID", handler.Delete)
-	protected.Get("/stores/:storeID/expense-categories", handler.ListCategories)
-	protected.Post("/stores/:storeID/expense-categories", handler.CreateCategory)
-	protected.Patch("/stores/:storeID/expense-categories/:categoryID", handler.UpdateCategory)
-	protected.Delete("/stores/:storeID/expense-categories/:categoryID", handler.DeactivateCategory)
+	protected.Get("/stores/:storeID/expenses/summary", g.operate, handler.Summary)
+	protected.Get("/stores/:storeID/expenses", g.operate, handler.List)
+	protected.Post("/stores/:storeID/expenses", g.operate, handler.Create)
+	protected.Get("/stores/:storeID/expenses/:expenseID", g.operate, handler.GetByID)
+	protected.Patch("/stores/:storeID/expenses/:expenseID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/expenses/:expenseID", g.owner, handler.Delete)
+	protected.Get("/stores/:storeID/expense-categories", g.operate, handler.ListCategories)
+	protected.Post("/stores/:storeID/expense-categories", g.manage, handler.CreateCategory)
+	protected.Patch("/stores/:storeID/expense-categories/:categoryID", g.manage, handler.UpdateCategory)
+	protected.Delete("/stores/:storeID/expense-categories/:categoryID", g.manage, handler.DeactivateCategory)
 }

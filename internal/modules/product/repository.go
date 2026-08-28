@@ -28,8 +28,6 @@ type Repository interface {
 	LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error)
 	ValidateOperationalLocation(ctx context.Context, storeID, locationID string) (bool, error)
 	GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -540,40 +538,6 @@ func (r PostgresRepository) GetStoreDefaultSaleLocationID(ctx context.Context, s
 		return "", nil
 	}
 	return "", err
-}
-
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// UserCanOperateStore reports whether the user may perform operational (POS) reads on
-// the store — owner/manager/cashier, excluding suspended members. Mirrors the canonical
-// operate check (sale/member modules) so POS cashiers can read the product catalog to
-// sell. Product writes stay manage-gated via UserCanManageStore.
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (row productQueryRow) toProduct() Product {

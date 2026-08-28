@@ -21,9 +21,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if strings.TrimSpace(storeID) == "" {
 		return Customer{}, ErrCustomerStoreIDRequired
 	}
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return Customer{}, err
-	}
 
 	email, err := normalizeEmail(input.Email)
 	if err != nil {
@@ -71,23 +68,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]CustomerListItem, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.ListByStore(ctx, storeID)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, customerID string) (Customer, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return Customer{}, err
-	}
 	return s.repo.GetByID(ctx, storeID, customerID)
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, customerID string, input UpdateCustomerRequest) (Customer, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return Customer{}, err
-	}
 
 	existing, err := s.repo.GetByID(ctx, storeID, customerID)
 	if err != nil {
@@ -160,9 +148,6 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, custome
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, customerID string) error {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	return s.repo.Delete(ctx, storeID, customerID)
 }
 
@@ -170,16 +155,10 @@ func (s Service) ListLevelDiscounts(ctx context.Context, actor auth.Claims, stor
 	// POS pricing needs member-tier discounts at operate level so cashiers price member
 	// sales identically to owner/manager. Discount writes (Upsert/Delete) remain
 	// manage-gated via ensureDiscountAccess.
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.ListLevelDiscounts(ctx, storeID)
 }
 
 func (s Service) UpsertLevelDiscount(ctx context.Context, actor auth.Claims, storeID string, level int, input UpsertLevelDiscountRequest) (LevelDiscount, error) {
-	if err := s.ensureDiscountAccess(ctx, actor, storeID); err != nil {
-		return LevelDiscount{}, err
-	}
 	if level <= 0 {
 		return LevelDiscount{}, ErrInvalidLevel
 	}
@@ -197,9 +176,6 @@ func (s Service) UpsertLevelDiscount(ctx context.Context, actor auth.Claims, sto
 }
 
 func (s Service) DeleteLevelDiscount(ctx context.Context, actor auth.Claims, storeID string, level int) error {
-	if err := s.ensureDiscountAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	if level <= 0 {
 		return ErrInvalidLevel
 	}
@@ -207,9 +183,6 @@ func (s Service) DeleteLevelDiscount(ctx context.Context, actor auth.Claims, sto
 }
 
 func (s Service) ListShippingAddresses(ctx context.Context, actor auth.Claims, storeID, customerID string) ([]CustomerShippingAddress, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
 		return nil, err
 	}
@@ -217,9 +190,6 @@ func (s Service) ListShippingAddresses(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) CreateShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID string, req ShippingAddressRequest) (CustomerShippingAddress, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return CustomerShippingAddress{}, err
-	}
 	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
 		return CustomerShippingAddress{}, err
 	}
@@ -245,9 +215,6 @@ func (s Service) CreateShippingAddress(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) UpdateShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID, addrID string, req ShippingAddressRequest) (CustomerShippingAddress, error) {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return CustomerShippingAddress{}, err
-	}
 	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
 		return CustomerShippingAddress{}, err
 	}
@@ -271,34 +238,10 @@ func (s Service) UpdateShippingAddress(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) DeleteShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID, addrID string) error {
-	if err := s.ensureStoreAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
 		return err
 	}
 	return s.repo.DeleteShippingAddress(ctx, addrID, customerID)
-}
-
-func (s Service) ensureStoreAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrCustomerForbidden
-	}
-	return nil
-}
-
-func (s Service) ensureDiscountAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if actor.Role == auth.RolePlatformAdmin {
-		return nil
-	}
-	if actor.Role != auth.RoleOwner && actor.Role != auth.RoleManager {
-		return ErrCustomerForbidden
-	}
-	return s.ensureStoreAccess(ctx, actor, storeID)
 }
 
 func normalizeEmail(email string) (string, error) {

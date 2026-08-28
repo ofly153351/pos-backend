@@ -25,20 +25,6 @@ func NewService(repo Repository, db *gorm.DB) Service {
 // Counting is an operational task; any store member (owner/manager/cashier) may
 // create, continue and apply counts — mirroring the existing stock-movement model.
 
-func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if strings.TrimSpace(storeID) == "" {
-		return ErrStoreIDRequired
-	}
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrForbidden
-	}
-	return nil
-}
-
 // validateCountLocation confirms a location exists, belongs to THIS store and is active —
 // the same store+active fence the stock-movement explicit-location path uses. A count may
 // only target an active location in its own store.
@@ -57,24 +43,15 @@ func (s Service) validateCountLocation(ctx context.Context, storeID, locationID 
 }
 
 func (s Service) List(ctx context.Context, actor auth.Claims, storeID string) ([]CountSession, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.List(ctx, storeID)
 }
 
 func (s Service) Get(ctx context.Context, actor auth.Claims, storeID, sessionID string) (CountSession, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CountSession{}, err
-	}
 	return s.repo.Get(ctx, storeID, sessionID)
 }
 
 // Save upserts a single session (header + items) addressed by the URL sessionID.
 func (s Service) Save(ctx context.Context, actor auth.Claims, storeID, sessionID string, session CountSession) (CountSession, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CountSession{}, err
-	}
 	if strings.TrimSpace(sessionID) == "" {
 		return CountSession{}, ErrSessionIDRequired
 	}
@@ -118,9 +95,6 @@ func (s Service) Save(ctx context.Context, actor auth.Claims, storeID, sessionID
 // review. It reuses the proven stock_movement.AdjustStock logic via a
 // transaction-scoped service, so behaviour matches a normal manual adjustment.
 func (s Service) Apply(ctx context.Context, actor auth.Claims, storeID, sessionID string, req ApplyRequest) (CountSession, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return CountSession{}, err
-	}
 	if strings.TrimSpace(sessionID) == "" {
 		return CountSession{}, ErrSessionIDRequired
 	}
@@ -243,9 +217,6 @@ func (s Service) Apply(ctx context.Context, actor auth.Claims, storeID, sessionI
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, sessionID string) error {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	affected, err := s.repo.Delete(ctx, storeID, sessionID)
 	if err != nil {
 		return err

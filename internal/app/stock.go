@@ -15,8 +15,9 @@ func newStockHandler(db *gorm.DB) stock.Handler {
 
 func registerStockRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.stockHandler.(stock.Handler)
+	g := newStoreGuards(deps)
 
-	protected.Get("/stores/:storeID/stock/products/:productID", handler.GetByProduct)
-	protected.Get("/stores/:storeID/stock/locations/:locationID", handler.GetByLocation)
-	protected.Get("/stores/:storeID/stock/low-stock", handler.ListLowStock)
+	protected.Get("/stores/:storeID/stock/products/:productID", g.access, handler.GetByProduct)
+	protected.Get("/stores/:storeID/stock/locations/:locationID", g.access, handler.GetByLocation)
+	protected.Get("/stores/:storeID/stock/low-stock", g.access, handler.ListLowStock)
 }

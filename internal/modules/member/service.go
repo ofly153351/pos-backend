@@ -17,30 +17,9 @@ func NewService(repo Repository) Service {
 	return Service{repo: repo}
 }
 
-// effectiveRole resolves the caller's power for THIS store. A platform_admin acts
-// with owner power; everyone else is bound to their ACTIVE store role (a suspended
-// member or non-member resolves to "" and therefore cannot manage anything).
-func (s Service) effectiveRole(ctx context.Context, actor auth.Claims, storeID string) (string, error) {
-	if actor.Role == auth.RolePlatformAdmin {
-		return RoleOwner, nil
-	}
-	return s.repo.GetActiveRole(ctx, storeID, actor.UserID)
-}
-
-func canManage(role string) bool {
-	return role == RoleOwner || role == RoleManager
-}
-
 func (s Service) ListMembers(ctx context.Context, actor auth.Claims, storeID string) ([]Member, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return nil, ErrStoreIDRequired
-	}
-	caller, err := s.effectiveRole(ctx, actor, storeID)
-	if err != nil {
-		return nil, err
-	}
-	if !canManage(caller) {
-		return nil, ErrForbidden
 	}
 	return s.repo.ListMembers(ctx, storeID)
 }
@@ -49,20 +28,13 @@ func (s Service) AddMember(ctx context.Context, actor auth.Claims, storeID strin
 	if strings.TrimSpace(storeID) == "" {
 		return Member{}, ErrStoreIDRequired
 	}
-	caller, err := s.effectiveRole(ctx, actor, storeID)
-	if err != nil {
-		return Member{}, err
-	}
-	if !canManage(caller) {
-		return Member{}, ErrForbidden
-	}
 
 	role := strings.TrimSpace(input.Role)
 	if !isValidRole(role) {
 		return Member{}, ErrInvalidRole
 	}
 	// Only an owner (or platform_admin) may grant the owner role.
-	if role == RoleOwner && caller != RoleOwner {
+	if role == RoleOwner && !auth.StoreAccessFromContext(ctx).IsOwner() {
 		return Member{}, ErrOwnerOnly
 	}
 
@@ -100,13 +72,6 @@ func (s Service) UpdateMember(ctx context.Context, actor auth.Claims, storeID, u
 	if strings.TrimSpace(storeID) == "" {
 		return Member{}, ErrStoreIDRequired
 	}
-	caller, err := s.effectiveRole(ctx, actor, storeID)
-	if err != nil {
-		return Member{}, err
-	}
-	if !canManage(caller) {
-		return Member{}, ErrForbidden
-	}
 	if input.Role == nil && input.Status == nil {
 		return Member{}, ErrNothingToUpdate
 	}
@@ -135,7 +100,7 @@ func (s Service) UpdateMember(ctx context.Context, actor auth.Claims, storeID, u
 
 	// Owner-role operations are owner-only: granting owner, or modifying an
 	// existing owner (demote/suspend), requires the caller to be an owner.
-	if (newRole == RoleOwner || target.Role == RoleOwner) && caller != RoleOwner {
+	if (newRole == RoleOwner || target.Role == RoleOwner) && !auth.StoreAccessFromContext(ctx).IsOwner() {
 		return Member{}, ErrOwnerOnly
 	}
 	// Don't let a caller suspend their own membership and lock themselves out.
@@ -171,13 +136,6 @@ func (s Service) RemoveMember(ctx context.Context, actor auth.Claims, storeID, u
 	if strings.TrimSpace(storeID) == "" {
 		return ErrStoreIDRequired
 	}
-	caller, err := s.effectiveRole(ctx, actor, storeID)
-	if err != nil {
-		return err
-	}
-	if !canManage(caller) {
-		return ErrForbidden
-	}
 	if userID == actor.UserID {
 		return ErrCannotSelfRemove
 	}
@@ -187,7 +145,7 @@ func (s Service) RemoveMember(ctx context.Context, actor auth.Claims, storeID, u
 		return err
 	}
 	// Removing an owner is owner-only.
-	if target.Role == RoleOwner && caller != RoleOwner {
+	if target.Role == RoleOwner && !auth.StoreAccessFromContext(ctx).IsOwner() {
 		return ErrOwnerOnly
 	}
 

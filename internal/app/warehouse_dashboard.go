@@ -15,5 +15,6 @@ func newWarehouseDashboardHandler(db *gorm.DB) warehouse_dashboard.Handler {
 
 func registerWarehouseDashboardRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.warehouseDashboardHandler.(warehouse_dashboard.Handler)
-	protected.Get("/stores/:storeID/dashboard/warehouse", handler.GetDashboard)
+	g := newStoreGuards(deps)
+	protected.Get("/stores/:storeID/dashboard/warehouse", g.operate, handler.GetDashboard)
 }

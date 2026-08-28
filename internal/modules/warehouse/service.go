@@ -24,13 +24,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	if strings.TrimSpace(req.Name) == "" {
 		return Warehouse{}, ErrInvalidName
 	}
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Warehouse{}, err
-	}
-	if !allowed {
-		return Warehouse{}, ErrForbiddenStoreAccess
-	}
 	isActive := true
 	if req.IsActive != nil {
 		isActive = *req.IsActive
@@ -50,35 +43,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string, includeArchived bool) ([]Warehouse, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 	return s.repo.ListByStore(ctx, storeID, includeArchived)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, id string) (Warehouse, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Warehouse{}, err
-	}
-	if !allowed {
-		return Warehouse{}, ErrForbiddenStoreAccess
-	}
 	return s.repo.GetByID(ctx, storeID, id)
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateWarehouseRequest) (Warehouse, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Warehouse{}, err
-	}
-	if !allowed {
-		return Warehouse{}, ErrForbiddenStoreAccess
-	}
 	item, err := s.repo.GetByID(ctx, storeID, id)
 	if err != nil {
 		return Warehouse{}, err
@@ -116,13 +88,6 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 // AssessDeletion returns the read-only deletion assessment for a warehouse (drives the
 // adaptive delete/archive modal). Manage-level access required.
 func (s Service) AssessDeletion(ctx context.Context, actor auth.Claims, storeID, id string) (lifecycle.Assessment, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return lifecycle.Assessment{}, err
-	}
-	if !allowed {
-		return lifecycle.Assessment{}, ErrForbiddenStoreAccess
-	}
 	// Confirm the warehouse exists and is in this store (→ 404 otherwise).
 	if _, err := s.repo.GetByID(ctx, storeID, id); err != nil {
 		return lifecycle.Assessment{}, err
@@ -140,13 +105,6 @@ func (s Service) AssessDeletion(ctx context.Context, actor auth.Claims, storeID,
 // structured blocker error with no mutation. expected is an optional client-declared action
 // for optimistic concurrency (ENTITY_STATE_CHANGED on mismatch).
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id, expected string) (DeleteOutcome, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return DeleteOutcome{}, err
-	}
-	if !allowed {
-		return DeleteOutcome{}, ErrForbiddenStoreAccess
-	}
 	// Confirm existence + store scope before the locked apply (→ 404 otherwise).
 	if _, err := s.repo.GetByID(ctx, storeID, id); err != nil {
 		return DeleteOutcome{}, err
@@ -163,13 +121,6 @@ func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id, exp
 // ──────────────────────────────────────────────
 
 func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID string, req AddWarehouseProductRequest) (WarehouseProduct, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return WarehouseProduct{}, err
-	}
-	if !allowed {
-		return WarehouseProduct{}, ErrForbiddenStoreAccess
-	}
 	// Phase W0: the legacy direct add changed stocks without a movement and could
 	// silently auto-create locations. It is disabled — receiving now goes through
 	// the canonical Goods Receipt workflow.
@@ -177,13 +128,6 @@ func (s Service) AddProduct(ctx context.Context, actor auth.Claims, storeID, war
 }
 
 func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]WarehouseProduct, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 
 	// Verify warehouse belongs to store
 	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
@@ -198,13 +142,6 @@ func (s Service) ListProducts(ctx context.Context, actor auth.Claims, storeID, w
 // (owner/manager/cashier/warehouse) may read; suspended/non-members get ErrForbiddenStoreAccess
 // (403). The query is assumed already validated/normalized by the handler.
 func (s Service) ListInventoryProducts(ctx context.Context, actor auth.Claims, storeID, warehouseID string, q WarehouseInventoryQuery) (WarehouseInventoryResponse, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return WarehouseInventoryResponse{}, err
-	}
-	if !allowed {
-		return WarehouseInventoryResponse{}, ErrForbiddenStoreAccess
-	}
 
 	// Verify warehouse belongs to store (→ ErrWarehouseNotFound / 404 otherwise).
 	wh, err := s.repo.GetByID(ctx, storeID, warehouseID)
@@ -231,13 +168,6 @@ func (s Service) ListInventoryProducts(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string, quantity int) error {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 	// Phase W0: the destructive absolute-quantity update deleted stock rows at other
 	// locations and wrote no movement. It is disabled — use the inventory stock
 	// adjustment (which posts an auditable IN/OUT movement) instead.
@@ -245,13 +175,6 @@ func (s Service) UpdateProduct(ctx context.Context, actor auth.Claims, storeID, 
 }
 
 func (s Service) RemoveProduct(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string) error {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
-	}
 
 	// Verify warehouse belongs to store
 	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
@@ -292,13 +215,6 @@ func (s Service) TransferStock(_ context.Context, _ auth.Claims, _, _ string, _ 
 // ──────────────────────────────────────────────
 
 func (s Service) ListInventory(ctx context.Context, actor auth.Claims, storeID, warehouseID string) ([]WarehouseInventory, error) {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 
 	// Verify warehouse belongs to store
 	if _, err := s.repo.GetByID(ctx, storeID, warehouseID); err != nil {
@@ -311,14 +227,6 @@ func (s Service) ListInventory(ctx context.Context, actor auth.Claims, storeID, 
 func (s Service) AllocateInventory(ctx context.Context, actor auth.Claims, storeID, warehouseID, productID string, req AllocateInventoryRequest) error {
 	if req.Quantity <= 0 {
 		return ErrAllocateZeroQty
-	}
-
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !allowed {
-		return ErrForbiddenStoreAccess
 	}
 
 	// Verify warehouse belongs to store

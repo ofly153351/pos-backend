@@ -29,9 +29,6 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 	if strings.TrimSpace(storeID) == "" {
 		return Supplier{}, ErrSupplierStoreIDReq
 	}
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return Supplier{}, err
-	}
 	if strings.TrimSpace(input.Name) == "" {
 		return Supplier{}, ErrSupplierNameRequired
 	}
@@ -75,23 +72,14 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 }
 
 func (s Service) ListSuppliers(ctx context.Context, actor auth.Claims, storeID string) ([]Supplier, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.ListSuppliers(ctx, storeID)
 }
 
 func (s Service) GetSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string) (Supplier, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return Supplier{}, err
-	}
 	return s.repo.GetSupplier(ctx, storeID, supplierID)
 }
 
 func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string, input UpdateSupplierRequest) (Supplier, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return Supplier{}, err
-	}
 
 	existing, err := s.repo.GetSupplier(ctx, storeID, supplierID)
 	if err != nil {
@@ -173,9 +161,6 @@ func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID,
 }
 
 func (s Service) DeleteSupplier(ctx context.Context, actor auth.Claims, storeID, supplierID string) error {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return err
-	}
 	return s.repo.DeleteSupplier(ctx, storeID, supplierID)
 }
 
@@ -184,9 +169,6 @@ func (s Service) DeleteSupplier(ctx context.Context, actor auth.Claims, storeID,
 func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string, input CreatePORequest) (PurchaseOrder, error) {
 	if strings.TrimSpace(storeID) == "" {
 		return PurchaseOrder{}, ErrPOStoreIDRequired
-	}
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
-		return PurchaseOrder{}, err
 	}
 
 	if len(input.Items) == 0 {
@@ -287,23 +269,14 @@ func (s Service) CreatePO(ctx context.Context, actor auth.Claims, storeID string
 }
 
 func (s Service) ListPOs(ctx context.Context, actor auth.Claims, storeID string) ([]PurchaseOrder, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.ListPOs(ctx, storeID)
 }
 
 func (s Service) GetPO(ctx context.Context, actor auth.Claims, storeID, poID string) (PurchaseOrder, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return PurchaseOrder{}, err
-	}
 	return s.repo.GetPO(ctx, storeID, poID)
 }
 
 func (s Service) UpdatePO(ctx context.Context, actor auth.Claims, storeID, poID string, input UpdatePORequest) (PurchaseOrder, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
-		return PurchaseOrder{}, err
-	}
 
 	existing, err := s.repo.GetPO(ctx, storeID, poID)
 	if err != nil {
@@ -341,9 +314,6 @@ func (s Service) UpdatePO(ctx context.Context, actor auth.Claims, storeID, poID 
 }
 
 func (s Service) ReceiveStock(ctx context.Context, actor auth.Claims, storeID, poID string, input ReceivePORequest) (PurchaseOrder, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return PurchaseOrder{}, err
-	}
 
 	existing, err := s.repo.GetPO(ctx, storeID, poID)
 	if err != nil {
@@ -459,9 +429,6 @@ func translateReceivingLocationError(err error) error {
 }
 
 func (s Service) CancelPO(ctx context.Context, actor auth.Claims, storeID, poID string) (PurchaseOrder, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrPOForbidden); err != nil {
-		return PurchaseOrder{}, err
-	}
 
 	existing, err := s.repo.GetPO(ctx, storeID, poID)
 	if err != nil {
@@ -485,9 +452,6 @@ func (s Service) CancelPO(ctx context.Context, actor auth.Claims, storeID, poID 
 // ---- Supplier Products ----
 
 func (s Service) ListSupplierProducts(ctx context.Context, actor auth.Claims, storeID, supplierID string) ([]SupplierProductResponse, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	// Verify supplier belongs to store
 	if _, err := s.repo.GetSupplier(ctx, storeID, supplierID); err != nil {
 		return nil, err
@@ -496,9 +460,6 @@ func (s Service) ListSupplierProducts(ctx context.Context, actor auth.Claims, st
 }
 
 func (s Service) AddSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID string, input AddSupplierProductRequest) (SupplierProductResponse, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return SupplierProductResponse{}, err
-	}
 
 	if strings.TrimSpace(input.ProductID) == "" {
 		return SupplierProductResponse{}, ErrSupplierProductRequired
@@ -556,9 +517,6 @@ func (s Service) AddSupplierProduct(ctx context.Context, actor auth.Claims, stor
 }
 
 func (s Service) UpdateSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID, productID string, input UpdateSupplierProductRequest) (SupplierProductResponse, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return SupplierProductResponse{}, err
-	}
 
 	// Verify supplier belongs to store
 	if _, err := s.repo.GetSupplier(ctx, storeID, supplierID); err != nil {
@@ -597,9 +555,6 @@ func (s Service) UpdateSupplierProduct(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) RemoveSupplierProduct(ctx context.Context, actor auth.Claims, storeID, supplierID, productID string) error {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return err
-	}
 	// Verify supplier belongs to store
 	if _, err := s.repo.GetSupplier(ctx, storeID, supplierID); err != nil {
 		return err
@@ -608,9 +563,6 @@ func (s Service) RemoveSupplierProduct(ctx context.Context, actor auth.Claims, s
 }
 
 func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Claims, storeID, supplierID string, input CreateSupplierProductAndLinkRequest) (SupplierProductResponse, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID, ErrSupplierForbidden); err != nil {
-		return SupplierProductResponse{}, err
-	}
 
 	if strings.TrimSpace(input.Name) == "" {
 		return SupplierProductResponse{}, ErrSupplierProductNameReq
@@ -673,28 +625,8 @@ func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Cl
 
 // ensureAccess gates operate-level actions (list/get + receive stock): owner,
 // manager, cashier, and warehouse members all pass.
-func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrSupplierForbidden
-	}
-	return nil
-}
 
 // ensureManageAccess gates management actions (create/edit/cancel/delete of
 // suppliers, supplier-product links, and purchase orders): only owner/manager
 // (or platform_admin) pass. `forbidden` is the domain-specific 403 error to
 // return so supplier vs PO call sites surface the right message.
-func (s Service) ensureManageAccess(ctx context.Context, actor auth.Claims, storeID string, forbidden error) error {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return forbidden
-	}
-	return nil
-}

@@ -15,9 +15,10 @@ func newSubscriptionHandler(db *gorm.DB) subscription.Handler {
 
 func registerSubscriptionRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.subscriptionHandler.(subscription.Handler)
+	g := newStoreGuards(deps)
 	protected.Get("/subscriptions/plans", handler.ListPlans)
-	protected.Get("/stores/:storeID/subscription", handler.GetCurrentByStore)
-	protected.Put("/stores/:storeID/subscription", handler.ChangePlan)
+	protected.Get("/stores/:storeID/subscription", g.manage, handler.GetCurrentByStore)
+	protected.Put("/stores/:storeID/subscription", g.manage, handler.ChangePlan)
 }
 
 func registerAdminSubscriptionRoutes(admin fiber.Router, deps appDependencies) {

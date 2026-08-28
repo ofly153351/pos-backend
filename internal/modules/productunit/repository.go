@@ -13,7 +13,6 @@ type Repository interface {
 	GetByID(ctx context.Context, storeID, id string) (ProductUnit, error)
 	Update(ctx context.Context, unit ProductUnit) (ProductUnit, error)
 	Delete(ctx context.Context, storeID, id string) error
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -116,19 +115,4 @@ func (r PostgresRepository) Delete(ctx context.Context, storeID, id string) erro
 		return ErrProductUnitNotFound
 	}
 	return nil
-}
-
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }

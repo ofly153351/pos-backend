@@ -15,10 +15,11 @@ func newStockMovementHandler(db *gorm.DB) stock_movement.Handler {
 
 func registerStockMovementRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.stockMovementHandler.(stock_movement.Handler)
+	g := newStoreGuards(deps)
 
-	protected.Post("/stores/:storeID/stock-movements/in", handler.AddStock)
-	protected.Post("/stores/:storeID/stock-movements/out", handler.RemoveStock)
-	protected.Post("/stores/:storeID/stock-movements/transfer", handler.TransferStock)
-	protected.Post("/stores/:storeID/stock-movements/adjust", handler.AdjustStock)
-	protected.Get("/stores/:storeID/stock-movements", handler.ListMovements)
+	protected.Post("/stores/:storeID/stock-movements/in", g.manage, handler.AddStock)
+	protected.Post("/stores/:storeID/stock-movements/out", g.manage, handler.RemoveStock)
+	protected.Post("/stores/:storeID/stock-movements/transfer", g.manage, handler.TransferStock)
+	protected.Post("/stores/:storeID/stock-movements/adjust", g.manage, handler.AdjustStock)
+	protected.Get("/stores/:storeID/stock-movements", g.manage, handler.ListMovements)
 }

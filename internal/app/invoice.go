@@ -26,11 +26,12 @@ func newInvoiceHandler(cfg config.Config, db *gorm.DB) invoice.Handler {
 
 func registerInvoiceRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.invoiceHandler.(invoice.Handler)
-	protected.Post("/stores/:storeID/invoices", handler.Create)
-	protected.Get("/stores/:storeID/invoices", handler.ListByStore)
-	protected.Get("/stores/:storeID/invoices/:invoiceID", handler.GetByID)
-	protected.Post("/stores/:storeID/invoices/:invoiceID/payments", handler.AddPayment)
-	protected.Get("/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof", handler.ViewPaymentProof)
-	protected.Post("/stores/:storeID/invoices/:invoiceID/unpay", handler.MarkUnpaid)
-	protected.Get("/stores/:storeID/invoices/:invoiceID/pdf", handler.ExportPDF)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/invoices", g.operate, handler.Create)
+	protected.Get("/stores/:storeID/invoices", g.operate, handler.ListByStore)
+	protected.Get("/stores/:storeID/invoices/:invoiceID", g.operate, handler.GetByID)
+	protected.Post("/stores/:storeID/invoices/:invoiceID/payments", g.operate, handler.AddPayment)
+	protected.Get("/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof", g.operate, handler.ViewPaymentProof)
+	protected.Post("/stores/:storeID/invoices/:invoiceID/unpay", g.operate, handler.MarkUnpaid)
+	protected.Get("/stores/:storeID/invoices/:invoiceID/pdf", g.operate, handler.ExportPDF)
 }

@@ -15,10 +15,6 @@ import (
 type Repository interface {
 	ListMembers(ctx context.Context, storeID string) ([]Member, error)
 	GetMember(ctx context.Context, storeID, userID string) (Member, error)
-	// GetActiveRole returns the user's STORE role only when the membership is
-	// active; it returns "" (no error) when the user is not a member or is
-	// suspended. Used to gate the caller.
-	GetActiveRole(ctx context.Context, storeID, userID string) (string, error)
 	CountActiveOwners(ctx context.Context, storeID string) (int, error)
 	FindUserIDByEmail(ctx context.Context, email string) (string, error)
 	InsertMember(ctx context.Context, storeID, userID, role string) (Member, error)
@@ -75,24 +71,6 @@ func (r PostgresRepository) GetMember(ctx context.Context, storeID, userID strin
 		return Member{}, err
 	}
 	return item, nil
-}
-
-func (r PostgresRepository) GetActiveRole(ctx context.Context, storeID, userID string) (string, error) {
-	var row struct {
-		Role string `gorm:"column:role"`
-	}
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Select("role").
-		Where("store_id = ? AND user_id = ? AND status <> 'suspended'", storeID, userID).
-		Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil
-		}
-		return "", err
-	}
-	return row.Role, nil
 }
 
 func (r PostgresRepository) CountActiveOwners(ctx context.Context, storeID string) (int, error) {

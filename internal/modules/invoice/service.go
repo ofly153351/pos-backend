@@ -47,24 +47,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID string) ([]Invoice, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return nil, err
-	}
-	if !allowed {
-		return nil, ErrForbiddenStoreAccess
-	}
 	return s.repo.ListByStore(ctx, storeID)
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID, invoiceID string) (Invoice, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Invoice{}, err
-	}
-	if !allowed {
-		return Invoice{}, ErrForbiddenStoreAccess
-	}
 	return s.repo.GetByID(ctx, storeID, invoiceID)
 }
 
@@ -74,14 +60,6 @@ func (s Service) AddPayment(ctx context.Context, actor auth.Claims, storeID, inv
 	}
 	if req.PaidAmount <= 0 {
 		return Invoice{}, ErrInvalidPaidAmount
-	}
-
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Invoice{}, err
-	}
-	if !allowed {
-		return Invoice{}, ErrForbiddenStoreAccess
 	}
 
 	now := time.Now().UTC()
@@ -110,25 +88,10 @@ func (s Service) MarkUnpaid(ctx context.Context, actor auth.Claims, storeID, inv
 		return Invoice{}, ErrInvalidUnpayReason
 	}
 
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Invoice{}, err
-	}
-	if !allowed {
-		return Invoice{}, ErrForbiddenStoreAccess
-	}
-
 	return s.repo.MarkUnpaid(ctx, storeID, invoiceID, actor.UserID, reason, time.Now().UTC())
 }
 
 func (s Service) GetPaymentProof(ctx context.Context, actor auth.Claims, storeID, invoiceID, paymentID string) (InvoicePayment, error) {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return InvoicePayment{}, err
-	}
-	if !allowed {
-		return InvoicePayment{}, ErrForbiddenStoreAccess
-	}
 
 	payment, err := s.repo.GetPaymentProof(ctx, storeID, invoiceID, paymentID)
 	if err != nil {

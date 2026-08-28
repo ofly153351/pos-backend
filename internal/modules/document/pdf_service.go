@@ -186,9 +186,6 @@ func (s Service) generateBillPDF(doc *Document, opts InvoicePDFOptions) ([]byte,
 
 // GenerateStatementPDF builds a Statement PDF for a customer over a date range.
 func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, storeID, customerID string, opts StatementPDFOptions) ([]byte, string, error) {
-	if err := s.ensureAccess(actor, storeID); err != nil {
-		return nil, "", err
-	}
 
 	// Fetch store info
 	var store struct {

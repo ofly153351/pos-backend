@@ -15,7 +15,8 @@ func newFinanceHandler(db *gorm.DB) finance.Handler {
 
 func registerFinanceRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.financeHandler.(finance.Handler)
-	protected.Get("/stores/:storeID/finance/pnl", handler.GetPnL)
-	protected.Get("/stores/:storeID/finance/summary", handler.GetSummary)
-	protected.Get("/stores/:storeID/finance/inventory", handler.GetInventory)
+	g := newStoreGuards(deps)
+	protected.Get("/stores/:storeID/finance/pnl", g.operate, handler.GetPnL)
+	protected.Get("/stores/:storeID/finance/summary", g.operate, handler.GetSummary)
+	protected.Get("/stores/:storeID/finance/inventory", g.operate, handler.GetInventory)
 }

@@ -17,8 +17,6 @@ type Repository interface {
 	GetByID(ctx context.Context, storeID string) (Store, error)
 	ListByUser(ctx context.Context, userID, role string) ([]Store, error)
 	Update(ctx context.Context, storeID string, update Store) error
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserHasStoreAccess(ctx context.Context, storeID, userID, role string) (bool, error)
 	ListBankAccounts(ctx context.Context, storeID string) ([]StoreBankAccount, error)
 	CreateBankAccount(ctx context.Context, acc StoreBankAccount) (StoreBankAccount, error)
 	UpdateBankAccount(ctx context.Context, storeID, id string, updates map[string]interface{}) (StoreBankAccount, error)
@@ -371,38 +369,6 @@ func (r PostgresRepository) Update(ctx context.Context, storeID string, update S
 		}
 		return nil
 	})
-}
-
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ?", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (r PostgresRepository) UserHasStoreAccess(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ?", storeID, userID).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) hasStorePromptPayIDColumn(ctx context.Context) (bool, error) {

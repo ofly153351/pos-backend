@@ -17,51 +17,18 @@ func NewService(repo Repository) Service {
 	return Service{repo: repo}
 }
 
-func (s Service) ensureAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if strings.TrimSpace(storeID) == "" {
-		return ErrStoreIDRequired
-	}
-	ok, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrForbidden
-	}
-	return nil
-}
-
 // ensureManageAccess gates write operations (create/update/delete) to owner/manager
 // (or platform admin). Cashiers can read promotions but cannot mint/alter them —
 // this prevents a cashier from fabricating an 'active' promotion to feed an
 // unearned promo_discount through checkout.
-func (s Service) ensureManageAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	if strings.TrimSpace(storeID) == "" {
-		return ErrStoreIDRequired
-	}
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrForbidden
-	}
-	return nil
-}
 
 func (s Service) List(ctx context.Context, actor auth.Claims, storeID string) ([]json.RawMessage, error) {
-	if err := s.ensureAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	return s.repo.List(ctx, storeID)
 }
 
 // Create stores the full campaign JSON verbatim; the server owns the id and a
 // default status. Returns the stored campaign (with the server id) as raw JSON.
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, body []byte) (json.RawMessage, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	obj := map[string]any{}
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, ErrInvalidBody
@@ -96,9 +63,6 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id string, body []byte) (json.RawMessage, error) {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return nil, err
-	}
 	if strings.TrimSpace(id) == "" {
 		return nil, ErrIDRequired
 	}
@@ -133,9 +97,6 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 }
 
 func (s Service) Delete(ctx context.Context, actor auth.Claims, storeID, id string) error {
-	if err := s.ensureManageAccess(ctx, actor, storeID); err != nil {
-		return err
-	}
 	affected, err := s.repo.Delete(ctx, storeID, id)
 	if err != nil {
 		return err

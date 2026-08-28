@@ -52,8 +52,6 @@ type Repository interface {
 	CreateProductForSupplier(ctx context.Context, storeID string, name, sku, barcode, productTypeID, productUnitID string, basePrice float64) (string, error)
 
 	// Access
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type timeSetter struct {
@@ -88,26 +86,26 @@ func nilIfEmpty(s string) any {
 
 func (r PostgresRepository) CreateSupplier(ctx context.Context, supplier Supplier) (Supplier, error) {
 	payload := map[string]any{
-		"id":                   supplier.ID,
-		"store_id":             supplier.StoreID,
-		"name":                 supplier.Name,
-		"is_active":            supplier.IsActive,
-		"credit_days":          supplier.CreditDays,
-		"created_at":           supplier.CreatedAt,
-		"updated_at":           supplier.CreatedAt,
-		"phone":                nilIfEmpty(supplier.Phone),
-		"address":              nilIfEmpty(supplier.Address),
-		"tax_id":               nilIfEmpty(supplier.TaxID),
-		"contact_person":       nilIfEmpty(supplier.ContactPerson),
-		"note":                 nilIfEmpty(supplier.Note),
-		"email":                nilIfEmpty(supplier.Email),
-		"line_id":              nilIfEmpty(supplier.LineID),
-		"payment_method":       nilIfEmpty(supplier.PaymentMethod),
-		"promptpay_number":     nilIfEmpty(supplier.PromptpayNumber),
-		"bank_name":            nilIfEmpty(supplier.BankName),
-		"bank_account_number":  nilIfEmpty(supplier.BankAccountNumber),
-		"bank_account_name":    nilIfEmpty(supplier.BankAccountName),
-		"logo_url":             nilIfEmpty(supplier.LogoURL),
+		"id":                  supplier.ID,
+		"store_id":            supplier.StoreID,
+		"name":                supplier.Name,
+		"is_active":           supplier.IsActive,
+		"credit_days":         supplier.CreditDays,
+		"created_at":          supplier.CreatedAt,
+		"updated_at":          supplier.CreatedAt,
+		"phone":               nilIfEmpty(supplier.Phone),
+		"address":             nilIfEmpty(supplier.Address),
+		"tax_id":              nilIfEmpty(supplier.TaxID),
+		"contact_person":      nilIfEmpty(supplier.ContactPerson),
+		"note":                nilIfEmpty(supplier.Note),
+		"email":               nilIfEmpty(supplier.Email),
+		"line_id":             nilIfEmpty(supplier.LineID),
+		"payment_method":      nilIfEmpty(supplier.PaymentMethod),
+		"promptpay_number":    nilIfEmpty(supplier.PromptpayNumber),
+		"bank_name":           nilIfEmpty(supplier.BankName),
+		"bank_account_number": nilIfEmpty(supplier.BankAccountNumber),
+		"bank_account_name":   nilIfEmpty(supplier.BankAccountName),
+		"logo_url":            nilIfEmpty(supplier.LogoURL),
 	}
 
 	if err := r.db.WithContext(ctx).Table("suppliers").Create(payload).Error; err != nil {
@@ -144,23 +142,23 @@ func (r PostgresRepository) GetSupplier(ctx context.Context, storeID, supplierID
 
 func (r PostgresRepository) UpdateSupplier(ctx context.Context, supplier Supplier) (Supplier, error) {
 	updates := map[string]any{
-		"name":                 supplier.Name,
-		"is_active":            supplier.IsActive,
-		"credit_days":          supplier.CreditDays,
-		"updated_at":           supplier.UpdatedAt,
-		"phone":                nilIfEmpty(supplier.Phone),
-		"address":              nilIfEmpty(supplier.Address),
-		"tax_id":               nilIfEmpty(supplier.TaxID),
-		"contact_person":       nilIfEmpty(supplier.ContactPerson),
-		"note":                 nilIfEmpty(supplier.Note),
-		"email":                nilIfEmpty(supplier.Email),
-		"line_id":              nilIfEmpty(supplier.LineID),
-		"payment_method":       nilIfEmpty(supplier.PaymentMethod),
-		"promptpay_number":     nilIfEmpty(supplier.PromptpayNumber),
-		"bank_name":            nilIfEmpty(supplier.BankName),
-		"bank_account_number":  nilIfEmpty(supplier.BankAccountNumber),
-		"bank_account_name":    nilIfEmpty(supplier.BankAccountName),
-		"logo_url":             nilIfEmpty(supplier.LogoURL),
+		"name":                supplier.Name,
+		"is_active":           supplier.IsActive,
+		"credit_days":         supplier.CreditDays,
+		"updated_at":          supplier.UpdatedAt,
+		"phone":               nilIfEmpty(supplier.Phone),
+		"address":             nilIfEmpty(supplier.Address),
+		"tax_id":              nilIfEmpty(supplier.TaxID),
+		"contact_person":      nilIfEmpty(supplier.ContactPerson),
+		"note":                nilIfEmpty(supplier.Note),
+		"email":               nilIfEmpty(supplier.Email),
+		"line_id":             nilIfEmpty(supplier.LineID),
+		"payment_method":      nilIfEmpty(supplier.PaymentMethod),
+		"promptpay_number":    nilIfEmpty(supplier.PromptpayNumber),
+		"bank_name":           nilIfEmpty(supplier.BankName),
+		"bank_account_number": nilIfEmpty(supplier.BankAccountNumber),
+		"bank_account_name":   nilIfEmpty(supplier.BankAccountName),
+		"logo_url":            nilIfEmpty(supplier.LogoURL),
 	}
 
 	result := r.db.WithContext(ctx).
@@ -432,15 +430,15 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 	id := newProductID()
 	now := gorm.Expr("NOW()")
 	payload := map[string]any{
-		"id":          id,
-		"store_id":    storeID,
-		"name":        name,
-		"sku":         sku,
-		"barcode":     barcode,
-		"base_price":  basePrice,
-		"is_active":   true,
-		"created_at":  now,
-		"updated_at":  now,
+		"id":         id,
+		"store_id":   storeID,
+		"name":       name,
+		"sku":        sku,
+		"barcode":    barcode,
+		"base_price": basePrice,
+		"is_active":  true,
+		"created_at": now,
+		"updated_at": now,
 	}
 	if strings.TrimSpace(productTypeID) != "" {
 		payload["product_type_id"] = productTypeID
@@ -480,45 +478,6 @@ func (r PostgresRepository) CreateProductForSupplier(ctx context.Context, storeI
 }
 
 // ---- Access ----
-
-// UserCanOperateStore reports whether the user may perform operate-level actions
-// (list/get + receive stock). Warehouse staff are included here so they can
-// receive POs; cashiers are included per product decision (receiving is a floor
-// task). Management actions (PO/supplier create/edit/cancel) use the stricter
-// UserCanManageStore below. Suspended members are excluded.
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager", "cashier", "warehouse"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// UserCanManageStore reports whether the user is owner/manager of the store (or a
-// platform admin). Creating/editing/cancelling/deleting suppliers, supplier-product
-// links, and purchase orders are management actions; warehouse/cashier may only
-// LIST/GET and receive stock. Suspended members are excluded.
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND status <> 'suspended' AND role IN ?", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
 
 // ---- Supplier Products ----
 

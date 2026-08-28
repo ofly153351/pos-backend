@@ -15,7 +15,6 @@ type Repository interface {
 	GetCurrentByStore(ctx context.Context, storeID string) (StoreSubscription, error)
 	ChangePlan(ctx context.Context, storeID, planCode string, changedAt time.Time) (StoreSubscription, error)
 	UpdateStatus(ctx context.Context, storeID, status string) (StoreSubscription, error)
-	UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -159,21 +158,6 @@ func (r PostgresRepository) UpdateStatus(ctx context.Context, storeID, status st
 	return r.GetCurrentByStore(ctx, storeID)
 }
 
-func (r PostgresRepository) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
 func (row storeSubscriptionView) toSubscription() StoreSubscription {
 	return StoreSubscription{
 		ID:                 row.ID,
@@ -190,4 +174,3 @@ func (row storeSubscriptionView) toSubscription() StoreSubscription {
 		CreatedAt:          row.CreatedAt,
 	}
 }
-

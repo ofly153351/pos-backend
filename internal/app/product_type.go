@@ -15,8 +15,9 @@ func newProductTypeHandler(db *gorm.DB) producttype.Handler {
 
 func registerProductTypeRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.productTypeHandler.(producttype.Handler)
-	protected.Post("/stores/:storeID/product-types", handler.Create)
-	protected.Get("/stores/:storeID/product-types", handler.ListByStore)
-	protected.Patch("/stores/:storeID/product-types/:productTypeID", handler.Update)
-	protected.Delete("/stores/:storeID/product-types/:productTypeID", handler.Delete)
+	g := newStoreGuards(deps)
+	protected.Post("/stores/:storeID/product-types", g.manage, handler.Create)
+	protected.Get("/stores/:storeID/product-types", g.manage, handler.ListByStore)
+	protected.Patch("/stores/:storeID/product-types/:productTypeID", g.manage, handler.Update)
+	protected.Delete("/stores/:storeID/product-types/:productTypeID", g.manage, handler.Delete)
 }

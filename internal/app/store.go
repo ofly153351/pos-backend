@@ -24,13 +24,14 @@ func newStoreHandler(cfg config.Config, db *gorm.DB) store.Handler {
 
 func registerStoreRoutes(protected fiber.Router, deps appDependencies) {
 	handler := deps.storeHandler.(store.Handler)
+	g := newStoreGuards(deps)
 	protected.Get("/me/stores", handler.ListMyStores)
 	protected.Post("/stores", handler.Create)
 	protected.Get("/stores", handler.ListMyStores)
-	protected.Get("/stores/:storeID", handler.GetByID)
-	protected.Put("/stores/:storeID", handler.Update)
-	protected.Get("/stores/:storeID/bank-accounts", handler.ListBankAccounts)
-	protected.Post("/stores/:storeID/bank-accounts", handler.CreateBankAccount)
-	protected.Patch("/stores/:storeID/bank-accounts/:accountID", handler.UpdateBankAccount)
-	protected.Delete("/stores/:storeID/bank-accounts/:accountID", handler.DeleteBankAccount)
+	protected.Get("/stores/:storeID", g.manage, handler.GetByID)
+	protected.Put("/stores/:storeID", g.manage, handler.Update)
+	protected.Get("/stores/:storeID/bank-accounts", g.access, handler.ListBankAccounts)
+	protected.Post("/stores/:storeID/bank-accounts", g.manage, handler.CreateBankAccount)
+	protected.Patch("/stores/:storeID/bank-accounts/:accountID", g.manage, handler.UpdateBankAccount)
+	protected.Delete("/stores/:storeID/bank-accounts/:accountID", g.manage, handler.DeleteBankAccount)
 }

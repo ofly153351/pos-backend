@@ -495,11 +495,11 @@ func (s Service) Reopen(ctx context.Context, actor auth.Claims, receiptID string
 	if err != nil {
 		return WarehouseReceipt{}, err
 	}
-	allowed, err := s.repo.UserCanManageStore(ctx, current.StoreID, actor.UserID, actor.Role)
+	role, err := s.resolveStoreRole(ctx, current.StoreID, actor)
 	if err != nil {
 		return WarehouseReceipt{}, err
 	}
-	if !allowed {
+	if !auth.RoleSatisfies(role, auth.StoreLevelManage) {
 		return WarehouseReceipt{}, ErrReceiptReopenForbidden
 	}
 	if err := s.repo.ReopenToDraft(ctx, receiptID, actor.UserID); err != nil {
@@ -683,23 +683,53 @@ func (s Service) Print(ctx context.Context, actor auth.Claims, receiptID string)
 	}, nil
 }
 
+// resolveStoreRole returns the caller's active store role for storeID ("" if no
+// active membership). warehouse_receipt's storeID lives on the receipt resource
+// rather than in the URL path, so membership is resolved here instead of via the
+// store-authorization middleware; the role→level decision still uses
+// auth.RoleSatisfies (single source of truth).
+func (s Service) resolveStoreRole(ctx context.Context, storeID string, actor auth.Claims) (string, error) {
+	if actor.Role == auth.RolePlatformAdmin {
+		return auth.RoleOwner, nil
+	}
+	var member struct {
+		Role   string `gorm:"column:role"`
+		Status string `gorm:"column:status"`
+	}
+	err := s.db.WithContext(ctx).
+		Table("store_members").
+		Select("role, status").
+		Where("store_id = ? AND user_id = ?", storeID, actor.UserID).
+		Take(&member).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	if member.Status != "active" {
+		return "", nil
+	}
+	return member.Role, nil
+}
+
 func (s Service) ensureOperateAccess(ctx context.Context, actor auth.Claims, storeID string) error {
-	allowed, err := s.repo.UserCanOperateStore(ctx, storeID, actor.UserID, actor.Role)
+	role, err := s.resolveStoreRole(ctx, storeID, actor)
 	if err != nil {
 		return err
 	}
-	if !allowed {
+	if !auth.RoleSatisfies(role, auth.StoreLevelAccess) {
 		return ErrReceiptForbidden
 	}
 	return nil
 }
 
 func (s Service) ensureManageAccess(ctx context.Context, actor auth.Claims, storeID string, confirm bool) error {
-	allowed, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
+	role, err := s.resolveStoreRole(ctx, storeID, actor)
 	if err != nil {
 		return err
 	}
-	if !allowed {
+	if !auth.RoleSatisfies(role, auth.StoreLevelManage) {
 		if confirm {
 			return ErrReceiptConfirmForbidden
 		}

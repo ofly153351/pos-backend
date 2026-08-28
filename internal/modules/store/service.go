@@ -71,13 +71,6 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 }
 
 func (s Service) GetByID(ctx context.Context, actor auth.Claims, storeID string) (Store, error) {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Store{}, err
-	}
-	if !ok {
-		return Store{}, ErrStoreForbidden
-	}
 
 	return s.repo.GetByID(ctx, storeID)
 }
@@ -87,13 +80,6 @@ func (s Service) ListMyStores(ctx context.Context, actor auth.Claims) ([]Store, 
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateStoreRequest) (Store, error) {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil {
-		return Store{}, err
-	}
-	if !ok {
-		return Store{}, ErrStoreForbidden
-	}
 
 	current, err := s.repo.GetByID(ctx, storeID)
 	if err != nil {
@@ -180,24 +166,12 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 	return updated, nil
 }
 
-func (s Service) CanManageStore(ctx context.Context, actor auth.Claims, storeID string) (bool, error) {
-	return s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-}
-
 func (s Service) ListBankAccounts(ctx context.Context, actor auth.Claims, storeID string) ([]StoreBankAccount, error) {
 	// Cashiers need bank account details at checkout; allow any store member to list.
-	ok, err := s.repo.UserHasStoreAccess(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil || !ok {
-		return nil, ErrUnauthorized
-	}
 	return s.repo.ListBankAccounts(ctx, storeID)
 }
 
 func (s Service) CreateBankAccount(ctx context.Context, actor auth.Claims, storeID string, req CreateBankAccountRequest) (StoreBankAccount, error) {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil || !ok {
-		return StoreBankAccount{}, ErrUnauthorized
-	}
 	acc := StoreBankAccount{
 		ID:          idgen.Generate(idgen.PrefixStoreBankAccount),
 		StoreID:     storeID,
@@ -211,10 +185,6 @@ func (s Service) CreateBankAccount(ctx context.Context, actor auth.Claims, store
 }
 
 func (s Service) UpdateBankAccount(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateBankAccountRequest) (StoreBankAccount, error) {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil || !ok {
-		return StoreBankAccount{}, ErrUnauthorized
-	}
 	updates := map[string]interface{}{}
 	if req.BankName != nil {
 		updates["bank_name"] = strings.TrimSpace(*req.BankName)
@@ -235,9 +205,5 @@ func (s Service) UpdateBankAccount(ctx context.Context, actor auth.Claims, store
 }
 
 func (s Service) DeleteBankAccount(ctx context.Context, actor auth.Claims, storeID, id string) error {
-	ok, err := s.repo.UserCanManageStore(ctx, storeID, actor.UserID, actor.Role)
-	if err != nil || !ok {
-		return ErrUnauthorized
-	}
 	return s.repo.DeleteBankAccount(ctx, storeID, id)
 }

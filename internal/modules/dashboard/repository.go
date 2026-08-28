@@ -21,7 +21,6 @@ const saleVoidedStatus = "voided"
 const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
 
 type Repository interface {
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetSummary(ctx context.Context, storeID string, from, to time.Time) (Summary, error)
 	GetPaymentBreakdown(ctx context.Context, storeID string, from, to time.Time) ([]PaymentMethodStat, error)
 	GetTopProducts(ctx context.Context, storeID string, from, to time.Time, limit int) ([]TopProductStat, error)
@@ -35,21 +34,6 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) GetSummary(ctx context.Context, storeID string, from, to time.Time) (Summary, error) {
@@ -88,7 +72,9 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 // canonicalPaymentMethodSQL collapses legacy / duplicate payment_method values onto the
 // canonical channel keys so the breakdown shows one row per real channel, regardless of
 // which code path wrote the sale. Mirrors lib/payment-method.ts on the frontend:
-//   transfer → bank_transfer · qr → promptpay · credit_card|debit_card → card.
+//
+//	transfer → bank_transfer · qr → promptpay · credit_card|debit_card → card.
+//
 // `credit` (sold-on-credit) is intentionally kept distinct — it is not a tender.
 const canonicalPaymentMethodSQL = `CASE
 	WHEN NULLIF(TRIM(s.payment_method), '') IS NULL THEN 'unknown'

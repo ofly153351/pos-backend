@@ -10,7 +10,6 @@ import (
 )
 
 type Repository interface {
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 	GetKPI(ctx context.Context, storeID string) (KPI, error)
 	GetMovementChart(ctx context.Context, storeID string, from, to time.Time) ([]MovementChartPoint, error)
 	GetLowStockAlerts(ctx context.Context, storeID string, limit int) ([]LowStockAlert, error)
@@ -25,18 +24,6 @@ type PostgresRepository struct {
 
 func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 	return PostgresRepository{db: db}
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	return count > 0, err
 }
 
 // ── KPI ──────────────────────────────────────────────────────────────────────

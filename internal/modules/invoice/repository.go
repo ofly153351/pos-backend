@@ -20,7 +20,6 @@ type Repository interface {
 	AddPayment(ctx context.Context, storeID, invoiceID string, payment InvoicePayment) (Invoice, error)
 	MarkUnpaid(ctx context.Context, storeID, invoiceID, actorUserID, reason string, atTime time.Time) (Invoice, error)
 	GetPaymentProof(ctx context.Context, storeID, invoiceID, paymentID string) (InvoicePayment, error)
-	UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -411,21 +410,6 @@ func (r PostgresRepository) GetPaymentProof(ctx context.Context, storeID, invoic
 		return InvoicePayment{}, err
 	}
 	return payment, nil
-}
-
-func (r PostgresRepository) UserCanOperateStore(ctx context.Context, storeID, userID, role string) (bool, error) {
-	if role == "platform_admin" {
-		return true, nil
-	}
-	var count int64
-	err := r.db.WithContext(ctx).
-		Table("store_members").
-		Where("store_id = ? AND user_id = ? AND role IN ? AND status <> 'suspended'", storeID, userID, []string{"owner", "manager", "cashier"}).
-		Count(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count > 0, nil
 }
 
 func (r PostgresRepository) lockProductForInvoice(ctx context.Context, tx *gorm.DB, storeID, productID string) (productSnapshot, error) {
