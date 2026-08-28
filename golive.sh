@@ -116,6 +116,26 @@ done
 ok "PostgreSQL ready"
 ok "MinIO ready"
 
+# ── 2.5 Restored-DB guard: empty schema_migrations ledger ─────────────────
+# A DB restored from a dump has an EMPTY schema_migrations ledger, so the
+# backend's auto-migrate re-runs init-db/*.sql in order and dies on 001_schema.sql
+# ("cannot drop columns from view" — later migrations already extended the views).
+# Fill the ledger for exactly the migrations the DB already reflects; genuinely
+# new migration files stay unrecorded so the backend applies them on boot.
+# No-op on a fresh DB (schema_migrations doesn't exist yet) or when the ledger
+# already has entries.
+LEDGER_COUNT=$(docker compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null | tr -d '[:space:]')
+if [ "${LEDGER_COUNT:-x}" = "0" ]; then
+  info "schema_migrations ว่าง (DB ถูก restore) — เตรียม ledger..."
+  if command -v uv >/dev/null 2>&1; then
+    uv run scripts/mark_migrations_applied.py
+  else
+    warn "ไม่พบ uv — ใช้ python3 แทน (สคริปต์เป็น stdlib)"
+    python3 scripts/mark_migrations_applied.py
+  fi
+  ok "migration ledger พร้อม — backend จะ apply เฉพาะ migration ใหม่"
+fi
+
 # ── 3. Build Go backend ──────────────────────────────────────────────────────
 step "Build Go backend"
 cd "$BACKEND_DIR"
