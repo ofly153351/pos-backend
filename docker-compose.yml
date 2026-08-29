@@ -13,7 +13,7 @@ services:
     ports:
       # Bind PostgreSQL to localhost only. This avoids Windows hosts blocking
       # broad 0.0.0.0 binds for the default Postgres port.
-      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+      - "0.0.0.0:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
