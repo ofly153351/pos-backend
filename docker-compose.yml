@@ -11,9 +11,9 @@ services:
       # encoding (see init-db README / handoff: recreate the volume to fix existing data).
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     ports:
-      # Bind PostgreSQL to localhost only. This avoids Windows hosts blocking
-      # broad 0.0.0.0 binds for the default Postgres port.
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      # Expose PostgreSQL on all interfaces for direct Navicat access.
+      # NOTE: reachable from the public network — keep 5432 firewalled (ufw) to trusted IPs.
+      - "0.0.0.0:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
