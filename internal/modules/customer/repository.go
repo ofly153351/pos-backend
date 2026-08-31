@@ -115,7 +115,15 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string) ([]
 		Where("c.store_id = ?", storeID).
 		Order("c.created_at DESC").
 		Scan(&items).Error
-	return items, err
+	if err != nil {
+		return nil, err
+	}
+	// Empty store → nil slice → marshals as JSON null, which crashes frontend
+	// consumers that default only against undefined (customers.map). Return [].
+	if items == nil {
+		items = []CustomerListItem{}
+	}
+	return items, nil
 }
 
 // nextMemberCode returns the next per-store member code in the "M00001" series,
@@ -234,7 +242,13 @@ func (r PostgresRepository) ListLevelDiscounts(ctx context.Context, storeID stri
 		Where("store_id = ?", storeID).
 		Order("level ASC").
 		Find(&items).Error
-	return items, err
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []LevelDiscount{}
+	}
+	return items, nil
 }
 
 func (r PostgresRepository) UpsertLevelDiscount(ctx context.Context, item LevelDiscount) (LevelDiscount, error) {
@@ -266,7 +280,13 @@ func (r PostgresRepository) ListShippingAddresses(ctx context.Context, customerI
 		Where("customer_id = ?", customerID).
 		Order("created_at ASC").
 		Find(&items).Error
-	return items, err
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []CustomerShippingAddress{}
+	}
+	return items, nil
 }
 
 func (r PostgresRepository) CreateShippingAddress(ctx context.Context, addr CustomerShippingAddress) (CustomerShippingAddress, error) {
