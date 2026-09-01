@@ -241,6 +241,7 @@ func (r PostgresRepository) ListPOs(ctx context.Context, storeID string) ([]Purc
 	err := r.db.WithContext(ctx).
 		Model(&PurchaseOrder{}).
 		Preload("Supplier").
+		Preload("Items").
 		Where("store_id = ?", storeID).
 		Order("created_at DESC").
 		Find(&items).Error
