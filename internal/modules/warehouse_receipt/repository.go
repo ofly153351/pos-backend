@@ -720,17 +720,59 @@ func (r PostgresRepository) ComputePreview(ctx context.Context, receiptID string
 		return qty, nil
 	}
 
+	// Confirmed receipts already moved their stock: the CURRENT stocks row includes
+	// this receipt's own contribution, so "current + qty" would double-count (POS-005:
+	// preview showed 20 -> 40 after confirm while the movement ledger logged +20 once).
+	// Instead reconstruct the at-confirm picture from the append-only movement ledger:
+	// after  = current stock minus the net of every movement at this location that
+	//          happened AFTER this receipt's confirm (sales, transfers, adjustments,
+	//          later receipts — transfers contribute both legs at this location),
+	// before = after − qty.
+	// Draft/pending/cancelled receipts have NOT touched stock, so current stock is the
+	// correct "before" and qty is added on top, as it always was.
+	var receiptRow struct {
+		Status      string     `gorm:"column:status"`
+		ConfirmedAt *time.Time `gorm:"column:confirmed_at"`
+	}
+	if err := r.db.WithContext(ctx).
+		Table("warehouse_receipts").
+		Select("status, confirmed_at").
+		Where("id = ?", receiptID).
+		Take(&receiptRow).Error; err != nil {
+		return nil, err
+	}
+	confirmedAt := receiptRow.ConfirmedAt
+	if confirmedAt != nil {
+		// Normalize to UTC so the created_at > ? comparison is timezone-safe.
+		utc := confirmedAt.UTC()
+		confirmedAt = &utc
+	}
+	fromLedger := receiptRow.Status == string(ReceiptStatusConfirmed)
+
 	preview := make([]StockImpactPreview, 0, len(items))
 	for _, item := range items {
-		qty, err := lookupStock(item.ProductID, item.LocationID)
-		if err != nil {
-			return nil, err
-		}
-		beforeValue := roundMoney(float64(qty) * item.UnitPrice)
-		afterQty := qty
-		if item.Quantity > 0 {
+		var beforeQty, afterQty int
+		if fromLedger {
+			// Effective location (persisted at confirm) with fallback to the
+			// pre-resolve location for receipts confirmed before Phase W3.
+			locID := strings.TrimSpace(item.LocationID)
+			if err := r.db.WithContext(ctx).Raw(`
+				SELECT COALESCE((SELECT quantity FROM stocks WHERE product_id = ? AND location_id = ? LIMIT 1), 0)
+				     - COALESCE((SELECT SUM(quantity_change) FROM stock_movements
+				                 WHERE product_id = ? AND location_id = ? AND created_at > ?), 0)`,
+				item.ProductID, locID, item.ProductID, locID, confirmedAt).Scan(&afterQty).Error; err != nil {
+				return nil, err
+			}
+			beforeQty = afterQty - item.Quantity
+		} else {
+			qty, err := lookupStock(item.ProductID, item.LocationID)
+			if err != nil {
+				return nil, err
+			}
+			beforeQty = qty
 			afterQty = qty + item.Quantity
 		}
+		beforeValue := roundMoney(float64(beforeQty) * item.UnitPrice)
 		afterValue := roundMoney(float64(afterQty) * item.UnitPrice)
 		preview = append(preview, StockImpactPreview{
 			ItemID:         item.ID,
@@ -739,7 +781,7 @@ func (r PostgresRepository) ComputePreview(ctx context.Context, receiptID string
 			LocationID:     item.LocationID,
 			LocationName:   item.LocationName,
 			Quantity:       item.Quantity,
-			BeforeQuantity: qty,
+			BeforeQuantity: beforeQty,
 			AfterQuantity:  afterQty,
 			BeforeValue:    beforeValue,
 			AfterValue:     afterValue,
