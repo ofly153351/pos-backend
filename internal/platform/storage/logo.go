@@ -93,8 +93,11 @@ type MinIOLogoStorage struct {
 	bucket    string
 	publicURL string
 	subDir    string
-	once      sync.Once
-	onceErr   error
+
+	// ensureBucket bookkeeping. Only a successful bucket check is cached; a
+	// failure (e.g. MinIO down when the API started) is retried on every call.
+	mu       sync.Mutex
+	verified bool
 }
 
 func NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL, subDir string) *MinIOLogoStorage {
@@ -152,18 +155,29 @@ func (s *MinIOLogoStorage) DeleteLogo(logoURL string) error {
 	return s.client.RemoveObject(context.Background(), s.bucket, objectPath, minio.RemoveObjectOptions{})
 }
 
+// ensureBucket lazily creates the bucket on first use. A failure is NOT cached:
+// MinIO may come up after the API server starts (docker compose up order), so a
+// once-failed attempt must retry on the next call. Only success is remembered.
 func (s *MinIOLogoStorage) ensureBucket(ctx context.Context) error {
-	s.once.Do(func() {
-		exists, err := s.client.BucketExists(ctx, s.bucket)
-		if err != nil {
-			s.onceErr = err
-			return
+	s.mu.Lock()
+	verified := s.verified
+	s.mu.Unlock()
+	if verified {
+		return nil
+	}
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return err // transient (MinIO down?) — retry on next call
+	}
+	if !exists {
+		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
+			return err // transient — retry on next call
 		}
-		if !exists {
-			s.onceErr = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{})
-		}
-	})
-	return s.onceErr
+	}
+	s.mu.Lock()
+	s.verified = true
+	s.mu.Unlock()
+	return nil
 }
 
 // ── safeAssetPath ─────────────────────────────────────────────────────────────
