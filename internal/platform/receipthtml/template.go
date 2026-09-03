@@ -273,8 +273,11 @@ const receiptTpl = `<!DOCTYPE html>
   <hr class="divider"/>
 
   <div class="center">
-    <div class="doc-title">ใบเสร็จรับเงิน / ใบกำกับภาษีอย่างย่อ</div>
-    <div class="doc-title-en">Receipt / Abbreviated Tax Invoice</div>
+    {{/* C-01: the doc title follows the ACTUAL VAT carried by the sale (same gate as
+         the VAT rows below). A zero-VAT receipt is a plain receipt — never an
+         "abbreviated tax invoice" (which would be an invalid tax document). */}}
+    <div class="doc-title">{{if gt .Sale.VatAmount 0.0}}ใบเสร็จรับเงิน / ใบกำกับภาษีอย่างย่อ{{else}}ใบเสร็จรับเงิน{{end}}</div>
+    <div class="doc-title-en">{{if gt .Sale.VatAmount 0.0}}Receipt / Abbreviated Tax Invoice{{else}}Receipt{{end}}</div>
   </div>
 
   <hr class="divider"/>

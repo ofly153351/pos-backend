@@ -54,8 +54,9 @@ func TestRenderReceipt_NewLayout(t *testing.T) {
 
 	mustContain := []string{
 		"POS Demo Store",
-		"ใบเสร็จรับเงิน / ใบกำกับภาษีอย่างย่อ",
-		"Receipt / Abbreviated Tax Invoice",
+		// zero-VAT sample (VatAmount 0) → plain receipt title, never "ใบกำกับภาษี" (C-01)
+		`<div class="doc-title">ใบเสร็จรับเงิน</div>`,
+		`<div class="doc-title-en">Receipt</div>`,
 		"1. แก๊ส 15kg",     // numbered item
 		"2. โค้ก 1.25L",
 		"1 x 350.00",       // qty x price line
@@ -111,6 +112,11 @@ func TestRenderReceipt_ExclusiveVAT(t *testing.T) {
 	if !strings.Contains(out, "VAT 7%") {
 		t.Error("exclusive mode should show 'VAT 7%'")
 	}
+	// This sale CARRIES VAT (27.48) → the abbreviated-tax-invoice title is correct here (C-01).
+	if !strings.Contains(out, "ใบเสร็จรับเงิน / ใบกำกับภาษีอย่างย่อ") ||
+		!strings.Contains(out, "Receipt / Abbreviated Tax Invoice") {
+		t.Error("VAT-carrying receipt should print the abbreviated-tax-invoice title")
+	}
 }
 
 func TestRenderReceipt_TotalQtyAutofill(t *testing.T) {
@@ -140,9 +146,9 @@ func TestRenderReceipt_PaymentLabelAutofill(t *testing.T) {
 func TestPaymentLabel(t *testing.T) {
 	cases := map[string]string{
 		"cash":          "เงินสด",
-		"promptpay":     "พร้อมเพย์ / QR",
-		"qr":            "พร้อมเพย์ / QR",
-		"transfer":      "พร้อมเพย์ / QR",
+		"promptpay":     "พร้อมเพย์ (QR)",
+		"qr":            "พร้อมเพย์ (QR)",
+		"transfer":      "โอนเงิน",
 		"bank_transfer": "โอนเงิน",
 		"card":          "บัตรเครดิต / เดบิต",
 		"":              "-",

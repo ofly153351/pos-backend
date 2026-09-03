@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"pos-backend/internal/modules/auth"
@@ -56,6 +57,35 @@ func (s Service) loadSettings(ctx context.Context, storeID string) ReceiptSettin
 		return defaultSettings()
 	}
 	return sv
+}
+
+// effectiveTaxPolicy resolves the immutable VAT snapshot for a checkout from the
+// store's receipt settings. The request only carries the cashier's per-bill
+// on/off intent: vat_percent == 0 means "VAT off for this bill"; a non-zero value
+// or a nil field (bare API call — no toggle) means "VAT on". The RATE and the
+// inclusive/exclusive MODE are always taken from settings — tax_mode "none"
+// forces VAT off regardless of the toggle, and an invalid/missing tax_mode falls
+// back to exclusive.
+func effectiveTaxPolicy(sv ReceiptSettingsView, reqVATPercent *float64) (included bool, percent float64) {
+	toggleOn := reqVATPercent == nil || *reqVATPercent > 0
+	rate := sv.VatRate
+	if rate < 0 {
+		rate = 0
+	}
+	mode := sv.TaxMode
+	included = false
+	switch mode {
+	case "inclusive":
+		included = true
+	case "none":
+		rate = 0
+	default: // "exclusive" and any unknown value
+		mode = "exclusive"
+	}
+	if !toggleOn || rate == 0 {
+		return false, 0
+	}
+	return included, rate
 }
 
 func (s Service) GenerateReceiptHTML(ctx context.Context, actor auth.Claims, storeID, saleID string) ([]byte, error) {
@@ -130,9 +160,9 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 		})
 	}
 
-	soldAt := s.SoldAt.In(time.Local)
+	soldAt := s.SoldAt.In(bangkokLocation())
 	if soldAt.IsZero() {
-		soldAt = time.Now()
+		soldAt = time.Now().In(bangkokLocation())
 	}
 
 	customerName := strings.TrimSpace(s.CustomerName)
@@ -212,6 +242,22 @@ func renderSaleAsReceiptHTML(s Sale, sv ReceiptSettingsView) ([]byte, error) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// bangkokLocation returns the Asia/Bangkok location used for ALL receipt-side
+// time formatting. Receipts must print the store's local wall time regardless of
+// the server's own TZ (C-01: a UTC/NTP-drifted host must not shift the printed
+// time). Falls back to a fixed +07 offset when the tzdata database is missing.
+var bangkokLoc = sync.OnceValue(func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Bangkok")
+	if err != nil {
+		return time.FixedZone("ICT", 7*60*60)
+	}
+	return loc
+})
+
+func bangkokLocation() *time.Location {
+	return bangkokLoc()
+}
 
 func formatThaiDate(t time.Time) string {
 	return fmt.Sprintf("%d/%d/%d", t.Day(), int(t.Month()), t.Year()+543)
