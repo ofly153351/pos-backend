@@ -28,6 +28,24 @@ var (
 	ErrInvalidConversion = errors.New("conversion not allowed for this document type")
 )
 
+// fieldValidationError carries field-level failures so the handler can answer
+// HTTP 422 with indexed fields (e.g. items[2].unit_price) instead of a generic
+// 400. It is the single validation failure carrier for CreateDocument.
+type fieldValidationError struct {
+	fields []validationField
+}
+
+type validationField struct {
+	field   string
+	message string
+}
+
+func (e *fieldValidationError) Error() string { return "invalid document line(s)" }
+
+func newFieldValidation(fields ...validationField) error {
+	return &fieldValidationError{fields: fields}
+}
+
 // allowedConversions is the document workflow matrix: which target types a given
 // source type may be converted into. Arbitrary conversions that break the
 // business workflow are rejected (ErrInvalidConversion).
@@ -124,9 +142,59 @@ func (s Service) GetDocument(ctx context.Context, actor auth.Claims, storeID, id
 	return doc, nil
 }
 
+// validateCreateLines enforces the document line business rules server-side
+// (H-03): every line needs a product OR an approved description, a positive
+// quantity, a non-negative unit price, a coherent discount and a supported VAT
+// rate. Failures return a fieldValidationError with indexed field names
+// (items[i].unit_price) so the handler can answer 422.
+func validateCreateLines(req CreateDocumentRequest) error {
+	var fields []validationField
+	for i, inp := range req.Items {
+		desc := strings.TrimSpace(inp.Description)
+		hasProduct := inp.ProductID != nil && strings.TrimSpace(*inp.ProductID) != ""
+		// A valid line is a real product or a free-text description line. A row
+		// with neither (stale draft / leftover) is rejected. quantity and price
+		// must be valid on both kinds.
+		if !hasProduct && desc == "" {
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].description", i), message: "description or product is required"})
+		}
+		if inp.Quantity <= 0 {
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].quantity", i), message: "quantity must be greater than 0"})
+		}
+		if inp.UnitPrice < 0 {
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].unit_price", i), message: "unit price cannot be negative"})
+		}
+		switch inp.DiscountType {
+		case "", "PERCENT", "AMOUNT":
+		default:
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].discount_type", i), message: "discount type must be PERCENT or AMOUNT"})
+		}
+		if inp.DiscountType == "PERCENT" && (inp.DiscountValue < 0 || inp.DiscountValue > 100) {
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].discount_value", i), message: "percent discount must be between 0 and 100"})
+		}
+		if inp.DiscountType == "AMOUNT" && inp.DiscountValue < 0 {
+			fields = append(fields, validationField{field: fmt.Sprintf("items[%d].discount_value", i), message: "discount cannot be negative"})
+		}
+	}
+	if req.VatRate < 0 || req.VatRate > 100 {
+		fields = append(fields, validationField{field: "vat_rate", message: "vat_rate must be between 0 and 100"})
+	}
+	if len(fields) > 0 {
+		return newFieldValidation(fields...)
+	}
+	return nil
+}
+
 func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID string, req CreateDocumentRequest) (*Document, error) {
 	if len(req.Items) == 0 {
 		return nil, ErrNoItems
+	}
+
+	// H-03 server-side per-line validation. Frontend guards are UX only — the
+	// server is the authority: reject empty/stale draft rows, non-positive
+	// quantity, negative price, malformed discounts and unsupported VAT.
+	if err := validateCreateLines(req); err != nil {
+		return nil, err
 	}
 
 	// Resolve customer (snapshot name + address + phone for §86/4 compliance)

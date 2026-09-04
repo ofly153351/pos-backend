@@ -291,6 +291,16 @@ func (h Handler) BulkAction(c *fiber.Ctx) error {
 }
 
 func writeError(c *fiber.Ctx, err error) error {
+	// Field-level validation (H-03): answer 422 with indexed fields such as
+	// items[0].unit_price so the client can surface per-line errors.
+	var fieldErr *fieldValidationError
+	if errors.As(err, &fieldErr) {
+		fields := make([]httpx.FieldError, 0, len(fieldErr.fields))
+		for _, f := range fieldErr.fields {
+			fields = append(fields, httpx.FieldError{Field: f.field, Message: f.message})
+		}
+		return httpx.ValidationError(c, fields...)
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return httpx.Error(c, fiber.StatusNotFound, "not found", err.Error())
