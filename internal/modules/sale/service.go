@@ -73,11 +73,10 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	}
 	// C-01: the effective tax policy is resolved from the store's receipt settings
 	// (tax_mode + vat_rate) at checkout time and snapshotted immutably onto the sale.
-	// The request may only carry the cashier's per-bill on/off intent: a zero
-	// vat_percent means VAT is toggled off for this bill; any non-zero value means
-	// VAT is on — but the RATE and the inclusive/exclusive MODE always come from
-	// settings, never from the client (money policy is server-authoritative).
-	vatIncluded, vatPercent := effectiveTaxPolicy(s.loadSettings(ctx, storeID), req.VATPercent)
+	// VAT on/off, rate and inclusive/exclusive mode all come from the persisted
+	// store receipt settings. The request is kept for backwards-compatible payloads
+	// but must not be trusted to disable/enable VAT.
+	vatIncluded, vatPercent := effectiveTaxPolicy(s.loadSettings(ctx, storeID))
 	sale.VATIncluded = vatIncluded
 	sale.VATPercent = vatPercent
 

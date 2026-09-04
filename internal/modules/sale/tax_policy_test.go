@@ -7,88 +7,58 @@ import (
 )
 
 // C-01 regression: the sale's VAT snapshot must be resolved from the store's
-// receipt settings at checkout, with the request carrying only the cashier's
-// per-bill on/off intent (zero = off, non-zero = on).
+// receipt settings at checkout. VAT on/off comes from DB-backed tax_mode, not
+// transient client state or request payloads.
 func TestEffectiveTaxPolicy(t *testing.T) {
-	seven := 7.0
-	zero := 0.0
 	cases := []struct {
-		name       string
-		settings   ReceiptSettingsView
-		reqPercent *float64
-		wantInc    bool
-		wantPct    float64
+		name     string
+		settings ReceiptSettingsView
+		wantInc  bool
+		wantPct  float64
 	}{
 		{
-			name:       "QA case: exclusive 7% settings, frontend sends vat_percent 0 (toggle off)",
-			settings:   ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
-			reqPercent: &zero,
-			wantInc:    false,
-			wantPct:    0,
+			name:     "exclusive 7% settings enable VAT from DB",
+			settings: ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
+			wantInc:  false,
+			wantPct:  7,
 		},
 		{
-			name:       "exclusive 7% settings, VAT toggled on → rate comes from settings",
-			settings:   ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
-			reqPercent: &seven,
-			wantInc:    false,
-			wantPct:    7,
+			name:     "tax_mode none disables VAT from DB",
+			settings: ReceiptSettingsView{TaxMode: "none", VatRate: 7},
+			wantInc:  false,
+			wantPct:  0,
 		},
 		{
-			name:       "nil vat_percent (bare API sale) keeps the settings default: VAT on",
-			settings:   ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
-			reqPercent: nil,
-			wantInc:    false,
-			wantPct:    7,
+			name:     "inclusive settings enable VAT-inclusive snapshot from DB",
+			settings: ReceiptSettingsView{TaxMode: "inclusive", VatRate: 7},
+			wantInc:  true,
+			wantPct:  7,
 		},
 		{
-			name:       "inclusive settings → VAT-inclusive snapshot when toggled on",
-			settings:   ReceiptSettingsView{TaxMode: "inclusive", VatRate: 7},
-			reqPercent: &seven,
-			wantInc:    true,
-			wantPct:    7,
+			name:     "unknown tax_mode falls back to exclusive",
+			settings: ReceiptSettingsView{TaxMode: "bogus", VatRate: 7},
+			wantInc:  false,
+			wantPct:  7,
 		},
 		{
-			name:       "tax_mode none forces VAT off even when the toggle is on",
-			settings:   ReceiptSettingsView{TaxMode: "none", VatRate: 7},
-			reqPercent: &seven,
-			wantInc:    false,
-			wantPct:    0,
+			name:     "settings rate zero keeps VAT off",
+			settings: ReceiptSettingsView{TaxMode: "inclusive", VatRate: 0},
+			wantInc:  false,
+			wantPct:  0,
 		},
 		{
-			name:       "unknown tax_mode falls back to exclusive",
-			settings:   ReceiptSettingsView{TaxMode: "bogus", VatRate: 7},
-			reqPercent: &seven,
-			wantInc:    false,
-			wantPct:    7,
-		},
-		{
-			name:       "client cannot smuggle a custom rate: vat_percent 999 still applies the settings rate",
-			settings:   ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
-			reqPercent: func() *float64 { v := 999.0; return &v }(),
-			wantInc:    false,
-			wantPct:    7,
-		},
-		{
-			name:       "negative vat_percent is clamped by validation upstream; policy treats it as off",
-			settings:   ReceiptSettingsView{TaxMode: "exclusive", VatRate: 7},
-			reqPercent: func() *float64 { v := -1.0; return &v }(),
-			wantInc:    false,
-			wantPct:    0,
-		},
-		{
-			name:       "settings rate zero keeps VAT off even when toggled on",
-			settings:   ReceiptSettingsView{TaxMode: "inclusive", VatRate: 0},
-			reqPercent: &seven,
-			wantInc:    false,
-			wantPct:    0,
+			name:     "negative settings rate keeps VAT off",
+			settings: ReceiptSettingsView{TaxMode: "exclusive", VatRate: -1},
+			wantInc:  false,
+			wantPct:  0,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotInc, gotPct := effectiveTaxPolicy(tc.settings, tc.reqPercent)
+			gotInc, gotPct := effectiveTaxPolicy(tc.settings)
 			if gotInc != tc.wantInc || gotPct != tc.wantPct {
-				t.Fatalf("effectiveTaxPolicy(%+v, %v) = (%v, %v), want (%v, %v)",
-					tc.settings, tc.reqPercent, gotInc, gotPct, tc.wantInc, tc.wantPct)
+				t.Fatalf("effectiveTaxPolicy(%+v) = (%v, %v), want (%v, %v)",
+					tc.settings, gotInc, gotPct, tc.wantInc, tc.wantPct)
 			}
 		})
 	}
@@ -107,16 +77,16 @@ func TestReceiptUsesBangkokTime(t *testing.T) {
 	defer func() { time.Local = origLocal }()
 
 	html, err := renderSaleAsReceiptHTML(Sale{
-		SaleNumber:      "SALE-TEST",
-		SoldAt:          soldAt,
-		PaymentMethod:   "cash",
-		PaidAmount:      214,
-		TotalAmount:     214,
-		SubtotalAmount:  200,
-		VATIncluded:     false,
-		VATPercent:      7,
-		VATAmount:       14,
-		Items:           []SaleItem{{ProductName: "ทดสอบ", Quantity: 2, UnitPrice: 107, LineTotal: 214}},
+		SaleNumber:     "SALE-TEST",
+		SoldAt:         soldAt,
+		PaymentMethod:  "cash",
+		PaidAmount:     214,
+		TotalAmount:    214,
+		SubtotalAmount: 200,
+		VATIncluded:    false,
+		VATPercent:     7,
+		VATAmount:      14,
+		Items:          []SaleItem{{ProductName: "ทดสอบ", Quantity: 2, UnitPrice: 107, LineTotal: 214}},
 	}, defaultSettings())
 	if err != nil {
 		t.Fatalf("renderSaleAsReceiptHTML: %v", err)

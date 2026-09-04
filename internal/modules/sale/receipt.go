@@ -43,7 +43,7 @@ func defaultSettings() ReceiptSettingsView {
 		ShowStoreName: true, ShowAddress: true, ShowPhone: true, ShowTaxId: true,
 		TaxMode: "exclusive", VatRate: 7, TaxLabel: "ภาษีมูลค่าเพิ่ม (VAT 7%)",
 		FooterText: "ขอบคุณที่ใช้บริการ",
-		ShowQr: true, QrSize: "medium", PaperSize: "80mm",
+		ShowQr:     true, QrSize: "medium", PaperSize: "80mm",
 		RoundAmount: true,
 	}
 }
@@ -60,14 +60,11 @@ func (s Service) loadSettings(ctx context.Context, storeID string) ReceiptSettin
 }
 
 // effectiveTaxPolicy resolves the immutable VAT snapshot for a checkout from the
-// store's receipt settings. The request only carries the cashier's per-bill
-// on/off intent: vat_percent == 0 means "VAT off for this bill"; a non-zero value
-// or a nil field (bare API call — no toggle) means "VAT on". The RATE and the
-// inclusive/exclusive MODE are always taken from settings — tax_mode "none"
-// forces VAT off regardless of the toggle, and an invalid/missing tax_mode falls
-// back to exclusive.
-func effectiveTaxPolicy(sv ReceiptSettingsView, reqVATPercent *float64) (included bool, percent float64) {
-	toggleOn := reqVATPercent == nil || *reqVATPercent > 0
+// store's receipt settings. VAT on/off is persisted in tax_mode: "none" is off,
+// while "exclusive"/"inclusive" are on with the configured vat_rate. Client
+// request fields are not part of this policy because checkout tax must be
+// server-authoritative and DB-backed.
+func effectiveTaxPolicy(sv ReceiptSettingsView) (included bool, percent float64) {
 	rate := sv.VatRate
 	if rate < 0 {
 		rate = 0
@@ -82,7 +79,7 @@ func effectiveTaxPolicy(sv ReceiptSettingsView, reqVATPercent *float64) (include
 	default: // "exclusive" and any unknown value
 		mode = "exclusive"
 	}
-	if !toggleOn || rate == 0 {
+	if rate == 0 {
 		return false, 0
 	}
 	return included, rate
@@ -335,4 +332,3 @@ func fallback(v, d string) string {
 	}
 	return v
 }
-
