@@ -401,16 +401,24 @@ func (r PostgresRepository) GetTree(ctx context.Context, storeID, warehouseID st
 }
 
 type productAtLocationRow struct {
-	ProductID   string `gorm:"column:product_id"`
-	ProductName string `gorm:"column:product_name"`
-	SKU         string `gorm:"column:sku"`
-	Quantity    int    `gorm:"column:quantity"`
+	ProductID   string  `gorm:"column:product_id"`
+	ProductName string  `gorm:"column:product_name"`
+	SKU         string  `gorm:"column:sku"`
+	Barcode     string  `gorm:"column:barcode"`
+	Quantity    int     `gorm:"column:quantity"`
+	MinStock    int     `gorm:"column:min_stock"`
+	CostPrice   float64 `gorm:"column:cost_price"`
+	BasePrice   float64 `gorm:"column:base_price"`
+	CategoryID  string  `gorm:"column:category_id"`
 }
 
 func (r PostgresRepository) GetProducts(ctx context.Context, storeID, locationID string, page, limit int) ([]LocationProduct, int64, error) {
 	q := r.db.WithContext(ctx).
 		Table("stocks").
-		Select("stocks.product_id, products.name AS product_name, COALESCE(products.sku, '') AS sku, stocks.quantity").
+		Select("stocks.product_id, products.name AS product_name, COALESCE(products.sku, '') AS sku, "+
+			"COALESCE(products.barcode, '') AS barcode, stocks.quantity, COALESCE(products.min_stock, 0) AS min_stock, "+
+			"COALESCE(products.cost_price, 0) AS cost_price, COALESCE(products.base_price, 0) AS base_price, "+
+			"COALESCE(products.product_type_id, '') AS category_id").
 		Joins("LEFT JOIN products ON products.id = stocks.product_id").
 		Where("stocks.store_id = ? AND stocks.location_id = ? AND stocks.quantity > 0 AND products.deleted_at IS NULL", storeID, locationID)
 
@@ -437,7 +445,12 @@ func (r PostgresRepository) GetProducts(ctx context.Context, storeID, locationID
 			ProductID:   row.ProductID,
 			ProductName: row.ProductName,
 			SKU:         row.SKU,
+			Barcode:     row.Barcode,
 			Quantity:    row.Quantity,
+			MinStock:    row.MinStock,
+			CostPrice:   row.CostPrice,
+			BasePrice:   row.BasePrice,
+			CategoryID:  row.CategoryID,
 		})
 	}
 	return products, total, nil

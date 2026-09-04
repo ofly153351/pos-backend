@@ -79,10 +79,18 @@ type TreeZone struct {
 	Floors []TreeFloor `json:"floors"`
 }
 
-// LocationProduct is a product stored at a location.
+// LocationProduct is a product stored at a location, with the master-data
+// fields a stock-count sheet needs (barcode / min_stock / cost basis /
+// category) so clients never have to join the whole catalog client-side.
+// Quantity is stocks.quantity at this location; rows exist only when > 0.
 type LocationProduct struct {
-	ProductID   string `json:"product_id"`
-	ProductName string `json:"product_name"`
-	SKU         string `json:"sku,omitempty"`
-	Quantity    int    `json:"quantity"`
+	ProductID   string  `json:"product_id"`
+	ProductName string  `json:"product_name"`
+	SKU         string  `json:"sku,omitempty"`
+	Barcode     string  `json:"barcode,omitempty"`
+	Quantity    int     `json:"quantity"`
+	MinStock    int     `json:"min_stock"`
+	CostPrice   float64 `json:"cost_price"`
+	BasePrice   float64 `json:"base_price"`
+	CategoryID  string  `json:"category_id,omitempty"`
 }
