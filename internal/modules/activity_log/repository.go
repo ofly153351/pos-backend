@@ -82,11 +82,21 @@ func (r Repository) List(ctx context.Context, q ListQuery) ([]ActivityLog, int64
 	}
 	// Free-text search — deliberately limited to business-facing columns. Never
 	// path/ip/session ids (per spec: owners search by product, user, action — not IDs).
+	// Product-name/SKU/barcode hits (H-05, 2026-09-04): activity rows carry only the
+	// product's resource_id, so match module='product' rows whose resource is a live
+	// product whose name/sku/barcode contains the query. Soft-deleted products stay
+	// searchable (history must survive the product being archived).
 	if s := strings.TrimSpace(q.Search); s != "" {
 		like := "%" + s + "%"
 		query = query.Where(
-			"user_name ILIKE ? OR module ILIKE ? OR action ILIKE ? OR resource_id ILIKE ?",
-			like, like, like, like,
+			`user_name ILIKE ? OR module ILIKE ? OR action ILIKE ? OR resource_id ILIKE ?
+			 OR (module = 'product' AND EXISTS (
+			   SELECT 1 FROM products p
+			   WHERE p.id = activity_logs.resource_id
+			     AND p.store_id = activity_logs.store_id
+			     AND (p.name ILIKE ? OR p.sku ILIKE ? OR p.barcode ILIKE ?)
+			 ))`,
+			like, like, like, like, like, like, like,
 		)
 	}
 	if from, ok := parseFilterDate(q.DateFrom); ok {
