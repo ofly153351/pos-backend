@@ -51,7 +51,7 @@ func TestBuildWarehouseInventory_SplitTotalAndSummary(t *testing.T) {
 		// น้ำแข็ง: zero (#9 zero → out)
 		{ProductID: "p4", ProductName: "น้ำแข็งหลอด", SKU: "ICE", CostPrice: 25, MinStock: 5, ReadyStock: 0, StorageStock: 0},
 	}
-	summary, items, total := buildWarehouseInventory(rows, WarehouseInventoryQuery{Page: 1, PageSize: 20})
+	summary, items, total := buildInventory(rows, WarehouseInventoryQuery{Page: 1, PageSize: 20})
 
 	if total != 4 || len(items) != 4 {
 		t.Fatalf("expected 4 items, got total=%d len=%d", total, len(items))
@@ -94,6 +94,41 @@ func TestBuildWarehouseInventory_SplitTotalAndSummary(t *testing.T) {
 	}
 }
 
+func TestBuildWarehouseInventory_StoreWideReady(t *testing.T) {
+	// NEW semantics (user B 2026-09-04): พร้อมขาย comes from the store-wide sale-point
+	// map, NOT the row's own warehouse sale. A product stocked only in this (storage)
+	// warehouse with no counter stock anywhere reports ready 0; a product that also
+	// sits at a sale point of ANOTHER warehouse reports that counter quantity here.
+	rows := []WarehouseStockRow{
+		{ProductID: "shelf", ProductName: "ของบนชั้น", StorageStock: 30, MinStock: 5},
+		{ProductID: "both", ProductName: "ของสองที่", StorageStock: 10, MinStock: 5},
+	}
+	sale := map[string]int{"both": 12} // counter (จุดขาย) ของอีกคลัง
+	summary, items, total := buildWarehouseInventory(rows, sale, WarehouseInventoryQuery{Page: 1, PageSize: 20})
+
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	byID := map[string]WarehouseInventoryProduct{}
+	for _, it := range items {
+		byID[it.ProductID] = it
+	}
+	if got := byID["shelf"]; got.ReadyStock != 0 || got.StorageStock != 30 || got.TotalStock != 30 {
+		t.Errorf("shelf = %+v, want ready 0 storage 30 total 30", got)
+	}
+	if got := byID["both"]; got.ReadyStock != 12 || got.StorageStock != 10 || got.TotalStock != 22 {
+		t.Errorf("both = %+v, want ready 12 storage 10 total 22", got)
+	}
+	if summary.ReadyStock != 12 || summary.StorageStock != 40 || summary.TotalStock != 52 {
+		t.Errorf("summary = %+v, want ready 12 storage 40 total 52", summary)
+	}
+	// sale_point location filter uses the store-wide ready figure
+	_, saleOnly, saleN := buildWarehouseInventory(rows, sale, WarehouseInventoryQuery{LocationType: LocationTypeSalePoint, Page: 1, PageSize: 20})
+	if saleN != 1 || len(saleOnly) != 1 || saleOnly[0].ProductID != "both" {
+		t.Errorf("sale_point filter → %d %v, want 1 [both]", saleN, ids(saleOnly))
+	}
+}
+
 func TestBuildWarehouseInventory_StatusFilter(t *testing.T) {
 	rows := []WarehouseStockRow{
 		{ProductID: "a", ProductName: "A", ReadyStock: 100, MinStock: 10}, // available
@@ -108,7 +143,7 @@ func TestBuildWarehouseInventory_StatusFilter(t *testing.T) {
 		{StockStatusLow, "b"},
 		{StockStatusOut, "c"},
 	} {
-		_, items, total := buildWarehouseInventory(rows, WarehouseInventoryQuery{StockStatus: tc.status, Page: 1, PageSize: 20})
+		_, items, total := buildInventory(rows, WarehouseInventoryQuery{StockStatus: tc.status, Page: 1, PageSize: 20})
 		if total != 1 || items[0].ProductID != tc.wantID {
 			t.Errorf("status %q → total %d first %q, want 1 %q", tc.status, total, firstID(items), tc.wantID)
 		}
@@ -121,15 +156,15 @@ func TestBuildWarehouseInventory_LocationTypeFilter(t *testing.T) {
 		{ProductID: "storage-only", ProductName: "S", StorageStock: 10},
 		{ProductID: "both", ProductName: "B", ReadyStock: 5, StorageStock: 5},
 	}
-	_, sale, saleTotal := buildWarehouseInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeSalePoint, Page: 1, PageSize: 20})
+	_, sale, saleTotal := buildInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeSalePoint, Page: 1, PageSize: 20})
 	if saleTotal != 2 { // ready-only + both
 		t.Errorf("sale_point filter total = %d, want 2 (ids: %v)", saleTotal, ids(sale))
 	}
-	_, storage, storageTotal := buildWarehouseInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeStorage, Page: 1, PageSize: 20})
+	_, storage, storageTotal := buildInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeStorage, Page: 1, PageSize: 20})
 	if storageTotal != 2 { // storage-only + both
 		t.Errorf("storage filter total = %d, want 2 (ids: %v)", storageTotal, ids(storage))
 	}
-	_, _, allTotal := buildWarehouseInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeAll, Page: 1, PageSize: 20})
+	_, _, allTotal := buildInventory(rows, WarehouseInventoryQuery{LocationType: LocationTypeAll, Page: 1, PageSize: 20})
 	if allTotal != 3 {
 		t.Errorf("all filter total = %d, want 3", allTotal)
 	}
@@ -141,17 +176,17 @@ func TestBuildWarehouseInventory_SearchAndCategory(t *testing.T) {
 		{ProductID: "p2", ProductName: "ข้าวสาร 5kg", SKU: "RICE-5KG", Barcode: "8850000000011", CategoryID: "cat-grocery", StorageStock: 20},
 	}
 	// search by SKU substring (case-insensitive)
-	_, bySku, n1 := buildWarehouseInventory(rows, WarehouseInventoryQuery{Search: "water", Page: 1, PageSize: 20})
+	_, bySku, n1 := buildInventory(rows, WarehouseInventoryQuery{Search: "water", Page: 1, PageSize: 20})
 	if n1 != 1 || bySku[0].ProductID != "p1" {
 		t.Errorf("search water → %d %q", n1, firstID(bySku))
 	}
 	// search by barcode
-	_, byBc, n2 := buildWarehouseInventory(rows, WarehouseInventoryQuery{Search: "8850000000011", Page: 1, PageSize: 20})
+	_, byBc, n2 := buildInventory(rows, WarehouseInventoryQuery{Search: "8850000000011", Page: 1, PageSize: 20})
 	if n2 != 1 || byBc[0].ProductID != "p2" {
 		t.Errorf("search barcode → %d %q", n2, firstID(byBc))
 	}
 	// category filter
-	_, byCat, n3 := buildWarehouseInventory(rows, WarehouseInventoryQuery{CategoryID: "cat-grocery", Page: 1, PageSize: 20})
+	_, byCat, n3 := buildInventory(rows, WarehouseInventoryQuery{CategoryID: "cat-grocery", Page: 1, PageSize: 20})
 	if n3 != 1 || byCat[0].ProductID != "p2" {
 		t.Errorf("category filter → %d %q", n3, firstID(byCat))
 	}
@@ -162,16 +197,16 @@ func TestBuildWarehouseInventory_Pagination(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		rows = append(rows, WarehouseStockRow{ProductID: string(rune('a' + i)), ProductName: string(rune('a' + i)), ReadyStock: 1})
 	}
-	_, page1, total := buildWarehouseInventory(rows, WarehouseInventoryQuery{Page: 1, PageSize: 20})
+	_, page1, total := buildInventory(rows, WarehouseInventoryQuery{Page: 1, PageSize: 20})
 	if total != 25 || len(page1) != 20 {
 		t.Fatalf("page1: total=%d len=%d, want 25 / 20", total, len(page1))
 	}
-	_, page2, _ := buildWarehouseInventory(rows, WarehouseInventoryQuery{Page: 2, PageSize: 20})
+	_, page2, _ := buildInventory(rows, WarehouseInventoryQuery{Page: 2, PageSize: 20})
 	if len(page2) != 5 {
 		t.Errorf("page2 len = %d, want 5", len(page2))
 	}
 	// page beyond the end → empty (not nil)
-	_, page99, _ := buildWarehouseInventory(rows, WarehouseInventoryQuery{Page: 99, PageSize: 20})
+	_, page99, _ := buildInventory(rows, WarehouseInventoryQuery{Page: 99, PageSize: 20})
 	if page99 == nil || len(page99) != 0 {
 		t.Errorf("page99 = %v, want empty non-nil slice", page99)
 	}
@@ -203,6 +238,8 @@ func TestService_ListInventoryProducts_CashierAllowed(t *testing.T) {
 	repo := &stubRepo{
 		warehouse: Warehouse{ID: "wh1", Name: "คลังหลัก", Code: "WH-MAIN"},
 		rows:      []WarehouseStockRow{{ProductID: "p1", ProductName: "X", ReadyStock: 5, StorageStock: 5, MinStock: 2}},
+		// store-wide sale-point stock (the warehouse page's พร้อมขาย figure)
+		saleStock: map[string]int{"p1": 5},
 	}
 	svc := NewService(repo)
 	resp, err := svc.ListInventoryProducts(context.Background(), auth.Claims{UserID: "u-cashier", Role: "cashier"}, "store1", "wh1", WarehouseInventoryQuery{Page: 1, PageSize: 20})
@@ -243,13 +280,34 @@ func ids(items []WarehouseInventoryProduct) []string {
 	return out
 }
 
+// saleStockFromRows mirrors the OLD single-warehouse ready semantics into the new
+// store-wide sale-point map, so the pure tests keep their established numbers while
+// exercising the NEW code path (ready now comes from the map argument, not the row).
+func saleStockFromRows(rows []WarehouseStockRow) map[string]int {
+	m := make(map[string]int, len(rows))
+	for _, r := range rows {
+		if r.ReadyStock > 0 {
+			m[r.ProductID] = r.ReadyStock
+		}
+	}
+	return m
+}
+
+// buildInventory is the pure-test convenience wrapper: rows that used to carry ready
+// stock on the struct now feed the store-wide sale-point map directly.
+func buildInventory(rows []WarehouseStockRow, q WarehouseInventoryQuery) (WarehouseInventorySummary, []WarehouseInventoryProduct, int) {
+	return buildWarehouseInventory(rows, saleStockFromRows(rows), q)
+}
+
 // stubRepo implements warehouse.Repository for service-layer tests. Only the methods used
 // by ListInventoryProducts are configurable; the rest are inert.
 type stubRepo struct {
-	warehouse  Warehouse
-	getByIDErr error
-	rows       []WarehouseStockRow
-	rowsErr    error
+	warehouse    Warehouse
+	getByIDErr   error
+	rows         []WarehouseStockRow
+	rowsErr      error
+	saleStock    map[string]int
+	saleStockErr error
 }
 
 func (s *stubRepo) GetByID(_ context.Context, _, _ string) (Warehouse, error) {
@@ -260,6 +318,9 @@ func (s *stubRepo) GetByID(_ context.Context, _, _ string) (Warehouse, error) {
 }
 func (s *stubRepo) ListWarehouseStockRows(_ context.Context, _ string) ([]WarehouseStockRow, error) {
 	return s.rows, s.rowsErr
+}
+func (s *stubRepo) ListStoreSalePointStock(_ context.Context, _ string) (map[string]int, error) {
+	return s.saleStock, s.saleStockErr
 }
 
 // Inert implementations to satisfy the Repository interface.

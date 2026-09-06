@@ -154,7 +154,13 @@ func (s Service) ListInventoryProducts(ctx context.Context, actor auth.Claims, s
 		return WarehouseInventoryResponse{}, err
 	}
 
-	summary, items, total := buildWarehouseInventory(rows, q)
+	// พร้อมขาย is store-wide (every sale point of the store) — user B 2026-09-04.
+	salePointStock, err := s.repo.ListStoreSalePointStock(ctx, storeID)
+	if err != nil {
+		return WarehouseInventoryResponse{}, err
+	}
+
+	summary, items, total := buildWarehouseInventory(rows, salePointStock, q)
 	return WarehouseInventoryResponse{
 		Warehouse: WarehouseRef{ID: wh.ID, Name: wh.Name, Code: wh.Code},
 		Summary:   summary,

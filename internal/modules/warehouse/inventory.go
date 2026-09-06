@@ -8,14 +8,19 @@ import (
 
 // Phase 0 — Warehouse-scoped product inventory (read-only).
 //
-// The redesigned Warehouse page needs พร้อมขาย / พื้นที่จัดเก็บ / รวมในคลัง scoped to a
-// SINGLE selected warehouse. The product_view aggregates (ready_stock / storage_stock)
-// are STORE-WIDE (every location in the store) and the legacy total_stock / warehouse_stock
-// fields are mislabelled — none of them is safe here. So this feature derives the split
-// directly from stocks JOIN locations, scoped by locations.warehouse_id, splitting on
-// locations.is_sale_point. The SQL does the warehouse-scoped grouped aggregation
-// (ListWarehouseStockRows); this file holds the pure, fully-testable derivation
-// (filtering, status, summary, sort, pagination) applied on top of those rows.
+// The redesigned Warehouse page needs พร้อมขาย / พื้นที่จัดเก็บ / รวม scoped to a
+// SINGLE selected warehouse for the storage side, but พร้อมขาย is deliberately
+// STORE-WIDE across every sale point (user-directed 2026-09-04, option B): staff
+// viewing a storage warehouse must see how much is still sellable at the
+// counter(s) so they can decide to transfer from this warehouse to the sale
+// point. The product_view aggregates (ready_stock / storage_stock) are STORE-WIDE
+// (every location in the store) and the legacy total_stock / warehouse_stock fields
+// are mislabelled — none of them is safe here. So this feature derives the split
+// directly from stocks JOIN locations: storage = non-sale-point locations of the
+// selected warehouse (ListWarehouseStockRows), พร้อมขาย = sale-point locations of the
+// WHOLE store (ListStoreSalePointStock). The SQL does the grouped aggregation; this
+// file holds the pure, fully-testable derivation (filtering, status, summary, sort,
+// pagination) applied on top of those rows.
 
 const (
 	// Stock status (recommended business vocabulary).
@@ -38,10 +43,14 @@ const (
 	maxInventoryPageSize     = 100
 )
 
-// WarehouseStockRow is the raw per-product row returned by the grouped, warehouse-scoped
-// SQL query. ready_stock / storage_stock are already split (SUM split on is_sale_point)
-// and warehouse-scoped (WHERE locations.warehouse_id = ?); ALL locations (active AND
-// inactive) are included in these current-stock totals.
+// WarehouseStockRow is the raw per-product row returned by the grouped,
+// warehouse-scoped SQL query. ready_stock / storage_stock are already split
+// (SUM split on is_sale_point) and warehouse-scoped (WHERE locations.warehouse_id
+// = ?); ALL locations (active AND inactive) are included in these current-stock
+// totals. NOTE: the API's พร้อมขาย figure is NOT this row's ReadyStock anymore —
+// buildWarehouseInventory overrides ready with the store-wide sale-point map
+// (ListStoreSalePointStock). The row's ReadyStock is kept for the SQL split and
+// unit-test fixtures only.
 type WarehouseStockRow struct {
 	ProductID    string  `gorm:"column:product_id"`
 	ProductName  string  `gorm:"column:product_name"`
@@ -80,9 +89,9 @@ type WarehouseInventoryProduct struct {
 	CostPrice    float64 `json:"cost_price"`
 	SellingPrice float64 `json:"selling_price"`
 	MinStock     int     `json:"min_stock"`
-	ReadyStock   int     `json:"ready_stock"`   // พร้อมขาย — sale-point locations
-	StorageStock int     `json:"storage_stock"` // พื้นที่จัดเก็บ — non-sale-point locations
-	TotalStock   int     `json:"total_stock"`   // รวมในคลัง — ready + storage
+	ReadyStock   int     `json:"ready_stock"`   // พร้อมขาย — sale-point locations of the WHOLE store (cross-warehouse)
+	StorageStock int     `json:"storage_stock"` // พื้นที่จัดเก็บ — non-sale-point locations of the SELECTED warehouse
+	TotalStock   int     `json:"total_stock"`   // รวม — ready + storage (the replenishment decision number)
 	Status       string  `json:"status"`
 }
 
@@ -159,16 +168,24 @@ func validateInventoryQuery(q WarehouseInventoryQuery) error {
 	return nil
 }
 
-// buildWarehouseInventory turns warehouse-scoped per-product rows into the response pieces:
-// per-product total = ready + storage, status, filtering, summary over the filtered set,
-// sort, and pagination. Pure — no I/O — so it is exhaustively unit-tested.
-func buildWarehouseInventory(rows []WarehouseStockRow, q WarehouseInventoryQuery) (WarehouseInventorySummary, []WarehouseInventoryProduct, int) {
+// buildWarehouseInventory turns warehouse-scoped per-product rows plus the store-wide
+// sale-point map into the response pieces: per-product ready = store-wide sale stock,
+// storage = this warehouse's non-sale stock, total = ready + storage, status, filtering,
+// summary over the filtered set, sort, and pagination. Pure — no I/O — so it is
+// exhaustively unit-tested.
+func buildWarehouseInventory(rows []WarehouseStockRow, salePointStock map[string]int, q WarehouseInventoryQuery) (WarehouseInventorySummary, []WarehouseInventoryProduct, int) {
 	search := strings.ToLower(strings.TrimSpace(q.Search))
 	filtered := make([]WarehouseInventoryProduct, 0, len(rows))
 	var summary WarehouseInventorySummary
 
 	for _, row := range rows {
-		total := row.ReadyStock + row.StorageStock
+		// พร้อมขาย = stock at EVERY sale point of the store (any warehouse). A product
+		// with no counter stock anywhere gets 0, whatever it holds in this warehouse.
+		ready := 0
+		if qty, ok := salePointStock[row.ProductID]; ok {
+			ready = qty
+		}
+		total := ready + row.StorageStock
 		item := WarehouseInventoryProduct{
 			ProductID:    row.ProductID,
 			ProductName:  row.ProductName,
@@ -180,7 +197,7 @@ func buildWarehouseInventory(rows []WarehouseStockRow, q WarehouseInventoryQuery
 			CostPrice:    row.CostPrice,
 			SellingPrice: row.SellingPrice,
 			MinStock:     row.MinStock,
-			ReadyStock:   row.ReadyStock,
+			ReadyStock:   ready,
 			StorageStock: row.StorageStock,
 			TotalStock:   total,
 			Status:       deriveStockStatus(total, row.MinStock),

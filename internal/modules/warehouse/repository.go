@@ -37,6 +37,10 @@ type Repository interface {
 	// with ready/storage already split (SUM split on locations.is_sale_point) and scoped to
 	// locations.warehouse_id. Includes active AND inactive locations. One grouped query.
 	ListWarehouseStockRows(ctx context.Context, warehouseID string) ([]WarehouseStockRow, error)
+	// ListStoreSalePointStock returns total stock per product across EVERY sale-point
+	// location in the store (any warehouse) — the พร้อมขาย figure the warehouse inventory
+	// API reports (user-directed 2026-09-04). Empty when the store has no sale point.
+	ListStoreSalePointStock(ctx context.Context, storeID string) (map[string]int, error)
 
 	// Warehouse-Product association (via stocks + locations)
 	AddProduct(ctx context.Context, storeID, warehouseID, productID string, quantity int) (WarehouseProduct, error)
@@ -252,6 +256,35 @@ func (r PostgresRepository) ListWarehouseStockRows(ctx context.Context, warehous
 		rows = []WarehouseStockRow{}
 	}
 	return rows, nil
+}
+
+// ListStoreSalePointStock returns total stock per product across EVERY sale-point
+// location of the store (any warehouse). This is the พร้อมขาย figure the warehouse
+// inventory API reports: staff viewing a storage warehouse need to see how much is
+// sellable at the counter(s) store-wide (user-directed 2026-09-04, option B).
+// Active AND inactive locations are counted, mirroring ListWarehouseStockRows.
+// Returns an empty map (never nil) when the store has no sale point.
+func (r PostgresRepository) ListStoreSalePointStock(ctx context.Context, storeID string) (map[string]int, error) {
+	type saleRow struct {
+		ProductID string `gorm:"column:product_id"`
+		Qty       int    `gorm:"column:qty"`
+	}
+	var rows []saleRow
+	err := r.db.WithContext(ctx).
+		Table("stocks").
+		Select("stocks.product_id AS product_id, COALESCE(SUM(stocks.quantity), 0) AS qty").
+		Joins("JOIN locations ON locations.id = stocks.location_id").
+		Where("locations.store_id = ? AND locations.is_sale_point = ?", storeID, true).
+		Group("stocks.product_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]int, len(rows))
+	for _, row := range rows {
+		m[row.ProductID] = row.Qty
+	}
+	return m, nil
 }
 
 func nilEmpty(s string) any {
