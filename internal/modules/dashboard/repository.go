@@ -60,8 +60,9 @@ func (r PostgresRepository) GetPaymentBreakdown(ctx context.Context, storeID str
 		Select(`
 			`+canonicalPaymentMethodSQL+` AS payment_method,
 			COUNT(*) AS sales_count,
-			COALESCE(SUM(s.total_amount), 0) AS amount
+			COALESCE(SUM(CASE WHEN LOWER(TRIM(s.payment_method)) = 'credit' THEN COALESCE(cs.remaining_amount, s.total_amount) ELSE s.total_amount END), 0) AS amount
 		`).
+		Joins("LEFT JOIN credit_sales cs ON cs.sale_id = s.id AND cs.store_id = s.store_id").
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Group(canonicalPaymentMethodSQL).
 		Order("amount DESC").
