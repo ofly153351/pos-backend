@@ -68,11 +68,15 @@ type PnLReport struct {
 // over active products. Counts use the same thresholds as the Inventory page:
 // out = stock<=0, low = 0<stock<=min_stock, inStock = stock>min_stock.
 type InventorySnapshot struct {
-	InventoryValue float64 `json:"inventory_value"` // SUM(cost_price*total_stock), stock>0
-	InStock        int64   `json:"in_stock"`
-	LowStock       int64   `json:"low_stock"`
-	OutOfStock     int64   `json:"out_of_stock"`
-	MissingCost    int64   `json:"missing_cost"` // active, stock>0, cost<=0
+	InventoryValue   float64 `json:"inventory_value"` // SUM(cost_price*total_stock), stock>0
+	RetailValue      float64 `json:"retail_value"`    // SUM(base_price*total_stock), stock>0
+	TotalUnits       int64   `json:"total_units"`     // SUM(total_stock), active products
+	ActiveSKUCount   int64   `json:"active_sku_count"`
+	InStock          int64   `json:"in_stock"`
+	LowStock         int64   `json:"low_stock"`
+	OutOfStock       int64   `json:"out_of_stock"`
+	MissingCost      int64   `json:"missing_cost"` // active, stock>0, cost<=0
+	CostExceedsPrice int64   `json:"cost_exceeds_price"`
 }
 
 type InventoryHealth struct {
@@ -133,10 +137,11 @@ type OverstockItem struct {
 // DB aggregates (GetInventorySnapshot + GetDeadStock), so the report scales to any
 // dataset size with no client-side movement scanning.
 type InventoryReport struct {
-	Snapshot      InventorySnapshot   `json:"snapshot"`
-	DeadStock     DeadStockStat       `json:"dead_stock"`
-	StockVelocity []StockVelocityItem `json:"stock_velocity"`
-	Overstock     []OverstockItem     `json:"overstock"`
+	Snapshot          InventorySnapshot   `json:"snapshot"`
+	CategoryBreakdown []CategoryTotal     `json:"category_breakdown"`
+	DeadStock         DeadStockStat       `json:"dead_stock"`
+	StockVelocity     []StockVelocityItem `json:"stock_velocity"`
+	Overstock         []OverstockItem     `json:"overstock"`
 }
 
 // TrendPoint is one day of the sales-performance chart. Profit is the gross

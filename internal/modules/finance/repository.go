@@ -31,6 +31,7 @@ type Repository interface {
 	GetPaymentBreakdown(ctx context.Context, storeID string, from, to time.Time) ([]PaymentMethodStat, error)
 
 	GetInventorySnapshot(ctx context.Context, storeID string) (InventorySnapshot, error)
+	GetInventoryCategoryValues(ctx context.Context, storeID string) ([]CategoryTotal, error)
 	GetDeadStock(ctx context.Context, storeID string, soldBefore time.Time) ([]DeadStockItem, int64, float64, error)
 	GetStockVelocity(ctx context.Context, storeID string) ([]StockVelocityItem, error)
 	GetOverstockItems(ctx context.Context, storeID string) ([]OverstockItem, error)
@@ -187,14 +188,33 @@ func (r PostgresRepository) GetInventorySnapshot(ctx context.Context, storeID st
 		Table("product_view").
 		Select(`
 			COALESCE(SUM(CASE WHEN total_stock > 0 THEN cost_price * total_stock ELSE 0 END), 0) AS inventory_value,
+			COALESCE(SUM(CASE WHEN total_stock > 0 THEN base_price * total_stock ELSE 0 END), 0) AS retail_value,
+			COALESCE(SUM(total_stock), 0) AS total_units,
+			COUNT(*) AS active_sku_count,
 			COUNT(*) FILTER (WHERE total_stock > min_stock)                              AS in_stock,
 			COUNT(*) FILTER (WHERE total_stock > 0 AND total_stock <= min_stock)         AS low_stock,
 			COUNT(*) FILTER (WHERE total_stock <= 0)                                     AS out_of_stock,
-			COUNT(*) FILTER (WHERE total_stock > 0 AND COALESCE(cost_price, 0) <= 0)     AS missing_cost
+			COUNT(*) FILTER (WHERE total_stock > 0 AND COALESCE(cost_price, 0) <= 0)     AS missing_cost,
+			COUNT(*) FILTER (WHERE total_stock > 0 AND base_price > 0 AND cost_price > base_price) AS cost_exceeds_price
 		`).
 		Where("store_id = ? AND is_active = TRUE AND deleted_at IS NULL", storeID).
 		Scan(&snap).Error
 	return snap, err
+}
+
+func (r PostgresRepository) GetInventoryCategoryValues(ctx context.Context, storeID string) ([]CategoryTotal, error) {
+	var rows []CategoryTotal
+	err := r.db.WithContext(ctx).
+		Table("product_view").
+		Select("COALESCE(product_type_id, '') AS category_id, COALESCE(product_type_name, '') AS name, COALESCE(SUM(base_price * total_stock) FILTER (WHERE total_stock > 0), 0) AS total").
+		Where("store_id = ? AND is_active = TRUE AND deleted_at IS NULL", storeID).
+		Group("product_type_id, product_type_name").
+		Order("total DESC, name ASC").
+		Find(&rows).Error
+	if rows == nil {
+		rows = []CategoryTotal{}
+	}
+	return rows, err
 }
 
 // GetDeadStock returns the in-stock active products whose last sale predates

@@ -172,6 +172,11 @@ func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, stor
 		return InventoryReport{}, err
 	}
 
+	categoryBreakdown, err := s.repo.GetInventoryCategoryValues(ctx, storeID)
+	if err != nil {
+		return InventoryReport{}, err
+	}
+
 	soldBefore := time.Now().UTC().AddDate(0, 0, -deadDays)
 	deadItems, count, value, err := s.repo.GetDeadStock(ctx, storeID, soldBefore)
 	if err != nil {
@@ -189,10 +194,11 @@ func (s Service) GetInventoryReport(ctx context.Context, actor auth.Claims, stor
 	}
 
 	return InventoryReport{
-		Snapshot:      snapshot,
-		DeadStock:     DeadStockStat{Days: deadDays, Count: count, Value: value, Items: deadItems},
-		StockVelocity: velocity,
-		Overstock:     overstock,
+		Snapshot:          snapshot,
+		CategoryBreakdown: categoryBreakdown,
+		DeadStock:         DeadStockStat{Days: deadDays, Count: count, Value: value, Items: deadItems},
+		StockVelocity:     velocity,
+		Overstock:         overstock,
 	}, nil
 }
 
