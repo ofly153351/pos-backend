@@ -2,6 +2,7 @@ package creditsale
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -99,6 +100,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		Items:          saleItems,
 	})
 	if err != nil {
+		if errors.Is(err, sale.ErrInvalidPaidAmount) && roundMoney(req.DownPayment) > 0 {
+			// The sale repository validates the final VAT/discounted total before
+			// deduction. Translate its generic paid-amount error into the credit
+			// API's field-specific 422 instead of leaking a 500.
+			return CreditSale{}, ErrInvalidDownPayment
+		}
 		return CreditSale{}, err
 	}
 
@@ -109,10 +116,12 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		return existing, nil
 	}
 
-	// The sale is committed (stock deducted); compute the receivable from its total.
+	// The sale service now rejects an excessive credit down payment before the
+	// transaction reaches this post-commit clamp. Keep this guard as a defensive
+	// invariant for direct repository callers and old integrations.
 	downPayment := roundMoney(req.DownPayment)
 	if downPayment > createdSale.TotalAmount {
-		downPayment = createdSale.TotalAmount // clamp; never fail post-commit (avoids orphan)
+		return CreditSale{}, ErrInvalidDownPayment
 	}
 	remaining := roundMoney(createdSale.TotalAmount - downPayment)
 	if remaining < 0 {

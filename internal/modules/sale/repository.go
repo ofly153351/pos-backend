@@ -56,9 +56,8 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	}
 	sale.LocationID = saleLocationID
 
-	// Group cart quantities by product (duplicate lines → one deduction) and deduct ONLY from
-	// the sale location, in deterministic product-id order (deadlock-safe). Stock is taken from
-	// the one sale point — never aggregated across locations, never from storage, never a fallback.
+	// Lock product snapshots before pricing so all prices/discounts are calculated
+	// from the same product rows. Deduction itself happens after payment validation.
 	grouped := map[string]int{}
 	productOrder := make([]string, 0)
 	for _, item := range sale.Items {
@@ -79,9 +78,6 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 			return Sale{}, ErrProductInactive
 		}
 		snapshots[pid] = product
-		if err := r.checkAndDeductAtLocation(ctx, tx, sale.StoreID, pid, grouped[pid], sale.ID, sale.CashierUserID, saleLocationID); err != nil {
-			return Sale{}, err
-		}
 	}
 
 	// Pricing per request line (sale_items stay per-line) reusing the locked product snapshots.
@@ -147,6 +143,11 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	// total). The sub-baht remainder is a rounding adjustment, consistent with cash handling.
 	sale.TotalAmount = math.Round(sale.TotalAmount)
 	sale.ChangeAmount = roundMoney(sale.PaidAmount - sale.TotalAmount)
+	if sale.PaymentMethod == "credit" && sale.ChangeAmount > 0 {
+		// Credit sales have no change/refund path. Reject an excessive down
+		// payment before stock deduction and before creating the receivable.
+		return Sale{}, ErrInvalidPaidAmount
+	}
 	if sale.ChangeAmount < 0 {
 		// Credit sales defer payment: the unpaid balance is tracked as a receivable
 		// by the creditsale module, so an under-payment (including paid_amount=0) is
@@ -156,6 +157,15 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 			return Sale{}, ErrInvalidPaidAmount
 		}
 		sale.ChangeAmount = 0
+	}
+
+	// Deduct stock only after the final payable total is known and payment rules
+	// have passed. This prevents an excessive credit down payment from committing
+	// stock before the request is rejected.
+	for _, pid := range productOrder {
+		if err := r.checkAndDeductAtLocation(ctx, tx, sale.StoreID, pid, grouped[pid], sale.ID, sale.CashierUserID, saleLocationID); err != nil {
+			return Sale{}, err
+		}
 	}
 
 	salePayload := map[string]any{
