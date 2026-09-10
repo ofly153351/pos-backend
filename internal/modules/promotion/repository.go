@@ -28,13 +28,23 @@ func (r PostgresRepository) List(ctx context.Context, storeID string) ([]json.Ra
 	var rows []struct {
 		Data               string  `gorm:"column:data"`
 		UsageCount         int64   `gorm:"column:usage_count"`
+		UsageToday         int64   `gorm:"column:usage_today"`
 		DiscountGivenTotal float64 `gorm:"column:discount_given_total"`
+		RevenueGenerated   float64 `gorm:"column:revenue_generated"`
 	}
 	err := r.db.WithContext(ctx).
-		Table("promotions").
-		Select("data, usage_count, discount_given_total").
-		Where("store_id = ? AND deleted_at IS NULL", storeID).
-		Order("created_at DESC").
+		Table("promotions p").
+		Select(`p.data, p.usage_count,
+			COALESCE((SELECT COUNT(*) FROM promotion_usages pu
+				WHERE pu.promotion_id = p.id AND pu.store_id = p.store_id
+				  AND pu.created_at >= CURRENT_DATE), 0) AS usage_today,
+			p.discount_given_total,
+			COALESCE((SELECT SUM(s.total_amount / NULLIF((SELECT COUNT(*) FROM promotion_usages pu2 WHERE pu2.sale_id = pu.sale_id AND pu2.store_id = pu.store_id), 0))
+				FROM promotion_usages pu JOIN sales s ON s.id = pu.sale_id AND s.store_id = pu.store_id
+				WHERE pu.promotion_id = p.id AND pu.store_id = p.store_id
+				  AND s.status <> 'voided'), 0) AS revenue_generated`).
+		Where("p.store_id = ? AND p.deleted_at IS NULL", storeID).
+		Order("p.created_at DESC").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -46,7 +56,9 @@ func (r PostgresRepository) List(ctx context.Context, storeID string) ([]json.Ra
 		var obj map[string]any
 		if json.Unmarshal([]byte(row.Data), &obj) == nil {
 			obj["usageCount"] = row.UsageCount
+			obj["usageToday"] = row.UsageToday
 			obj["discountGiven"] = row.DiscountGivenTotal
+			obj["revenueGenerated"] = row.RevenueGenerated
 			if merged, mErr := json.Marshal(obj); mErr == nil {
 				out[i] = json.RawMessage(merged)
 				continue
