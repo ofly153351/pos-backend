@@ -2,6 +2,7 @@ package sale
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1061,15 +1062,40 @@ func (r PostgresRepository) recordPromotionUsage(ctx context.Context, tx *gorm.D
 		return nil
 	}
 	share := roundMoney(applied.VerifiedDiscount / float64(n))
+	var saleTotal float64
+	if err := tx.WithContext(ctx).Table("sales").Select("total_amount").Where("id = ? AND store_id = ?", saleID, storeID).Scan(&saleTotal).Error; err != nil {
+		return err
+	}
+	revenueShare := roundMoney(saleTotal / float64(n))
 	now := time.Now().UTC()
 	for _, pid := range applied.PromotionIDs {
+		var snap struct {
+			Name string `gorm:"column:name"`
+			Type string `gorm:"column:type"`
+			Data string `gorm:"column:data"`
+		}
+		if err := tx.WithContext(ctx).Table("promotions").Select("name, type, data").Where("id = ? AND store_id = ?", pid, storeID).Take(&snap).Error; err != nil {
+			return err
+		}
+		// Prefer the canonical campaign fields in data when present, while keeping
+		// the row columns as a fallback for legacy promotion records.
+		var campaign struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal([]byte(snap.Data), &campaign)
+		name := snap.Name
+		if campaign.Name != "" {
+			name = campaign.Name
+		}
+		promoType := snap.Type
+		if campaign.Type != "" {
+			promoType = campaign.Type
+		}
 		if err := tx.WithContext(ctx).Table("promotion_usages").Create(map[string]any{
-			"id":              newPromotionUsageID(),
-			"store_id":        storeID,
-			"promotion_id":    pid,
-			"sale_id":         saleID,
-			"discount_amount": share,
-			"created_at":      now,
+			"id": newPromotionUsageID(), "store_id": storeID, "promotion_id": pid,
+			"sale_id": saleID, "discount_amount": share, "revenue_amount": revenueShare,
+			"promotion_name": name, "promotion_type": promoType, "created_at": now,
 		}).Error; err != nil {
 			return err
 		}
