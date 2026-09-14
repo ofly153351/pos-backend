@@ -12,12 +12,32 @@ import (
 	"context"
 	"fmt"
 	"os"
+	goruntime "runtime"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
+
+func resolveExecPath() string {
+	if p := os.Getenv("CHROME_PATH"); p != "" {
+		return p
+	}
+	if goruntime.GOOS == "darwin" {
+		for _, p := range []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		} {
+			if info, err := os.Stat(p); err == nil && !info.IsDir() {
+				return p
+			}
+		}
+	}
+	return ""
+}
 
 // Render converts a full HTML document to PDF bytes (A4, CSS @page respected,
 // backgrounds printed). A fresh headless browser is spun up per call and torn
@@ -30,7 +50,7 @@ func Render(parent context.Context, html string) ([]byte, error) {
 	)
 	// Prod override: point at a specific Chrome/Chromium/Edge binary when the host
 	// keeps it outside the default search paths (set CHROME_PATH in the env).
-	if p := os.Getenv("CHROME_PATH"); p != "" {
+	if p := resolveExecPath(); p != "" {
 		opts = append(opts, chromedp.ExecPath(p))
 	}
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(parent, opts...)
