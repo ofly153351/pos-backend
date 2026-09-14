@@ -527,6 +527,7 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .terms-title{ font-weight:700; margin-bottom:0.5mm; }
 .baht-text-row{ display:flex; gap:2mm; margin-top:0; padding:1.5mm 3mm; border:1px solid var(--line); background:#f6f6f6; font-size:11px; line-height:1.5; }
 .baht-text-row span:first-child{ color:var(--muted); }
+.baht-text-row span:last-child{ margin-left:auto; text-align:right; font-size:13px; }
 .refrow .lbl{ color:var(--muted); margin-right:1mm; }
 
 /* ---- ตารางสินค้า: full grid + คอลัมน์กึ่งกลาง (desc ชิดซ้าย) ---- */
