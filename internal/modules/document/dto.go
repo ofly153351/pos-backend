@@ -5,28 +5,32 @@ import "time"
 // ── Request DTOs ──────────────────────────────────────────────────────────────
 
 type CreateDocumentRequest struct {
-	Type         DocumentType              `json:"type"`
-	CustomerID       string `json:"customer_id"`
-	CustomerNameOverride    string `json:"customer_name,omitempty"`
-	CustomerAddressOverride string `json:"customer_address,omitempty"`
-	CustomerPhoneOverride   string `json:"customer_phone,omitempty"`
-	DocumentDate string                    `json:"document_date"` // YYYY-MM-DD
-	DueDate      *string                   `json:"due_date,omitempty"`
-	ValidUntil      *string                   `json:"valid_until,omitempty"`
-	DeliveryDate    *string                   `json:"delivery_date,omitempty"`    // YYYY-MM-DD
-	DeliveryAddress string                    `json:"delivery_address"`
-	DeliveryContact string                    `json:"delivery_contact"`
-	DeliveryPhone   string                    `json:"delivery_phone"`
-	SalesZone       string                    `json:"sales_zone"`
-	SalespersonName string                    `json:"salesperson_name"`
-	InvoiceRefNo     string                    `json:"invoice_ref_no"`
-	SourceDocumentID *string                   `json:"source_document_id,omitempty"`
-	PORefNo         string                    `json:"po_ref_no"`
-	ShippingFee     float64                   `json:"shipping_fee"`
-	CreditTermDays  int                       `json:"credit_term_days"`
-	Items           []CreateDocumentItemInput `json:"items"`
-	VatRate      float64                   `json:"vat_rate"`
-	Notes        *string                   `json:"notes,omitempty"`
+	Type                    DocumentType              `json:"type"`
+	CustomerID              string                    `json:"customer_id"`
+	CustomerNameOverride    string                    `json:"customer_name,omitempty"`
+	CustomerAddressOverride string                    `json:"customer_address,omitempty"`
+	CustomerPhoneOverride   string                    `json:"customer_phone,omitempty"`
+	DocumentDate            string                    `json:"document_date"` // YYYY-MM-DD
+	DueDate                 *string                   `json:"due_date,omitempty"`
+	ValidUntil              *string                   `json:"valid_until,omitempty"`
+	PriceValidityDays       *int                      `json:"price_validity_days,omitempty"`
+	DeliveryDate            *string                   `json:"delivery_date,omitempty"` // YYYY-MM-DD
+	DeliveryLeadTimeDays    *int                      `json:"delivery_lead_time_days,omitempty"`
+	POReceivedDate          *string                   `json:"po_received_date,omitempty"`       // YYYY-MM-DD
+	ExpectedDeliveryDate    *string                   `json:"expected_delivery_date,omitempty"` // YYYY-MM-DD
+	DeliveryAddress         string                    `json:"delivery_address"`
+	DeliveryContact         string                    `json:"delivery_contact"`
+	DeliveryPhone           string                    `json:"delivery_phone"`
+	SalesZone               string                    `json:"sales_zone"`
+	SalespersonName         string                    `json:"salesperson_name"`
+	InvoiceRefNo            string                    `json:"invoice_ref_no"`
+	SourceDocumentID        *string                   `json:"source_document_id,omitempty"`
+	PORefNo                 string                    `json:"po_ref_no"`
+	ShippingFee             float64                   `json:"shipping_fee"`
+	CreditTermDays          int                       `json:"credit_term_days"`
+	Items                   []CreateDocumentItemInput `json:"items"`
+	VatRate                 float64                   `json:"vat_rate"`
+	Notes                   *string                   `json:"notes,omitempty"`
 }
 
 type CreateDocumentItemInput struct {

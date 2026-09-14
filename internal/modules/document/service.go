@@ -223,6 +223,12 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	if err != nil {
 		return nil, fmt.Errorf("invalid document_date: %w", ErrInvalidInput)
 	}
+	if req.PriceValidityDays != nil && *req.PriceValidityDays < 0 {
+		return nil, fmt.Errorf("price_validity_days must be >= 0: %w", ErrInvalidInput)
+	}
+	if req.DeliveryLeadTimeDays != nil && *req.DeliveryLeadTimeDays < 0 {
+		return nil, fmt.Errorf("delivery_lead_time_days must be >= 0: %w", ErrInvalidInput)
+	}
 
 	var dueDate *time.Time
 	if req.DueDate != nil && *req.DueDate != "" {
@@ -234,13 +240,31 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	}
 
 	var validUntil *time.Time
-	if req.ValidUntil != nil && *req.ValidUntil != "" {
+	if req.PriceValidityDays != nil {
+		t := docDate.AddDate(0, 0, *req.PriceValidityDays)
+		validUntil = &t
+	} else if req.ValidUntil != nil && *req.ValidUntil != "" {
 		t, err := time.Parse("2006-01-02", *req.ValidUntil)
 		if err != nil {
 			return nil, fmt.Errorf("invalid valid_until: %w", ErrInvalidInput)
 		}
 		validUntil = &t
 	}
+
+	var poReceivedDate, expectedDeliveryDate *time.Time
+	if req.POReceivedDate != nil && *req.POReceivedDate != "" {
+		t, parseErr := time.Parse("2006-01-02", *req.POReceivedDate)
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid po_received_date: %w", ErrInvalidInput)
+		}
+		poReceivedDate = &t
+	}
+
+	calculatedValidUntil, calculatedExpected := calculateTermDates(docDate, req.PriceValidityDays, req.DeliveryLeadTimeDays, poReceivedDate)
+	if calculatedValidUntil != nil {
+		validUntil = calculatedValidUntil
+	}
+	expectedDeliveryDate = calculatedExpected
 
 	var deliveryDate *time.Time
 	if req.DeliveryDate != nil && *req.DeliveryDate != "" {
@@ -290,38 +314,42 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 	totalAmount := round2(subtotal + vatAmount)
 
 	doc := &Document{
-		ID:               idgen.Generate(PrefixDocument),
-		StoreID:          storeID,
-		Type:             req.Type,
-		Status:           StatusPending,
-		PaymentStatus:    PaymentUnpaid,
-		CustomerID:       req.CustomerID,
-		CustomerName:     cust.FullName,
-		CustomerAddress:  cust.Address,
-		CustomerPhone:    cust.Phone,
-		StaffID:          actor.UserID,
-		StaffName:        actor.Name,
-		DocumentDate:     docDate,
-		DueDate:          dueDate,
-		ValidUntil:       validUntil,
-		DeliveryDate:     deliveryDate,
-		DeliveryAddress:  req.DeliveryAddress,
-		DeliveryContact:  req.DeliveryContact,
-		DeliveryPhone:    req.DeliveryPhone,
-		SalesZone:        req.SalesZone,
-		SalespersonName:  req.SalespersonName,
-		InvoiceRefNo:     req.InvoiceRefNo,
-		PORefNo:          req.PORefNo,
-		SourceDocumentID: req.SourceDocumentID,
-		ShippingFee:      round2(req.ShippingFee),
-		CreditTermDays:   req.CreditTermDays,
-		Subtotal:         subtotal,
-		VatRate:          req.VatRate,
-		VatAmount:        vatAmount,
-		TotalAmount:      totalAmount,
-		Notes:            req.Notes,
-		Items:            items,
-		CreatedBy:        actor.UserID,
+		ID:                   idgen.Generate(PrefixDocument),
+		StoreID:              storeID,
+		Type:                 req.Type,
+		Status:               StatusPending,
+		PaymentStatus:        PaymentUnpaid,
+		CustomerID:           req.CustomerID,
+		CustomerName:         cust.FullName,
+		CustomerAddress:      cust.Address,
+		CustomerPhone:        cust.Phone,
+		StaffID:              actor.UserID,
+		StaffName:            actor.Name,
+		DocumentDate:         docDate,
+		DueDate:              dueDate,
+		ValidUntil:           validUntil,
+		PriceValidityDays:    req.PriceValidityDays,
+		DeliveryDate:         deliveryDate,
+		DeliveryLeadTimeDays: req.DeliveryLeadTimeDays,
+		POReceivedDate:       poReceivedDate,
+		ExpectedDeliveryDate: expectedDeliveryDate,
+		DeliveryAddress:      req.DeliveryAddress,
+		DeliveryContact:      req.DeliveryContact,
+		DeliveryPhone:        req.DeliveryPhone,
+		SalesZone:            req.SalesZone,
+		SalespersonName:      req.SalespersonName,
+		InvoiceRefNo:         req.InvoiceRefNo,
+		PORefNo:              req.PORefNo,
+		SourceDocumentID:     req.SourceDocumentID,
+		ShippingFee:          round2(req.ShippingFee),
+		CreditTermDays:       req.CreditTermDays,
+		Subtotal:             subtotal,
+		VatRate:              req.VatRate,
+		VatAmount:            vatAmount,
+		TotalAmount:          totalAmount,
+		Notes:                req.Notes,
+		Items:                items,
+		CreatedBy:            actor.UserID,
 	}
 
 	return s.assignNumberAndInsert(doc)
@@ -874,7 +902,7 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 // source via SourceDocumentID. The (source → target) pair must be permitted by
 // allowedConversions. This is a document-level copy — pricing / VAT / accounting
 // are NOT altered (a CREDIT_NOTE is copied as-is, not auto-negated).
-func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType) (*Document, error) {
+func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType, deliveryDateOverride ...*string) (*Document, error) {
 	src, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return nil, err
@@ -885,7 +913,7 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 
 	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
 	// (customer snapshot, delivery / reference fields, dates, notes, lineage link).
-	req := buildConversionRequest(src, target)
+	req := buildConversionRequest(src, target, deliveryDateOverride...)
 	// A DELIVERY_ORDER ships to the customer's saved delivery profile, not their
 	// billing snapshot — overlay it when one exists (blank fields keep the fallback).
 	if target == TypeDeliveryOrder && src.CustomerID != "" {
@@ -922,27 +950,39 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 			dueDate = &t
 		}
 	}
+	var deliveryDate *time.Time
+	if req.DeliveryDate != nil && *req.DeliveryDate != "" {
+		if t, perr := time.Parse("2006-01-02", *req.DeliveryDate); perr == nil {
+			deliveryDate = &t
+		}
+	}
 
 	doc := &Document{
-		ID:               idgen.Generate(PrefixDocument),
-		StoreID:          storeID,
-		Type:             target,
-		Status:           StatusPending,
-		PaymentStatus:    PaymentUnpaid,
-		CustomerID:       src.CustomerID,
-		CustomerName:     src.CustomerName,
-		CustomerTaxID:    src.CustomerTaxID,
-		CustomerAddress:  src.CustomerAddress,
-		CustomerPhone:    src.CustomerPhone,
-		StaffID:          actor.UserID,
-		StaffName:        actor.Name,
-		DocumentDate:     docDate,
-		DueDate:          dueDate,
-		DeliveryAddress:  req.DeliveryAddress,
-		DeliveryContact:  req.DeliveryContact,
-		DeliveryPhone:    req.DeliveryPhone,
-		InvoiceRefNo:     req.InvoiceRefNo,
-		SourceDocumentID: req.SourceDocumentID,
+		ID:                   idgen.Generate(PrefixDocument),
+		StoreID:              storeID,
+		Type:                 target,
+		Status:               StatusPending,
+		PaymentStatus:        PaymentUnpaid,
+		CustomerID:           src.CustomerID,
+		CustomerName:         src.CustomerName,
+		CustomerTaxID:        src.CustomerTaxID,
+		CustomerAddress:      src.CustomerAddress,
+		CustomerPhone:        src.CustomerPhone,
+		StaffID:              actor.UserID,
+		StaffName:            actor.Name,
+		DocumentDate:         docDate,
+		DueDate:              dueDate,
+		DeliveryDate:         deliveryDate,
+		ValidUntil:           src.ValidUntil,
+		PriceValidityDays:    src.PriceValidityDays,
+		DeliveryLeadTimeDays: src.DeliveryLeadTimeDays,
+		POReceivedDate:       src.POReceivedDate,
+		ExpectedDeliveryDate: src.ExpectedDeliveryDate,
+		DeliveryAddress:      req.DeliveryAddress,
+		DeliveryContact:      req.DeliveryContact,
+		DeliveryPhone:        req.DeliveryPhone,
+		InvoiceRefNo:         req.InvoiceRefNo,
+		SourceDocumentID:     req.SourceDocumentID,
 		// Money — verbatim from the source, NOT recomputed.
 		Subtotal:     src.Subtotal,
 		BillDiscount: src.BillDiscount,
@@ -1002,7 +1042,7 @@ func joinNonEmpty(sep string, parts ...string) string {
 // target type. SourceDocumentID is always set (invisible link powering the document
 // timeline); only DELIVERY_ORDER carries the extra visible delivery / reference
 // fields, preserving the previously-rendered output of the other conversions.
-func buildConversionRequest(src *Document, target DocumentType) CreateDocumentRequest {
+func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...*string) CreateDocumentRequest {
 	items := make([]CreateDocumentItemInput, len(src.Items))
 	for i, it := range src.Items {
 		items[i] = CreateDocumentItemInput{
@@ -1030,6 +1070,12 @@ func buildConversionRequest(src *Document, target DocumentType) CreateDocumentRe
 		SourceDocumentID:        &srcID,
 		Items:                   items,
 	}
+	req.PriceValidityDays = src.PriceValidityDays
+	req.DeliveryLeadTimeDays = src.DeliveryLeadTimeDays
+	if src.POReceivedDate != nil {
+		d := src.POReceivedDate.Format("2006-01-02")
+		req.POReceivedDate = &d
+	}
 	if target == TypeDeliveryOrder {
 		req.InvoiceRefNo = src.DocumentNoFull
 		req.DeliveryAddress = src.CustomerAddress
@@ -1038,6 +1084,9 @@ func buildConversionRequest(src *Document, target DocumentType) CreateDocumentRe
 		if src.DueDate != nil {
 			d := src.DueDate.Format("2006-01-02")
 			req.DueDate = &d
+		}
+		if len(deliveryDate) > 0 {
+			req.DeliveryDate = deliveryDate[0]
 		}
 	}
 	return req
@@ -1055,8 +1104,8 @@ func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, sto
 }
 
 // ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
-func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder)
+func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate *string) (*Document, error) {
+	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, deliveryDate)
 }
 
 // ConvertQuotation creates an INVOICE document from an existing QUOTATION.
@@ -1089,35 +1138,39 @@ func toDocData(doc *Document) dochtml.DocData {
 	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
 
 	return dochtml.DocData{
-		Type:            string(doc.Type),
-		DocumentNo:      doc.DocumentNo,
-		DocumentNoFull:  doc.DocumentNoFull,
-		DocumentDate:    doc.DocumentDate,
-		DueDate:         doc.DueDate,
-		ValidUntil:      doc.ValidUntil,
-		CustomerName:    doc.CustomerName,
-		CustomerAddress: doc.CustomerAddress,
-		CustomerPhone:   doc.CustomerPhone,
-		CustomerTaxID:   doc.CustomerTaxID,
-		StaffName:       doc.StaffName,
-		Items:           items,
-		Subtotal:        doc.Subtotal,
-		TotalDiscount:   totalDiscount,
-		VatRate:         doc.VatRate,
-		VatAmount:       doc.VatAmount,
-		TotalAmount:     doc.TotalAmount,
-		PreVatAmount:    preVat,
-		Notes:           doc.Notes,
+		Type:              string(doc.Type),
+		DocumentNo:        doc.DocumentNo,
+		DocumentNoFull:    doc.DocumentNoFull,
+		DocumentDate:      doc.DocumentDate,
+		DueDate:           doc.DueDate,
+		ValidUntil:        doc.ValidUntil,
+		PriceValidityDays: doc.PriceValidityDays,
+		CustomerName:      doc.CustomerName,
+		CustomerAddress:   doc.CustomerAddress,
+		CustomerPhone:     doc.CustomerPhone,
+		CustomerTaxID:     doc.CustomerTaxID,
+		StaffName:         doc.StaffName,
+		Items:             items,
+		Subtotal:          doc.Subtotal,
+		TotalDiscount:     totalDiscount,
+		VatRate:           doc.VatRate,
+		VatAmount:         doc.VatAmount,
+		TotalAmount:       doc.TotalAmount,
+		PreVatAmount:      preVat,
+		Notes:             doc.Notes,
 		// Delivery order fields
-		DeliveryDate:    doc.DeliveryDate,
-		DeliveryAddress: doc.DeliveryAddress,
-		DeliveryContact: doc.DeliveryContact,
-		DeliveryPhone:   doc.DeliveryPhone,
-		SalesZone:       doc.SalesZone,
-		SalespersonName: doc.SalespersonName,
-		InvoiceRefNo:    doc.InvoiceRefNo,
-		PORefNo:         doc.PORefNo,
-		ShippingFee:     doc.ShippingFee,
-		CreditTermDays:  doc.CreditTermDays,
+		DeliveryDate:         doc.DeliveryDate,
+		DeliveryLeadTimeDays: doc.DeliveryLeadTimeDays,
+		POReceivedDate:       doc.POReceivedDate,
+		ExpectedDeliveryDate: doc.ExpectedDeliveryDate,
+		DeliveryAddress:      doc.DeliveryAddress,
+		DeliveryContact:      doc.DeliveryContact,
+		DeliveryPhone:        doc.DeliveryPhone,
+		SalesZone:            doc.SalesZone,
+		SalespersonName:      doc.SalespersonName,
+		InvoiceRefNo:         doc.InvoiceRefNo,
+		PORefNo:              doc.PORefNo,
+		ShippingFee:          doc.ShippingFee,
+		CreditTermDays:       doc.CreditTermDays,
 	}
 }

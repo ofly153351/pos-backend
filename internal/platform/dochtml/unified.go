@@ -117,7 +117,7 @@ func profileFor(docType string) docProfile {
 	case "QUOTATION":
 		return docProfile{
 			TitleTH: "ใบเสนอราคา", TitleEN: "Quotation",
-			ShowDiscount: true, ShowPayBox: false, SpecialLabel: "ยืนราคาถึง (Valid Until)",
+			ShowDiscount: true, ShowPayBox: false, SpecialLabel: "",
 			SigLeftTH: "ผู้จัดทำ", SigLeftEN: "Prepared By", SigRightTH: "ผู้อนุมัติ", SigRightEN: "Approved By",
 		}
 	case "BILL":
@@ -180,7 +180,9 @@ type renderView struct {
 	// ลูกค้า / จัดส่ง
 	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
 	StaffName, SalespersonName, RefNo, DeliveryDate          string
+	PriceTerms, DeliveryTerms                                string
 	DeliveryAddr, DeliveryContact, DeliveryPhone             string
+	BahtText                                                 string
 	// flags
 	ShowDiscount, ShowDeliveryBox, ShowPayBox, PayCash bool
 	// footer
@@ -221,9 +223,30 @@ func specialValue(d DocData, docType string) string {
 		if d.DeliveryDate != nil {
 			return thaiDate(*d.DeliveryDate)
 		}
-		return thaiDate(d.DocumentDate)
+		return "_"
 	}
 	return ""
+}
+
+func quotationTerms(d DocData) (priceTerms, deliveryTerms string) {
+	if d.Type != "QUOTATION" {
+		return "", ""
+	}
+	validDays := "_"
+	if d.PriceValidityDays != nil && *d.PriceValidityDays > 0 {
+		validDays = strconv.Itoa(*d.PriceValidityDays)
+	}
+	deliveryDays := "_"
+	if d.DeliveryLeadTimeDays != nil && *d.DeliveryLeadTimeDays > 0 {
+		deliveryDays = strconv.Itoa(*d.DeliveryLeadTimeDays)
+	}
+	poDate := "_"
+	if d.POReceivedDate != nil {
+		poDate = thaiDate(*d.POReceivedDate)
+	}
+	priceTerms = fmt.Sprintf("ราคานี้ยืนราคาเป็นระยะเวลา %s วัน นับจากวันที่ออกใบเสนอราคา", validDays)
+	deliveryTerms = fmt.Sprintf("กำหนดส่งสินค้าภายใน %s วัน หลังจากได้รับใบสั่งซื้อวันที่ %s", deliveryDays, poDate)
+	return priceTerms, deliveryTerms
 }
 
 func buildSummary(d DocData, p docProfile) []summaryLine {
@@ -325,6 +348,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		}
 	}
 
+	priceTerms, deliveryTerms := quotationTerms(d)
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
 		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: template.URL(store.LogoURL),
@@ -342,10 +366,17 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 			if d.DeliveryDate != nil {
 				return thaiDate(*d.DeliveryDate)
 			}
-			return thaiDate(d.DocumentDate)
+			return "_"
 		}(),
+		PriceTerms: priceTerms, DeliveryTerms: deliveryTerms,
 		DeliveryAddr:    d.DeliveryAddress,
 		DeliveryContact: d.DeliveryContact, DeliveryPhone: d.DeliveryPhone,
+		BahtText: func() string {
+			if d.Type == "DELIVERY_ORDER" {
+				return formatThaiBahtText(d.TotalAmount)
+			}
+			return ""
+		}(),
 
 		ShowDiscount: p.ShowDiscount, ShowDeliveryBox: p.ShowDeliveryBox,
 		ShowPayBox: p.ShowPayBox, PayCash: p.PayCash,
@@ -492,6 +523,10 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .party-h{ font-size:10px; font-weight:700; color:#fff; background:var(--ink); margin:-2mm -3mm 2mm; padding:1mm 3mm; }
 .party-name{ font-weight:700; }
 .refrow{ display:flex; gap:6mm; font-size:10px; margin-bottom:2mm; padding:1.5mm 3mm; background:#f6f6f6; border:1px solid var(--line); }
+.termsrow{ font-size:10px; margin:2mm 0 0; padding:0; border:0; background:transparent; line-height:1.5; }
+.terms-title{ font-weight:700; margin-bottom:0.5mm; }
+.baht-text-row{ display:flex; gap:2mm; margin-top:0; padding:1.5mm 3mm; border:1px solid var(--line); background:#f6f6f6; font-size:11px; line-height:1.5; }
+.baht-text-row span:first-child{ color:var(--muted); }
 .refrow .lbl{ color:var(--muted); margin-right:1mm; }
 
 /* ---- ตารางสินค้า: full grid + คอลัมน์กึ่งกลาง (desc ชิดซ้าย) ---- */
@@ -645,6 +680,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </div>
   {{end}}
 
+  {{if and $pg.IsLast $root.BahtText}}<div class="baht-text-row"><span>จำนวนเงินตัวอักษร / Text:</span><span>({{$root.BahtText}})</span></div>{{end}}
+
   <div class="doc-spacer"></div>
 
   {{if $pg.IsLast}}
@@ -676,6 +713,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
     </div>
 
     <div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
+    {{if $root.PriceTerms}}<section class="termsrow"><div class="terms-title">เงื่อนไข (Terms)</div><div>1. {{$root.PriceTerms}}</div><div>2. {{$root.DeliveryTerms}}</div></section>{{end}}
 
     {{if $root.ShowSignature}}
     <div class="signatures">

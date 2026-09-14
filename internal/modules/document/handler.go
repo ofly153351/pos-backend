@@ -232,7 +232,11 @@ func (h Handler) ConvertToTaxInvoice(c *fiber.Ctx) error {
 func (h Handler) ConvertToDeliveryOrder(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
-	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id)
+	var req struct {
+		DeliveryDate *string `json:"delivery_date,omitempty"`
+	}
+	_ = c.BodyParser(&req)
+	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.DeliveryDate)
 	if err != nil {
 		return writeError(c, err)
 	}

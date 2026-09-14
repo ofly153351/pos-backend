@@ -123,38 +123,42 @@ type DocItem struct {
 // DocData is a flat representation of a document for HTML rendering.
 // It is populated by the document service and passed to RenderDocumentHTML.
 type DocData struct {
-	Type            string // "INVOICE" | "BILL" | "TAX_INVOICE" | …
-	DocumentNo      string
-	DocumentNoFull  string
-	DocumentDate    time.Time
-	DueDate         *time.Time
-	ValidUntil      *time.Time
-	CustomerName    string
-	CustomerAddress string
-	CustomerPhone   string
-	CustomerTaxID   *string
-	CustomerBranch  *string // สาขาผู้ซื้อ (optional)
-	StaffName       string
-	Items           []DocItem
-	Subtotal        float64
-	TotalDiscount   float64
-	VatRate         float64
-	VatAmount       float64
-	TotalAmount     float64
-	Notes           *string
+	Type              string // "INVOICE" | "BILL" | "TAX_INVOICE" | …
+	DocumentNo        string
+	DocumentNoFull    string
+	DocumentDate      time.Time
+	DueDate           *time.Time
+	ValidUntil        *time.Time
+	PriceValidityDays *int
+	CustomerName      string
+	CustomerAddress   string
+	CustomerPhone     string
+	CustomerTaxID     *string
+	CustomerBranch    *string // สาขาผู้ซื้อ (optional)
+	StaffName         string
+	Items             []DocItem
+	Subtotal          float64
+	TotalDiscount     float64
+	VatRate           float64
+	VatAmount         float64
+	TotalAmount       float64
+	Notes             *string
 	// Delivery order fields
-	DeliveryDate    *time.Time
-	DeliveryAddress string
-	DeliveryContact string
-	DeliveryPhone   string
-	SalesZone       string
-	SalespersonName string
-	InvoiceRefNo    string
-	PORefNo         string
-	ShippingFee     float64
-	CreditTermDays  int
-	PreVatAmount    float64
-	QRPaymentURL    template.URL
+	DeliveryDate         *time.Time
+	DeliveryLeadTimeDays *int
+	POReceivedDate       *time.Time
+	ExpectedDeliveryDate *time.Time
+	DeliveryAddress      string
+	DeliveryContact      string
+	DeliveryPhone        string
+	SalesZone            string
+	SalespersonName      string
+	InvoiceRefNo         string
+	PORefNo              string
+	ShippingFee          float64
+	CreditTermDays       int
+	PreVatAmount         float64
+	QRPaymentURL         template.URL
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).
