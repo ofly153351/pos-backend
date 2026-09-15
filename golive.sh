@@ -104,19 +104,70 @@ ok "ล้าง PM2 แล้ว"
 # ── 2. Docker — PostgreSQL + MinIO ──────────────────────────────────────────
 step "Docker (PostgreSQL + MinIO)"
 cd "$BACKEND_DIR"
-info "Starting containers..."
-docker compose up -d postgres minio minio-client
+
+docker_failure() {
+  local message="$1"
+  echo ""
+  warn "$message"
+  info "docker compose ps postgres minio"
+  docker compose ps postgres minio
+  info "docker compose logs --tail=100 postgres minio"
+  docker compose logs --tail=100 postgres minio
+  die "$message"
+}
+
+info "Pulling PostgreSQL and MinIO images..."
+if ! docker compose pull postgres minio; then
+  docker_failure "ไม่สามารถ pull image ของ PostgreSQL หรือ MinIO ได้"
+fi
+
+info "Starting PostgreSQL and MinIO..."
+if ! docker compose up -d postgres minio; then
+  docker_failure "ไม่สามารถ start PostgreSQL หรือ MinIO ได้"
+fi
+
+info "ตรวจสถานะ containers หลัง startup..."
+docker compose ps postgres minio
 
 info "รอ PostgreSQL ready..."
 local_attempts=0
 until docker compose exec -T postgres \
   pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" &>/dev/null; do
   local_attempts=$((local_attempts + 1))
-  [[ $local_attempts -gt 30 ]] && die "PostgreSQL ไม่ตอบสนอง — ดู: docker compose logs postgres"
+  if [[ $local_attempts -gt 30 ]]; then
+    docker_failure "PostgreSQL ไม่ตอบสนอง"
+  fi
   sleep 1
 done
 ok "PostgreSQL ready"
+
+info "รอ MinIO healthy..."
+local_attempts=0
+until curl -sf "http://localhost:${MINIO_API_PORT:-9000}/minio/health/live" &>/dev/null; do
+  local_attempts=$((local_attempts + 1))
+  if [[ $local_attempts -gt 30 ]]; then
+    docker_failure "MinIO ไม่ตอบสนองหรือยังไม่ healthy"
+  fi
+  sleep 1
+done
 ok "MinIO ready"
+
+docker compose ps postgres minio
+
+# minio-client only initializes the bucket; it is not a runtime dependency.
+# Do not let an unavailable/broken mc image take down PostgreSQL or MinIO.
+if docker image inspect minio/mc:latest &>/dev/null; then
+  info "Starting optional MinIO bucket initializer (mc)..."
+  if docker compose up -d minio-client; then
+    ok "MinIO bucket initializer started"
+  else
+    warn "ข้าม MinIO bucket initializer (mc) — PostgreSQL และ MinIO ยังทำงานต่อ"
+    warn "ตรวจสอบภายหลังด้วย: docker compose logs --tail=100 minio-client"
+  fi
+else
+  warn "ไม่พบ image minio/mc:latest — ข้าม bucket initializer (mc)"
+  warn "PostgreSQL และ MinIO ยังทำงานต่อ; ตรวจสอบ bucket initialization ตาม deployment policy"
+fi
 
 # ── 2.5 Restored-DB guard: empty schema_migrations ledger ─────────────────
 # A DB restored from a dump has an EMPTY schema_migrations ledger, so the
