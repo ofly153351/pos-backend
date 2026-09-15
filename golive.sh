@@ -205,7 +205,16 @@ else
   LEDGER_COUNT="$LEDGER_STATE"
 fi
 
-if [ "${LEDGER_COUNT:-x}" = "0" ]; then
+LEDGER_HAS_BASE="no"
+if [ "$LEDGER_STATE" != "missing" ]; then
+  if ! LEDGER_HAS_BASE=$(docker compose exec -T postgres \
+    psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
+    -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM schema_migrations WHERE filename = '001_schema.sql') THEN 'yes' ELSE 'no' END" 2>/dev/null | tr -d '[:space:]'); then
+    die "อ่าน migration ledger ไม่ได้ — ตรวจสอบ: docker compose logs --tail=100 postgres"
+  fi
+fi
+
+if [ "${LEDGER_COUNT:-x}" = "0" ] || [ "$LEDGER_HAS_BASE" != "yes" ]; then
   info "schema_migrations ว่าง (DB ถูก restore) — เตรียม ledger..."
   if command -v uv >/dev/null 2>&1; then
     uv run scripts/mark_migrations_applied.py
@@ -213,6 +222,12 @@ if [ "${LEDGER_COUNT:-x}" = "0" ]; then
     warn "ไม่พบ uv — ใช้ python3 แทน (สคริปต์เป็น stdlib)"
     python3 scripts/mark_migrations_applied.py
   fi
+  if ! LEDGER_HAS_BASE=$(docker compose exec -T postgres \
+    psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
+    -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM schema_migrations WHERE filename = '001_schema.sql') THEN 'yes' ELSE 'no' END" 2>/dev/null | tr -d '[:space:]'); then
+    die "ตรวจสอบ migration ledger หลัง repair ไม่ได้"
+  fi
+  [ "$LEDGER_HAS_BASE" = "yes" ] || die "migration ledger repair ไม่สำเร็จ — 001_schema.sql ยังไม่ถูก mark; ไม่ start PM2"
   ok "migration ledger พร้อม — backend จะ apply เฉพาะ migration ใหม่"
 fi
 
