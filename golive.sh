@@ -207,7 +207,7 @@ ok "Binary: $BACKEND_DIR/bin/api"
 # Chrome/Chromium/Edge binary. Without it, only that one button fails (print still works).
 info "ตรวจ Chrome/Chromium สำหรับสร้าง PDF เอกสาร..."
 CHROME_FOUND=""
-if [ -n "$CHROME_PATH" ] && [ -x "$CHROME_PATH" ]; then
+if [ -n "${CHROME_PATH:-}" ] && [ -x "$CHROME_PATH" ]; then
   CHROME_FOUND="$CHROME_PATH (CHROME_PATH)"
 else
   for c in google-chrome google-chrome-stable chromium chromium-browser chrome msedge; do
