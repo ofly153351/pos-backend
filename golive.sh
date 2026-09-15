@@ -11,7 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR"
 FRONTEND_DIR="$(dirname "$SCRIPT_DIR")/pos-frontend"
-TUNNEL_CONFIG="$HOME/.cloudflared/config.yml"
+FE_HOST="pos.phiraphat.site"
+BE_HOST="api.phiraphat.site"
+MEDIA_HOST="media.phiraphat.site"
 
 # ── Git credentials (token stored in ~/.git-credentials via credential.helper store)
 GITHUB_USER="ofly153351"
@@ -89,7 +91,6 @@ sync_repo() {
 
 sync_repo "$BACKEND_DIR"  "pos-backend"
 sync_repo "$FRONTEND_DIR" "pos-frontend"
-[[ -f "$TUNNEL_CONFIG" ]] || die "ไม่พบ tunnel config ที่ $TUNNEL_CONFIG — รัน setup.sh --tunnel ก่อน"
 command -v systemctl &>/dev/null || die "systemd/systemctl ไม่พร้อมใช้งาน — ตรวจสอบเครื่อง Ubuntu ก่อน"
 systemctl cat cloudflared.service &>/dev/null || die "ไม่พบ systemd service cloudflared — ติดตั้ง cloudflared service ก่อน"
 systemctl is-enabled --quiet cloudflared || die "cloudflared ยังไม่ enabled — รัน: sudo systemctl enable --now cloudflared"
@@ -342,16 +343,23 @@ else
   warn "MinIO ยังไม่ตอบ"
 fi
 
-# public URLs จาก tunnel config
-FE_HOST=$(grep "hostname:" "$TUNNEL_CONFIG" | awk '{print $3}' | head -1)
-BE_HOST=$(grep "hostname:" "$TUNNEL_CONFIG" | awk '{print $3}' | sed -n '2p')
-MEDIA_HOST=$(grep "hostname:" "$TUNNEL_CONFIG" | awk '{print $3}' | sed -n '3p')
-
 sleep 2
+if curl -sf "https://${FE_HOST}" &>/dev/null; then
+  ok "Public frontend  https://${FE_HOST}"
+else
+  warn "Public frontend ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
+fi
+
 if curl -sf "https://${BE_HOST}/health" &>/dev/null; then
   ok "Public backend  https://${BE_HOST}/health"
 else
   warn "Public backend ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
+fi
+
+if curl -sf "https://${MEDIA_HOST}/minio/health/live" &>/dev/null; then
+  ok "Public MinIO    https://${MEDIA_HOST}"
+else
+  warn "Public MinIO ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
