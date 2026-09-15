@@ -65,13 +65,14 @@ def main() -> int:
         if f in recorded:
             continue
 
-        # Probe the migration inside a transaction that is ALWAYS rolled back:
-        # explicit ROLLBACK on success; ON_ERROR_STOP aborts before it on failure
-        # and the closed connection implicitly rolls back. Nothing persists.
+        # Probe inside one transaction that is ALWAYS rolled back. A successful
+        # probe means the migration is still fresh; a failure means the existing
+        # schema already reflects it (or exposes a real schema problem).
         with open(os.path.join(INIT_DB, f), encoding="utf-8") as fh:
+            probe_sql = "BEGIN;\n" + fh.read() + "\nROLLBACK;\n"
             probe = psql(
-                ["-v", "ON_ERROR_STOP=1", "-c", "BEGIN;", "-c", "ROLLBACK;"],
-                input_text=fh.read(),
+                ["-v", "ON_ERROR_STOP=1"],
+                input_text=probe_sql,
             )
         if probe.returncode == 0:
             fresh += 1
