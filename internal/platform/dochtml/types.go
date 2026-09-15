@@ -148,6 +148,11 @@ type DocData struct {
 	DeliveryLeadTimeDays *int
 	POReceivedDate       *time.Time
 	ExpectedDeliveryDate *time.Time
+	PaymentMethod        string
+	PaymentReference     string
+	PaidAmount           float64
+	PaidAmountText       string
+	ChangeAmount         float64
 	DeliveryAddress      string
 	DeliveryContact      string
 	DeliveryPhone        string

@@ -219,6 +219,20 @@ func (h Handler) PayInvoice(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "invoice paid and tax invoice created", taxDoc)
 }
 
+func (h Handler) PayDeliveryOrder(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	id := c.Params("docID")
+	var req PayDeliveryOrderRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	receipt, err := h.service.PayDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusCreated, "receipt created", receipt)
+}
+
 func (h Handler) ConvertToTaxInvoice(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")

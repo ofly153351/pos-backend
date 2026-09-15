@@ -31,7 +31,7 @@ func TestCanConvert_Matrix(t *testing.T) {
 		{TypeReceipt, TypeInvoice},
 		{TypeTaxInvoice, TypeInvoice},
 		{TypeTaxInvoice, TypeReceipt},
-		{TypeDeliveryOrder, TypeReceipt},
+		{TypeDeliveryOrder, TypeCreditNote},
 		{TypeCreditNote, TypeInvoice},
 		{TypeInvoice, TypeQuotation},
 		{TypeInvoice, TypeInvoice},

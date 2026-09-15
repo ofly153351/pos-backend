@@ -183,6 +183,7 @@ type renderView struct {
 	PriceTerms, DeliveryTerms                                string
 	DeliveryAddr, DeliveryContact, DeliveryPhone             string
 	BahtText                                                 string
+	PaymentMethod, PaymentReference, PaidAmountText          string
 	// flags
 	ShowDiscount, ShowDeliveryBox, ShowPayBox, PayCash bool
 	// footer
@@ -372,11 +373,12 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		DeliveryAddr:    d.DeliveryAddress,
 		DeliveryContact: d.DeliveryContact, DeliveryPhone: d.DeliveryPhone,
 		BahtText: func() string {
-			if d.Type == "DELIVERY_ORDER" {
+			if d.Type == "DELIVERY_ORDER" || d.Type == "RECEIPT" {
 				return formatThaiBahtText(d.TotalAmount)
 			}
 			return ""
 		}(),
+		PaymentMethod: d.PaymentMethod, PaymentReference: d.PaymentReference, PaidAmountText: d.PaidAmountText,
 
 		ShowDiscount: p.ShowDiscount, ShowDeliveryBox: p.ShowDeliveryBox,
 		ShowPayBox: p.ShowPayBox, PayCash: p.PayCash,
@@ -703,7 +705,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
             <div class="c-row"><span class="c-lbl">เลขที่เช็ค / No.</span><span class="c-line"></span></div>
             <div class="c-row"><span class="c-lbl">ลงวันที่ / Date</span><span class="c-line"></span></div>
           </div>
-        </div>
+        {{if $root.PaymentMethod}}<div class="pay-row"><span class="pay-lbl">วิธีชำระเงิน / Method</span><span class="pay-dot"></span><span class="pay-baht">{{$root.PaymentMethod}}</span></div><div class="pay-row"><span class="pay-lbl">ชำระแล้ว / Paid</span><span class="pay-dot"></span><span class="pay-baht">{{$root.PaidAmountText}} บาท</span></div>{{end}}
+        {{if $root.PaymentReference}}<div class="bank-sub"><span class="bank-sub-lbl">เลขอ้างอิง</span><span>{{$root.PaymentReference}}</span></div>{{end}}
       </div>
       {{end}}
       <div class="summary">

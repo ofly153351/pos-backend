@@ -33,6 +33,7 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Delete("/stores/:storeID/documents/:docID", g.operate, h.DeleteDocument)
 	protected.Post("/stores/:storeID/documents/bulk", g.operate, h.BulkAction)
 	protected.Post("/stores/:storeID/documents/:docID/pay", g.operate, h.PayInvoice)
+	protected.Post("/stores/:storeID/documents/:docID/pay-delivery", g.operate, h.PayDeliveryOrder)
 	protected.Post("/stores/:storeID/documents/:docID/convert-tax", g.operate, h.ConvertToTaxInvoice)
 	protected.Post("/stores/:storeID/documents/:docID/convert-do", g.operate, h.ConvertToDeliveryOrder)
 	protected.Post("/stores/:storeID/documents/:docID/convert", g.operate, h.ConvertQuotation)

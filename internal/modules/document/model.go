@@ -73,6 +73,10 @@ type Document struct {
 	PORefNo              string         `gorm:"not null;default:''" json:"po_ref_no"`
 	ShippingFee          float64        `gorm:"not null;default:0" json:"shipping_fee"`
 	CreditTermDays       int            `gorm:"not null;default:0" json:"credit_term_days"`
+	PaymentMethod        string         `gorm:"not null;default:''" json:"payment_method"`
+	PaymentReference     string         `gorm:"not null;default:''" json:"payment_reference"`
+	PaidAmount           float64        `gorm:"not null;default:0" json:"paid_amount"`
+	ChangeAmount         float64        `gorm:"not null;default:0" json:"change_amount"`
 	Items                []DocumentItem `gorm:"foreignKey:DocumentID;constraint:OnDelete:CASCADE" json:"items,omitempty"`
 	CreatedBy            string         `gorm:"not null" json:"created_by"`
 	CreatedAt            time.Time      `json:"created_at"`

@@ -53,7 +53,7 @@ var allowedConversions = map[DocumentType][]DocumentType{
 	TypeQuotation:     {TypeInvoice},
 	TypeInvoice:       {TypeReceipt, TypeTaxInvoice, TypeDeliveryOrder, TypeCreditNote},
 	TypeReceipt:       {TypeTaxInvoice, TypeCreditNote},
-	TypeDeliveryOrder: {TypeInvoice},
+	TypeDeliveryOrder: {TypeInvoice, TypeReceipt},
 	TypeTaxInvoice:    {TypeCreditNote},
 }
 
@@ -897,6 +897,64 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	return taxDoc, nil
 }
 
+// PayDeliveryOrder records full payment at delivery and creates a receipt linked
+// to the DO. The DO remains the source of truth for customer, items and totals.
+func (s Service) PayDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, req PayDeliveryOrderRequest) (*Document, error) {
+	do, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if do.Type != TypeDeliveryOrder {
+		return nil, fmt.Errorf("document is not a delivery order: %w", ErrInvalidInput)
+	}
+	method := strings.ToUpper(strings.TrimSpace(req.PaymentMethod))
+	switch method {
+	case "CASH", "TRANSFER", "QR", "CARD":
+	default:
+		return nil, fmt.Errorf("unsupported payment_method: %w", ErrInvalidInput)
+	}
+	if math.Abs(req.PaidAmount-do.TotalAmount) > 0.01 {
+		return nil, fmt.Errorf("paid_amount must equal document total: %w", ErrInvalidInput)
+	}
+	var existing int64
+	if err := s.db.Model(&Document{}).Where("source_document_id = ? AND type = ?", id, TypeReceipt).Count(&existing).Error; err != nil {
+		return nil, err
+	}
+	if existing > 0 {
+		return nil, fmt.Errorf("receipt already exists: %w", ErrInvalidInput)
+	}
+
+	receipt, err := s.Convert(ctx, actor, storeID, id, TypeReceipt)
+	if err != nil {
+		return nil, err
+	}
+	change := math.Round((req.PaidAmount-do.TotalAmount)*100) / 100
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Document{}).Where("id = ?", receipt.ID).Updates(map[string]any{
+			"status": StatusCompleted, "payment_status": PaymentPaid,
+			"invoice_ref_no": do.DocumentNoFull, "payment_method": method,
+			"payment_reference": strings.TrimSpace(req.PaymentReference),
+			"paid_amount":       req.PaidAmount, "change_amount": change,
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Document{}).Where("id = ?", do.ID).Updates(map[string]any{
+			"payment_status": PaymentPaid, "updated_at": time.Now(),
+		}).Error
+	}); err != nil {
+		return nil, err
+	}
+	receipt.Status = StatusCompleted
+	receipt.PaymentStatus = PaymentPaid
+	receipt.InvoiceRefNo = do.DocumentNoFull
+	receipt.PaymentMethod = method
+	receipt.PaymentReference = strings.TrimSpace(req.PaymentReference)
+	receipt.PaidAmount = req.PaidAmount
+	receipt.ChangeAmount = change
+	return receipt, nil
+}
+
 // Convert creates a new document of targetType from an existing one, copying its
 // line items, customer snapshot, VAT rate and notes, and linking back to the
 // source via SourceDocumentID. The (source → target) pair must be permitted by
@@ -1163,6 +1221,11 @@ func toDocData(doc *Document) dochtml.DocData {
 		DeliveryLeadTimeDays: doc.DeliveryLeadTimeDays,
 		POReceivedDate:       doc.POReceivedDate,
 		ExpectedDeliveryDate: doc.ExpectedDeliveryDate,
+		PaymentMethod:        doc.PaymentMethod,
+		PaymentReference:     doc.PaymentReference,
+		PaidAmount:           doc.PaidAmount,
+		PaidAmountText:       fmt.Sprintf("%.2f", doc.PaidAmount),
+		ChangeAmount:         doc.ChangeAmount,
 		DeliveryAddress:      doc.DeliveryAddress,
 		DeliveryContact:      doc.DeliveryContact,
 		DeliveryPhone:        doc.DeliveryPhone,
