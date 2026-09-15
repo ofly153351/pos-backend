@@ -156,7 +156,8 @@ docker compose ps postgres minio
 
 # minio-client only initializes the bucket; it is not a runtime dependency.
 # Do not let an unavailable/broken mc image take down PostgreSQL or MinIO.
-if docker image inspect minio/mc:latest &>/dev/null; then
+MC_IMAGE=$(docker compose config --images | awk '/\/mc:/ { print; exit }')
+if [[ -n "$MC_IMAGE" ]] && docker image inspect "$MC_IMAGE" &>/dev/null; then
   info "Starting optional MinIO bucket initializer (mc)..."
   if docker compose up -d minio-client; then
     ok "MinIO bucket initializer started"
@@ -165,7 +166,7 @@ if docker image inspect minio/mc:latest &>/dev/null; then
     warn "ตรวจสอบภายหลังด้วย: docker compose logs --tail=100 minio-client"
   fi
 else
-  warn "ไม่พบ image minio/mc:latest — ข้าม bucket initializer (mc)"
+  warn "ไม่พบ image ${MC_IMAGE:-minio/mc} — ข้าม bucket initializer (mc)"
   warn "PostgreSQL และ MinIO ยังทำงานต่อ; ตรวจสอบ bucket initialization ตาม deployment policy"
 fi
 
@@ -240,7 +241,20 @@ chown "$USER":"$USER" /var/log/pm2 2>/dev/null || true
 # ── 6. Start via PM2 ────────────────────────────────────────────────────────
 step "Start services via PM2"
 cd "$BACKEND_DIR"
-pm2 start ecosystem.config.js
+if ! pm2 start ecosystem.config.js; then
+  pm2 status
+  pm2 logs pos-backend --lines 100 --nostream 2>/dev/null || true
+  pm2 logs pos-frontend --lines 100 --nostream 2>/dev/null || true
+  die "PM2 start failed — ตรวจสอบ logs ด้านบน"
+fi
+sleep 2
+for app in pos-backend pos-frontend; do
+  if ! pm2 show "$app" 2>/dev/null | grep -q "status.*online"; then
+    pm2 status
+    pm2 logs "$app" --lines 100 --nostream 2>/dev/null || true
+    die "$app ไม่ได้อยู่ในสถานะ online — ตรวจสอบ logs ด้านบน"
+  fi
+done
 ok "pos-backend และ pos-frontend เริ่มแล้ว"
 
 # ── 7. Cloudflare Tunnel ─────────────────────────────────────────────────────
