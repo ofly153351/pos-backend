@@ -55,12 +55,6 @@ type ConvertRequest struct {
 	TargetType DocumentType `json:"target_type"`
 }
 
-type PayDeliveryOrderRequest struct {
-	PaymentMethod    string  `json:"payment_method"`
-	PaymentReference string  `json:"payment_reference,omitempty"`
-	PaidAmount       float64 `json:"paid_amount"`
-}
-
 // RelatedDoc is a lightweight projection of a document in the same conversion
 // family (linked through source_document_id), used to render the lineage timeline.
 type RelatedDoc struct {
