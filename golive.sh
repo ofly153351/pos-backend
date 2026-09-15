@@ -89,8 +89,10 @@ sync_repo() {
 
 sync_repo "$BACKEND_DIR"  "pos-backend"
 sync_repo "$FRONTEND_DIR" "pos-frontend"
-command -v cloudflared &>/dev/null || die "cloudflared ไม่ได้ติดตั้ง — รัน setup.sh ก่อน"
 [[ -f "$TUNNEL_CONFIG" ]] || die "ไม่พบ tunnel config ที่ $TUNNEL_CONFIG — รัน setup.sh --tunnel ก่อน"
+command -v systemctl &>/dev/null || die "systemd/systemctl ไม่พร้อมใช้งาน — ตรวจสอบเครื่อง Ubuntu ก่อน"
+systemctl cat cloudflared.service &>/dev/null || die "ไม่พบ systemd service cloudflared — ติดตั้ง cloudflared service ก่อน"
+systemctl is-enabled --quiet cloudflared || die "cloudflared ยังไม่ enabled — รัน: sudo systemctl enable --now cloudflared"
 
 ok "ทุกอย่างพร้อม"
 
@@ -192,25 +194,22 @@ ok "pos-backend และ pos-frontend เริ่มแล้ว"
 
 # ── 7. Cloudflare Tunnel ─────────────────────────────────────────────────────
 step "Cloudflare Tunnel"
-info "Starting tunnel..."
-pm2 start cloudflared \
-  --name pos-tunnel \
-  --interpreter none \
-  -- tunnel --config "$TUNNEL_CONFIG" run
+info "Starting cloudflared via systemd..."
+sudo systemctl start cloudflared
 
 # รอสักครู่ให้ tunnel connect
 sleep 4
 
-if pm2 show pos-tunnel 2>/dev/null | grep -q "online"; then
+if systemctl is-active --quiet cloudflared; then
   ok "Tunnel online"
 else
-  warn "Tunnel อาจยังไม่ connect — ดู: pm2 logs pos-tunnel"
+  warn "Tunnel ยังไม่ทำงาน — ตรวจสอบด้วย: sudo journalctl -u cloudflared -f"
 fi
 
 # ── 8. Save PM2 process list ─────────────────────────────────────────────────
 step "Save PM2 + Startup"
 pm2 save
-ok "pm2 save แล้ว (reboot จะ restart อัตโนมัติ)"
+ok "pm2 save แล้วสำหรับ application services (pos-backend, pos-frontend)"
 
 # ── 9. Health checks ─────────────────────────────────────────────────────────
 step "Health checks"
@@ -270,9 +269,12 @@ echo "    pm2 status              — ดู process ทั้งหมด"
 echo "    pm2 logs                — ดู log realtime"
 echo "    pm2 logs pos-backend    — log backend"
 echo "    pm2 logs pos-frontend   — log frontend"
-echo "    pm2 logs pos-tunnel     — log tunnel"
 echo "    pm2 restart pos-backend — restart backend"
 echo "    pm2 monit               — CPU/RAM realtime"
+echo ""
+echo "  Cloudflare Tunnel (systemd):"
+echo "    systemctl status cloudflared"
+echo "    sudo journalctl -u cloudflared -f"
 echo ""
 echo "  Stop → bash stop.sh"
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
