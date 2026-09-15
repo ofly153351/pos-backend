@@ -157,7 +157,7 @@ docker compose ps postgres minio
 # minio-client only initializes the bucket; it is not a runtime dependency.
 # Do not let an unavailable/broken mc image take down PostgreSQL or MinIO.
 MC_IMAGE=$(docker compose config --images | awk '/\/mc:/ { print; exit }')
-if [[ -n "$MC_IMAGE" ]] && docker image inspect "$MC_IMAGE" &>/dev/null; then
+if [[ -n "$MC_IMAGE" ]] && docker compose pull minio-client; then
   info "Starting optional MinIO bucket initializer (mc)..."
   if docker compose up -d minio-client; then
     ok "MinIO bucket initializer started"
@@ -166,7 +166,7 @@ if [[ -n "$MC_IMAGE" ]] && docker image inspect "$MC_IMAGE" &>/dev/null; then
     warn "ตรวจสอบภายหลังด้วย: docker compose logs --tail=100 minio-client"
   fi
 else
-  warn "ไม่พบ image ${MC_IMAGE:-minio/mc} — ข้าม bucket initializer (mc)"
+  warn "ไม่สามารถ pull image ${MC_IMAGE:-minio/mc} — ข้าม bucket initializer (mc)"
   warn "PostgreSQL และ MinIO ยังทำงานต่อ; ตรวจสอบ bucket initialization ตาม deployment policy"
 fi
 
@@ -178,7 +178,12 @@ fi
 # new migration files stay unrecorded so the backend applies them on boot.
 # No-op on a fresh DB (schema_migrations doesn't exist yet) or when the ledger
 # already has entries.
-LEDGER_COUNT=$(docker compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null | tr -d '[:space:]')
+if ! LEDGER_COUNT=$(docker compose exec -T postgres \
+  psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
+  -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null | tr -d '[:space:]'); then
+  LEDGER_COUNT=""
+  info "ยังไม่มี schema_migrations — ข้าม restored-DB guard (fresh DB)"
+fi
 if [ "${LEDGER_COUNT:-x}" = "0" ]; then
   info "schema_migrations ว่าง (DB ถูก restore) — เตรียม ledger..."
   if command -v uv >/dev/null 2>&1; then
