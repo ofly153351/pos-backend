@@ -17,6 +17,7 @@ func TestCanConvert_Matrix(t *testing.T) {
 		{TypeReceipt, TypeTaxInvoice},
 		{TypeReceipt, TypeCreditNote},
 		{TypeDeliveryOrder, TypeInvoice},
+		{TypeDeliveryOrder, TypeReceipt},
 		{TypeTaxInvoice, TypeCreditNote},
 	}
 	for _, c := range allowed {
@@ -31,7 +32,6 @@ func TestCanConvert_Matrix(t *testing.T) {
 		{TypeReceipt, TypeInvoice},
 		{TypeTaxInvoice, TypeInvoice},
 		{TypeTaxInvoice, TypeReceipt},
-		{TypeDeliveryOrder, TypeReceipt},
 		{TypeCreditNote, TypeInvoice},
 		{TypeInvoice, TypeQuotation},
 		{TypeInvoice, TypeInvoice},

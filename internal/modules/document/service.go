@@ -53,7 +53,7 @@ var allowedConversions = map[DocumentType][]DocumentType{
 	TypeQuotation:     {TypeInvoice},
 	TypeInvoice:       {TypeReceipt, TypeTaxInvoice, TypeDeliveryOrder, TypeCreditNote},
 	TypeReceipt:       {TypeTaxInvoice, TypeCreditNote},
-	TypeDeliveryOrder: {TypeInvoice},
+	TypeDeliveryOrder: {TypeInvoice, TypeReceipt},
 	TypeTaxInvoice:    {TypeCreditNote},
 }
 
@@ -1088,6 +1088,9 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		if len(deliveryDate) > 0 {
 			req.DeliveryDate = deliveryDate[0]
 		}
+	}
+	if target == TypeReceipt {
+		req.InvoiceRefNo = src.DocumentNoFull
 	}
 	return req
 }

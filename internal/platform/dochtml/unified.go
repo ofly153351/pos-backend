@@ -633,9 +633,9 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
     {{end}}
   </section>
 
-  {{if $root.ShowDeliveryBox}}
+  {{if or $root.ShowDeliveryBox $root.RefNo}}
   <section class="refrow">
-    <div><span class="lbl">วันที่จัดส่ง</span>{{$root.DeliveryDate}}</div>
+    {{if $root.ShowDeliveryBox}}<div><span class="lbl">วันที่จัดส่ง</span>{{$root.DeliveryDate}}</div>{{end}}
     {{if $root.RefNo}}<div><span class="lbl">อ้างอิง</span>{{$root.RefNo}}</div>{{end}}
     {{if $root.SalespersonName}}<div><span class="lbl">พนักงานขาย</span>{{$root.SalespersonName}}</div>{{end}}
   </section>
