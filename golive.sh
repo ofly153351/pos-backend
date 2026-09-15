@@ -178,12 +178,33 @@ fi
 # new migration files stay unrecorded so the backend applies them on boot.
 # No-op on a fresh DB (schema_migrations doesn't exist yet) or when the ledger
 # already has entries.
-if ! LEDGER_COUNT=$(docker compose exec -T postgres \
+# No-op on a fresh DB with no schema yet; on a DB whose Docker init scripts
+# already created the core schema, bootstrap the ledger before preparing it.
+if ! LEDGER_STATE=$(docker compose exec -T postgres \
   psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
-  -tAc "SELECT count(*) FROM schema_migrations" 2>/dev/null | tr -d '[:space:]'); then
-  LEDGER_COUNT=""
-  info "ยังไม่มี schema_migrations — ข้าม restored-DB guard (fresh DB)"
+  -tAc "SELECT CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN 'missing' ELSE (SELECT count(*)::text FROM schema_migrations) END" 2>/dev/null | tr -d '[:space:]'); then
+  die "อ่านสถานะ schema_migrations ไม่ได้ — ตรวจสอบ: docker compose logs --tail=100 postgres"
 fi
+
+if [ "$LEDGER_STATE" = "missing" ]; then
+  if ! CORE_SCHEMA_READY=$(docker compose exec -T postgres \
+    psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
+    -tAc "SELECT CASE WHEN to_regclass('public.stores') IS NOT NULL AND to_regclass('public.documents') IS NOT NULL THEN 'yes' ELSE 'no' END" 2>/dev/null | tr -d '[:space:]'); then
+    die "ตรวจสอบ core schema ไม่ได้ — ตรวจสอบ: docker compose logs --tail=100 postgres"
+  fi
+  if [ "$CORE_SCHEMA_READY" = "yes" ]; then
+    info "พบ core schema แต่ไม่มี migration ledger — สร้าง schema_migrations..."
+    docker compose exec -T postgres psql -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" \
+      -c "CREATE TABLE IF NOT EXISTS schema_migrations (id SERIAL PRIMARY KEY, filename TEXT NOT NULL UNIQUE, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())" >/dev/null
+    LEDGER_COUNT="0"
+  else
+    info "ยังไม่มี core schema — ให้ backend bootstrap migration เอง"
+    LEDGER_COUNT=""
+  fi
+else
+  LEDGER_COUNT="$LEDGER_STATE"
+fi
+
 if [ "${LEDGER_COUNT:-x}" = "0" ]; then
   info "schema_migrations ว่าง (DB ถูก restore) — เตรียม ledger..."
   if command -v uv >/dev/null 2>&1; then
