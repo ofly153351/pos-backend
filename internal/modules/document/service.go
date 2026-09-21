@@ -371,7 +371,7 @@ func (s Service) assignNumberAndInsert(doc *Document) (*Document, error) {
 		seq, _ := s.repo.NextSeq(doc.StoreID, doc.Type)
 		seq += int64(attempt)
 		doc.DocumentNo = fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
-		doc.DocumentNoFull = fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
+		doc.DocumentNoFull = fmt.Sprintf("%s%d%02d-%04d", prefix, buddhistYear, int(now.Month()), seq)
 		createErr = s.repo.Create(doc)
 		if createErr == nil {
 			return doc, nil
