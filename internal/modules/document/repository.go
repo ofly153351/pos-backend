@@ -166,7 +166,7 @@ func (r *repository) BulkSetStatus(storeID string, ids []string, status Document
 // numbering monotonic across deletes.
 func (r *repository) NextSeq(storeID string, docType DocumentType) (int64, error) {
 	now := time.Now()
-	prefix := fmt.Sprintf("%s-%02d%02d", typePrefix(docType), now.Year()%100, now.Month())
+	prefix := fmt.Sprintf("%s%d%02d", typePrefix(docType), now.Year()+543, now.Month())
 	var maxSeq int64
 	r.db.Model(&Document{}).
 		Where("store_id = ? AND document_no LIKE ?", storeID, prefix+"-%").
