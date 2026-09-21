@@ -27,6 +27,7 @@ var (
 	ErrNoItems           = errors.New("document must have at least one item")
 	ErrBadAction         = errors.New("unknown bulk action")
 	ErrInvalidConversion = errors.New("conversion not allowed for this document type")
+	ErrAlreadyConverted  = errors.New("document has already been converted to this type")
 )
 
 // fieldValidationError carries field-level failures so the handler can answer
@@ -914,10 +915,20 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	if !canConvert(src.Type, target) {
 		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
+	if existing, err := s.repo.FindBySourceAndType(src.ID, target); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return nil, fmt.Errorf("%w: %s", ErrAlreadyConverted, existing.DocumentNoFull)
+	}
 
 	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
 	// (customer snapshot, delivery / reference fields, dates, notes, lineage link).
 	req := buildConversionRequest(src, target, deliveryDateOverride...)
+	// For DELIVERY_ORDER the optional second override is the purchase-order
+	// reference entered by the user during the invoice → DO conversion modal.
+	if target == TypeDeliveryOrder && len(deliveryDateOverride) > 1 && deliveryDateOverride[1] != nil {
+		req.PORefNo = strings.TrimSpace(*deliveryDateOverride[1])
+	}
 	// A DELIVERY_ORDER ships to the customer's saved delivery profile, not their
 	// billing snapshot — overlay it when one exists (blank fields keep the fallback).
 	if target == TypeDeliveryOrder && src.CustomerID != "" {
@@ -986,6 +997,7 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		DeliveryContact:      req.DeliveryContact,
 		DeliveryPhone:        req.DeliveryPhone,
 		InvoiceRefNo:         req.InvoiceRefNo,
+		PORefNo:              req.PORefNo,
 		SourceDocumentID:     req.SourceDocumentID,
 		// Money — verbatim from the source, NOT recomputed.
 		Subtotal:     src.Subtotal,
@@ -1141,8 +1153,8 @@ func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, sto
 }
 
 // ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
-func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate *string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, deliveryDate)
+func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate, poRefNo *string) (*Document, error) {
+	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, deliveryDate, poRefNo)
 }
 
 // ConvertQuotation creates an INVOICE document from an existing QUOTATION.

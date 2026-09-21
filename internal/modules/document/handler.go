@@ -234,9 +234,10 @@ func (h Handler) ConvertToDeliveryOrder(c *fiber.Ctx) error {
 	id := c.Params("docID")
 	var req struct {
 		DeliveryDate *string `json:"delivery_date,omitempty"`
+		PORefNo      *string `json:"po_ref_no,omitempty"`
 	}
 	_ = c.BodyParser(&req)
-	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.DeliveryDate)
+	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.DeliveryDate, req.PORefNo)
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -310,6 +311,8 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, "not found", err.Error())
 	case errors.Is(err, ErrForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, "forbidden", err.Error())
+	case errors.Is(err, ErrAlreadyConverted):
+		return httpx.Error(c, fiber.StatusConflict, "document already exists", err.Error())
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction), errors.Is(err, ErrInvalidConversion):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:

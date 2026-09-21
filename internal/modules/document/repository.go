@@ -1,6 +1,7 @@
 package document
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 type Repository interface {
 	List(q ListQuery) ([]DocumentListItem, int64, DocumentStats, error)
 	FindByID(id string) (*Document, error)
+	FindBySourceAndType(sourceID string, target DocumentType) (*Document, error)
 	Create(doc *Document) error
 	UpdateStatus(id string, status DocumentStatus) error
 	MarkPaid(id string) error
@@ -92,7 +94,9 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 	var rows []DocumentListItem
 	err := base.
 		Select("id, document_no, document_no_full, type, status, payment_status, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
-		Order("document_date DESC, created_at DESC").
+		// The document list is a creation feed: newest added records first.
+		// document_date is only a deterministic tie-breaker for equal timestamps.
+		Order("created_at DESC, document_date DESC").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error
 
@@ -102,6 +106,20 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 func (r *repository) FindByID(id string) (*Document, error) {
 	var doc Document
 	err := r.db.Preload("Items").First(&doc, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r *repository) FindBySourceAndType(sourceID string, target DocumentType) (*Document, error) {
+	var doc Document
+	err := r.db.Preload("Items").
+		Where("source_document_id = ? AND type = ?", sourceID, target).
+		First(&doc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

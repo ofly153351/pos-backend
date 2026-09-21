@@ -51,6 +51,8 @@ func (r stubRepo) FindByID(id string) (*Document, error) {
 	return nil, errors.New("not found")
 }
 
+func (stubRepo) FindBySourceAndType(string, DocumentType) (*Document, error) { return nil, nil }
+
 func (stubRepo) List(ListQuery) ([]DocumentListItem, int64, DocumentStats, error) {
 	return nil, 0, DocumentStats{}, nil
 }

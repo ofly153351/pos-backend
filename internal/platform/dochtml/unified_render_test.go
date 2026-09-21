@@ -137,6 +137,20 @@ func TestUnifiedRender_SinglePagePin(t *testing.T) {
 	}
 }
 
+func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
+	doc := makeDoc("DELIVERY_ORDER", 1)
+	doc.PORefNo = "PO256909-0015"
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	want := `<tr><td>อ้างอิงใบสั่งซื้อ (Ref. PO)</td><td class="b">PO256909-0015</td></tr>`
+	if !strings.Contains(html, want) {
+		t.Fatalf("missing PO reference row %q", want)
+	}
+}
+
 // A copy set (ต้นฉบับ/สำเนา) must wrap each copy in .copy-break so it page-breaks
 // in print AND is visually separated on screen (preview drawer).
 func TestUnifiedRender_CopySeparation(t *testing.T) {
