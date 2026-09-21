@@ -75,6 +75,8 @@ func (s Service) generateInvoicePDF(doc *Document, opts InvoicePDFOptions) ([]by
 		IssueDate:   doc.DocumentDate,
 		DueDate:     dueDate,
 		ReferenceDO: opts.ReferenceDO,
+		// ใบแจ้งหนี้ที่สร้างจากใบเสนอราคา → พิมพ์ "อ้างอิงใบเสนอราคา" ในหัว PDF
+		ReferenceQuotation: s.resolveQuotationRef(doc),
 
 		Subtotal:      dd.Subtotal,
 		TotalDiscount: dd.TotalDiscount,

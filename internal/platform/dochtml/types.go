@@ -155,10 +155,13 @@ type DocData struct {
 	SalespersonName      string
 	InvoiceRefNo         string
 	PORefNo              string
-	ShippingFee          float64
-	CreditTermDays       int
-	PreVatAmount         float64
-	QRPaymentURL         template.URL
+	// QuotationRefNo = เลขที่ใบเสนอราคาต้นทาง แสดงเป็นแถว "อ้างอิงใบเสนอราคา
+	// (Ref. Quotation)" ในหัวเอกสารใบแจ้งหนี้ที่สร้างจากใบเสนอราคา (ว่าง = ไม่แสดง)
+	QuotationRefNo string
+	ShippingFee    float64
+	CreditTermDays int
+	PreVatAmount   float64
+	QRPaymentURL   template.URL
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).

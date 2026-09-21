@@ -168,6 +168,12 @@ func drawInvoicePage(pdf *gofpdf.Fpdf, font string, in InvoicePDFInput) {
 		pdf.CellFormat(body/4, 5, in.ReferenceDO, "", 1, "R", false, 0, "")
 	}
 
+	if in.ReferenceQuotation != "" {
+		pdf.SetX(margin + body/2)
+		pdf.CellFormat(body/4, 5, "อ้างอิงใบเสนอราคา / Ref. Quotation", "", 0, "R", false, 0, "")
+		pdf.CellFormat(body/4, 5, in.ReferenceQuotation, "", 1, "R", false, 0, "")
+	}
+
 	pdf.Ln(4)
 	hRule(pdf)
 	pdf.Ln(3)
@@ -395,7 +401,7 @@ func money(v float64) string {
 	}
 	// integer and fractional parts
 	intPart := int64(v)
-	frac := int64(math.Round((v-float64(intPart))*100))
+	frac := int64(math.Round((v - float64(intPart)) * 100))
 	if frac == 100 {
 		intPart++
 		frac = 0

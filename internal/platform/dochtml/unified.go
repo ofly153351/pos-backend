@@ -183,9 +183,11 @@ type renderView struct {
 	// ลูกค้า / จัดส่ง
 	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
 	StaffName, SalespersonName, RefNo, DeliveryDate          string
-	PriceTerms, DeliveryTerms                                string
-	DeliveryAddr, DeliveryContact, DeliveryPhone             string
-	BahtText                                                 string
+	// QuotationRefNo = แถว "อ้างอิงใบเสนอราคา (Ref. Quotation)" ในตารางหัวเอกสาร
+	QuotationRefNo                               string
+	PriceTerms, DeliveryTerms                    string
+	DeliveryAddr, DeliveryContact, DeliveryPhone string
+	BahtText                                     string
 	// flags
 	ShowDiscount, ShowDeliveryBox, ShowPayBox, PayCash bool
 	// footer
@@ -365,6 +367,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		CustomerName: d.CustomerName, CustomerTaxID: derefStr(d.CustomerTaxID),
 		CustomerAddr: d.CustomerAddress, CustomerPhone: d.CustomerPhone,
 		StaffName: d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
+		QuotationRefNo: d.QuotationRefNo,
 		DeliveryDate: func() string {
 			if d.DeliveryDate != nil {
 				return thaiDate(*d.DeliveryDate)
@@ -612,6 +615,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <table class="doc-meta">
         <tr><td>เลขที่ (No.)</td><td class="b">{{$root.DocNo}}</td></tr>
         <tr><td>วันที่ (Date)</td><td class="b">{{$root.DocDate}}</td></tr>
+        {{if $root.QuotationRefNo}}<tr><td>อ้างอิงใบเสนอราคา (Ref. Quotation)</td><td class="b">{{$root.QuotationRefNo}}</td></tr>{{end}}
         {{if $root.SpecialLabel}}<tr><td>{{$root.SpecialLabel}}</td><td class="b">{{$root.SpecialValue}}</td></tr>{{end}}
         {{if $root.StaffName}}<tr><td>ผู้ออกเอกสาร (Issued By)</td><td class="b">{{$root.StaffName}}</td></tr>{{end}}
       </table>

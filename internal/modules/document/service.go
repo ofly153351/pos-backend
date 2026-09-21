@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -627,6 +628,9 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 	}
 
 	docData := toDocData(doc)
+	// ใบแจ้งหนี้ที่สร้างจากใบเสนอราคา → แถว "อ้างอิงใบเสนอราคา" ในหัวเอกสาร
+	docData.QuotationRefNo = s.resolveQuotationRef(doc)
+
 	if doc.StorePromptPayID != "" {
 		docData.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(doc.StorePromptPayID, doc.TotalAmount)
 	}
@@ -1093,6 +1097,36 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		req.InvoiceRefNo = src.DocumentNoFull
 	}
 	return req
+}
+
+// quotationRefNoOf returns the visible "อ้างอิงใบเสนอราคา / Ref. Quotation" reference a
+// source document contributes: only a QUOTATION does, every other source type renders
+// nothing. Pure, so it is unit-testable without a DB.
+func quotationRefNoOf(src *Document) string {
+	if src == nil || src.Type != TypeQuotation {
+		return ""
+	}
+	if full := strings.TrimSpace(src.DocumentNoFull); full != "" {
+		return full
+	}
+	return strings.TrimSpace(src.DocumentNo)
+}
+
+// resolveQuotationRef loads the document `doc` was created from (SourceDocumentID) and
+// returns its number when that source is a QUOTATION — the "อ้างอิงใบเสนอราคา
+// (Ref. Quotation)" row on an invoice created from a quotation. Resolved at render time
+// (never stored) so invoices created before this row existed display it too.
+// A lookup failure degrades to "no row" but is logged, not swallowed.
+func (s Service) resolveQuotationRef(doc *Document) string {
+	if doc == nil || doc.SourceDocumentID == nil || strings.TrimSpace(*doc.SourceDocumentID) == "" {
+		return ""
+	}
+	src, err := s.repo.FindByID(*doc.SourceDocumentID)
+	if err != nil {
+		log.Printf("[document] quotation ref lookup failed: doc=%s source=%s err=%v", doc.ID, *doc.SourceDocumentID, err)
+		return ""
+	}
+	return quotationRefNoOf(src)
 }
 
 func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
