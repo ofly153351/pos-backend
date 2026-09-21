@@ -82,6 +82,9 @@ func (p docProfile) footerBlockH(hasNotes bool) float64 {
 	// กล่องหมายเหตุขึ้นเสมอ (เป็น form field สำหรับเขียน ไม่ผูกกับว่ามี Notes ไหม)
 	// จึงสำรองพื้นที่ทุกครั้ง — hasNotes ไม่ได้ใช้ตัดสินความสูงอีกต่อไป
 	_ = hasNotes
+	if p.IsDelivery {
+		h += 8 // baht-text row below the item table
+	}
 	h += hRemarks  // remarks box (stacked below the grid)
 	h += hSigBlock // signatures stacked below remarks
 	return h
@@ -572,14 +575,14 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 /* center the whole signature GROUP, and center the content INSIDE each column
    (otherwise the fixed-width underlines left-pack inside 56mm boxes and the
    visible ink drifts left of the page centerline despite justify-content:center) */
-.signatures{ display:flex; justify-content:center; gap:20mm; margin-top:7mm; break-inside:avoid; }
-.sig{ width:56mm; flex-shrink:0; }
-.sig-t{ font-size:10px; font-weight:700; margin-bottom:3mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
-.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1.5mm; margin-top:7mm; margin-bottom:3mm; }
-.sig-write-lbl{ font-size:10px; white-space:nowrap; flex-shrink:0; }
-.sig-ln{ width:40mm; border-bottom:1px solid var(--ink); }
-.sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:1mm; font-size:9px; color:var(--muted); }
-.sig-date-seg{ width:10mm; border-bottom:1px solid var(--ink); position:relative; top:-2px; }
+.signatures{ display:flex; justify-content:center; gap:14mm; margin-top:4mm; break-inside:avoid; }
+.sig{ width:52mm; flex-shrink:0; }
+.sig-t{ font-size:9px; font-weight:700; margin-bottom:2mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:.5mm; }
+.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1mm; margin-top:4mm; margin-bottom:2mm; }
+.sig-write-lbl{ font-size:9px; white-space:nowrap; flex-shrink:0; }
+.sig-ln{ width:36mm; border-bottom:1px solid var(--ink); }
+.sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:.8mm; font-size:8px; color:var(--muted); }
+.sig-date-seg{ width:8mm; border-bottom:1px solid var(--ink); position:relative; top:-1px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
 
 /* ---- bottom strip (absolute ทุกหน้า) ---- */
