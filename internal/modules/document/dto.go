@@ -52,7 +52,8 @@ type UpdatePaymentStatusRequest struct {
 }
 
 type ConvertRequest struct {
-	TargetType DocumentType `json:"target_type"`
+	TargetType      DocumentType `json:"target_type"`
+	ReceiptTemplate int          `json:"receipt_template,omitempty"`
 }
 
 // RelatedDoc is a lightweight projection of a document in the same conversion
@@ -105,6 +106,7 @@ type DocumentListItem struct {
 	Type             DocumentType   `json:"type"`
 	Status           DocumentStatus `json:"status"`
 	PaymentStatus    PaymentStatus  `json:"payment_status"`
+	CustomerID       string         `json:"customer_id"`
 	CustomerName     string         `json:"customer_name"`
 	StaffName        string         `json:"staff_name"`
 	DocumentDate     time.Time      `json:"document_date"`

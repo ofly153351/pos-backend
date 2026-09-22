@@ -38,6 +38,7 @@ type Document struct {
 	Type              DocumentType   `gorm:"not null;type:varchar(20)" json:"type"`
 	Status            DocumentStatus `gorm:"not null;type:varchar(20);default:'PENDING'" json:"status"`
 	PaymentStatus     PaymentStatus  `gorm:"not null;type:varchar(20);default:'UNPAID'" json:"payment_status"`
+	ReceiptTemplate   int            `gorm:"not null;default:1" json:"receipt_template"`
 	CustomerID        string         `gorm:"not null" json:"customer_id"`
 	CustomerName      string         `gorm:"not null" json:"customer_name"`
 	CustomerTaxID     *string        `json:"customer_tax_id,omitempty"`

@@ -168,6 +168,11 @@ type summaryLine struct {
 
 type bankView struct{ Name, No, Holder string }
 
+type billRowView struct {
+	No                                     int
+	DocumentNo, IssueDate, DueDate, Amount string
+}
+
 type renderView struct {
 	// ร้าน
 	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch string
@@ -195,6 +200,7 @@ type renderView struct {
 	Notes                                        string
 	Banks                                        []bankView
 	QRURL                                        template.URL
+	BillRows                                     []billRowView
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 	// pages
 	Pages        []pageView
@@ -354,6 +360,20 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	}
 
 	priceTerms, deliveryTerms := quotationTerms(d)
+	billRows := make([]billRowView, 0, len(d.BillRows))
+	for _, row := range d.BillRows {
+		due := "_"
+		if row.DueDate != nil {
+			due = thaiDate(*row.DueDate)
+		}
+		billRows = append(billRows, billRowView{
+			No:         len(billRows) + 1,
+			DocumentNo: row.DocumentNo,
+			IssueDate:  thaiDate(row.IssueDate),
+			DueDate:    due,
+			Amount:     money(row.Amount),
+		})
+	}
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
 		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: template.URL(store.LogoURL),
@@ -388,7 +408,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		ShowPayBox: p.ShowPayBox, PayCash: p.PayCash,
 
 		Summary: buildSummary(d, p), Notes: derefStr(d.Notes),
-		Banks: banks, QRURL: d.QRPaymentURL,
+		Banks: banks, QRURL: d.QRPaymentURL, BillRows: billRows,
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
 
@@ -545,6 +565,11 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .items .left{ text-align:left; } .items .num{ text-align:right; }
 .items tr.filler td{ height:var(--row-h); }
 .col-no{ width:9mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
+.bill-items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
+.bill-items th{ background:var(--ink); color:#fff; border:1px solid #444; padding:2.2mm 2mm; font-size:10px; text-align:center; }
+.bill-items td{ height:10mm; border:1px solid var(--line); padding:1.5mm 2mm; vertical-align:middle; text-align:center; }
+.bill-items .left{ text-align:left; } .bill-items .num{ text-align:right; }
+.bill-col-no{ width:14mm; } .bill-col-date{ width:38mm; } .bill-col-due{ width:38mm; } .bill-col-amount{ width:42mm; }
 tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
 /* ---- footer: summary + paybox + remarks + signatures ---- */
@@ -657,6 +682,23 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
   {{if not $pg.FooterOnly}}
   <div class="doc-body">
+    {{if eq $root.TitleTH "ใบวางบิล"}}
+    <table class="bill-items">
+      <thead><tr>
+        <th class="bill-col-no">ลำดับ</th>
+        <th class="left">ใบส่งสินค้า (DO)</th>
+        <th class="bill-col-date">วันที่ออกเอกสาร</th>
+        <th class="bill-col-due">วันครบกำหนด</th>
+        <th class="bill-col-amount">จำนวนเงิน</th>
+      </tr></thead>
+      <tbody>
+      {{range $row := $root.BillRows}}
+        <tr><td>{{$row.No}}</td><td class="left">ใบส่งสินค้าเลขที่ {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td></tr>
+      {{end}}
+      {{if not $root.BillRows}}<tr><td colspan="5">ไม่มีใบส่งสินค้าที่ค้างวางบิล</td></tr>{{end}}
+      </tbody>
+    </table>
+    {{else}}
     <table class="items">
       <thead><tr>
         <th class="col-no">ลำดับ</th>
@@ -686,6 +728,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       {{end}}
       </tbody>
     </table>
+    {{end}}
   </div>
   {{end}}
 

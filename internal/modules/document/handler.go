@@ -116,7 +116,7 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
 	// ?copy=N selects a single copy (0-based); absent/-1 prints the whole set.
-	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
+	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1), c.QueryInt("receipt_template", 0))
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -131,7 +131,7 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 func (h Handler) GetDocumentPDF(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
-	data, err := h.service.RenderDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
+	data, err := h.service.RenderDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1), c.QueryInt("receipt_template", 0))
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -266,9 +266,16 @@ func (h Handler) Convert(c *fiber.Ctx) error {
 	if req.TargetType == "" {
 		return httpx.Error(c, fiber.StatusBadRequest, "target_type required", nil)
 	}
-	doc, err := h.service.Convert(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.TargetType)
+	claims := middleware.ClaimsFromContext(c)
+	doc, err := h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType)
 	if err != nil {
 		return writeError(c, err)
+	}
+	if req.TargetType == TypeReceipt && req.ReceiptTemplate != 0 {
+		if err := h.service.SetReceiptTemplate(c.UserContext(), claims, storeID, doc.ID, req.ReceiptTemplate); err != nil {
+			return writeError(c, err)
+		}
+		doc.ReceiptTemplate = req.ReceiptTemplate
 	}
 	return httpx.Success(c, fiber.StatusCreated, "document converted", doc)
 }

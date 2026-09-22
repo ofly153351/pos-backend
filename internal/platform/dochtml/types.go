@@ -162,6 +162,24 @@ type DocData struct {
 	CreditTermDays int
 	PreVatAmount   float64
 	QRPaymentURL   template.URL
+	// Receipt Type 2 fields. They are optional so Receipt Type 1 remains unchanged.
+	ReceiptTemplate    int
+	PaymentMethod      string
+	PaymentDescription string
+	BillingRefNo       string
+	DeliveryRefNo      string
+	PaymentDate        time.Time
+	PaymentAmount      float64
+	PaymentBank        string
+	// BillRows is the delivery-order register printed inside a BILL document.
+	BillRows []BillRow
+}
+
+type BillRow struct {
+	DocumentNo string
+	IssueDate  time.Time
+	DueDate    *time.Time
+	Amount     float64
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).

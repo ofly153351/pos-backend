@@ -17,6 +17,7 @@ type Repository interface {
 	UpdateStatus(id string, status DocumentStatus) error
 	MarkPaid(id string) error
 	SetPaymentStatus(id string, status PaymentStatus) error
+	SetReceiptTemplate(id string, template int) error
 	Delete(id string) error
 	BulkDelete(storeID string, ids []string) error
 	BulkSetStatus(storeID string, ids []string, status DocumentStatus) error
@@ -93,7 +94,7 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 
 	var rows []DocumentListItem
 	err := base.
-		Select("id, document_no, document_no_full, type, status, payment_status, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
+		Select("id, document_no, document_no_full, type, status, payment_status, customer_id, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
 		// The document list is a creation feed: newest added records first.
 		// document_date is only a deterministic tie-breaker for equal timestamps.
 		Order("created_at DESC, document_date DESC").
@@ -157,6 +158,15 @@ func (r *repository) SetPaymentStatus(id string, status PaymentStatus) error {
 		Updates(map[string]any{
 			"payment_status": status,
 			"updated_at":     time.Now(),
+		}).Error
+}
+
+func (r *repository) SetReceiptTemplate(id string, template int) error {
+	return r.db.Model(&Document{}).
+		Where("id = ? AND type = ?", id, TypeReceipt).
+		Updates(map[string]any{
+			"receipt_template": template,
+			"updated_at":       time.Now(),
 		}).Error
 }
 

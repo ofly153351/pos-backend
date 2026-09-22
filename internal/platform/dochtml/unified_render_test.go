@@ -151,8 +151,25 @@ func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
 	}
 }
 
-// A copy set (ต้นฉบับ/สำเนา) must wrap each copy in .copy-break so it page-breaks
-// in print AND is visually separated on screen (preview drawer).
+func TestUnifiedRender_BillUsesDeliveryOrderRegister(t *testing.T) {
+	doc := makeDoc("BILL", 0)
+	due := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	doc.BillRows = []BillRow{{DocumentNo: "DO256909-0001", IssueDate: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), DueDate: &due, Amount: 1250}}
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	for _, want := range []string{"ใบส่งสินค้า (DO)", "วันที่ออกเอกสาร", "วันครบกำหนด", "จำนวนเงิน", "DO256909-0001", "1,250.00"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("billing notice missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<table class="items">`) {
+		t.Fatalf("billing notice must not render product-line table")
+	}
+}
+
 func TestUnifiedRender_CopySeparation(t *testing.T) {
 	html, err := RenderUnifiedDocumentCopies(makeDoc("TAX_INVOICE", 3), StoreInfo{Name: "ร้านทดสอบ"}, -1)
 	if err != nil {

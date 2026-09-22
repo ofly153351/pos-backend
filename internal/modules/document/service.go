@@ -622,13 +622,54 @@ func (s Service) DeleteDocument(ctx context.Context, actor auth.Claims, storeID,
 	return s.repo.Delete(id)
 }
 
-func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) (string, error) {
+func (s Service) SetReceiptTemplate(ctx context.Context, actor auth.Claims, storeID, id string, template int) error {
+	if template != 1 && template != 2 {
+		return fmt.Errorf("receipt template must be 1 or 2")
+	}
+	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
+		return err
+	}
+	return s.repo.SetReceiptTemplate(id, template)
+}
+
+func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int) (string, error) {
 	doc, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return "", err
 	}
+	if receiptTemplate == 0 {
+		receiptTemplate = doc.ReceiptTemplate
+		if receiptTemplate == 0 {
+			receiptTemplate = 1
+		}
+	}
 
 	docData := toDocData(doc)
+	if doc.Type == TypeReceipt && receiptTemplate == 2 {
+		docData.ReceiptTemplate = 2
+		docData.PaymentDate = doc.DocumentDate
+		docData.PaymentAmount = doc.TotalAmount
+		docData.PaymentDescription = "ชำระเงินตามเอกสาร " + doc.DocumentNoFull
+		docData.DeliveryRefNo = doc.InvoiceRefNo
+		if doc.SourceDocumentID != nil {
+			var source struct {
+				DocumentNoFull string
+				Type           DocumentType
+			}
+			if sourceErr := s.db.WithContext(ctx).
+				Table("documents").
+				Select("document_no_full, type").
+				Where("id = ? AND store_id = ?", *doc.SourceDocumentID, storeID).
+				Take(&source).Error; sourceErr == nil {
+				switch source.Type {
+				case TypeDeliveryOrder:
+					docData.DeliveryRefNo = source.DocumentNoFull
+				case TypeBill:
+					docData.BillingRefNo = source.DocumentNoFull
+				}
+			}
+		}
+	}
 	// ใบแจ้งหนี้ที่สร้างจากใบเสนอราคา → แถว "อ้างอิงใบเสนอราคา" ในหัวเอกสาร
 	docData.QuotationRefNo = s.resolveQuotationRef(doc)
 
@@ -655,7 +696,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		}
 	}
 
-	return dochtml.RenderUnifiedDocumentCopies(docData, dochtml.StoreInfo{
+	storeInfo := dochtml.StoreInfo{
 		Name:         doc.StoreName,
 		Address:      doc.StoreAddress,
 		Phone:        doc.StorePhone,
@@ -666,7 +707,23 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		LogoURL:      inlineImageDataURI(ctx, doc.StoreLogoURL),
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
-	}, copyIdx)
+	}
+	if doc.Type == TypeReceipt && receiptTemplate == 2 {
+		// Receipt Type 2 deliberately reuses the standard A4 document template.
+		// Only the payment row data changes; layout, pagination, copies and styling
+		// stay identical to Receipt Type 1.
+		docData.Items = []dochtml.DocItem{{
+			Description: docData.PaymentDescription,
+			Quantity:    1,
+			Unit:        "รายการ",
+			Amount:      docData.PaymentAmount,
+			UnitPrice:   docData.PaymentAmount,
+		}}
+		docData.Subtotal = docData.PaymentAmount
+		docData.VatAmount = 0
+		docData.TotalAmount = docData.PaymentAmount
+	}
+	return dochtml.RenderUnifiedDocumentCopies(docData, storeInfo, copyIdx)
 }
 
 // inlineImageDataURI fetches an image URL and returns it as a base64 data: URI so
@@ -707,8 +764,8 @@ func inlineImageDataURI(ctx context.Context, rawURL string) string {
 // HTML as the on-screen preview / print, then converting it with headless Chrome.
 // The PDF is therefore byte-for-byte the same layout as the preview (no separate
 // gofpdf renderer to drift). copyIdx selects one copy or the whole set.
-func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) ([]byte, error) {
-	html, err := s.RenderDocumentPrint(ctx, actor, storeID, id, copyIdx)
+func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int) ([]byte, error) {
+	html, err := s.RenderDocumentPrint(ctx, actor, storeID, id, copyIdx, receiptTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -1186,6 +1243,22 @@ func toDocData(doc *Document) dochtml.DocData {
 
 	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
 
+	var billRows []dochtml.BillRow
+	if doc.Type == TypeBill {
+		billRows = make([]dochtml.BillRow, 0, len(doc.Items))
+		for _, item := range doc.Items {
+			if strings.TrimSpace(item.Description) == "" {
+				continue
+			}
+			billRows = append(billRows, dochtml.BillRow{
+				DocumentNo: item.Description,
+				IssueDate:  doc.DocumentDate,
+				DueDate:    doc.DueDate,
+				Amount:     item.Amount,
+			})
+		}
+	}
+
 	return dochtml.DocData{
 		Type:              string(doc.Type),
 		DocumentNo:        doc.DocumentNo,
@@ -1200,6 +1273,7 @@ func toDocData(doc *Document) dochtml.DocData {
 		CustomerTaxID:     doc.CustomerTaxID,
 		StaffName:         doc.StaffName,
 		Items:             items,
+		BillRows:          billRows,
 		Subtotal:          doc.Subtotal,
 		TotalDiscount:     totalDiscount,
 		VatRate:           doc.VatRate,
