@@ -18,6 +18,7 @@ type Repository interface {
 	MarkPaid(id string) error
 	SetPaymentStatus(id string, status PaymentStatus) error
 	SetReceiptTemplate(id string, template int) error
+	ListReceiptSettlements(receiptID string) ([]ReceiptSettlement, error)
 	Delete(id string) error
 	BulkDelete(storeID string, ids []string) error
 	BulkSetStatus(storeID string, ids []string, status DocumentStatus) error
@@ -168,6 +169,14 @@ func (r *repository) SetReceiptTemplate(id string, template int) error {
 			"receipt_template": template,
 			"updated_at":       time.Now(),
 		}).Error
+}
+
+func (r *repository) ListReceiptSettlements(receiptID string) ([]ReceiptSettlement, error) {
+	var rows []ReceiptSettlement
+	err := r.db.Preload("BillingDocument").Preload("DeliveryOrder").
+		Where("receipt_document_id = ?", receiptID).
+		Order("sort_order ASC, created_at ASC").Find(&rows).Error
+	return rows, err
 }
 
 func (r *repository) Delete(id string) error {

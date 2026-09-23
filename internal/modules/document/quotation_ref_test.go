@@ -56,11 +56,14 @@ func (stubRepo) FindBySourceAndType(string, DocumentType) (*Document, error) { r
 func (stubRepo) List(ListQuery) ([]DocumentListItem, int64, DocumentStats, error) {
 	return nil, 0, DocumentStats{}, nil
 }
-func (stubRepo) Create(*Document) error                               { return nil }
-func (stubRepo) UpdateStatus(string, DocumentStatus) error            { return nil }
-func (stubRepo) MarkPaid(string) error                                { return nil }
-func (stubRepo) SetPaymentStatus(string, PaymentStatus) error         { return nil }
-func (stubRepo) SetReceiptTemplate(string, int) error                 { return nil }
+func (stubRepo) Create(*Document) error                       { return nil }
+func (stubRepo) UpdateStatus(string, DocumentStatus) error    { return nil }
+func (stubRepo) MarkPaid(string) error                        { return nil }
+func (stubRepo) SetPaymentStatus(string, PaymentStatus) error { return nil }
+func (stubRepo) SetReceiptTemplate(string, int) error         { return nil }
+func (stubRepo) ListReceiptSettlements(string) ([]ReceiptSettlement, error) {
+	return nil, nil
+}
 func (stubRepo) Delete(string) error                                  { return nil }
 func (stubRepo) BulkDelete(string, []string) error                    { return nil }
 func (stubRepo) BulkSetStatus(string, []string, DocumentStatus) error { return nil }

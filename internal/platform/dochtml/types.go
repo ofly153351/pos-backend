@@ -171,8 +171,15 @@ type DocData struct {
 	PaymentDate        time.Time
 	PaymentAmount      float64
 	PaymentBank        string
+	ReceiptSettlements []ReceiptSettlementRow
 	// BillRows is the delivery-order register printed inside a BILL document.
 	BillRows []BillRow
+}
+
+type ReceiptSettlementRow struct {
+	BillingRef  string
+	DeliveryRef string
+	Amount      float64
 }
 
 type BillRow struct {

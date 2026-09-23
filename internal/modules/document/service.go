@@ -56,6 +56,7 @@ var allowedConversions = map[DocumentType][]DocumentType{
 	TypeInvoice:       {TypeReceipt, TypeTaxInvoice, TypeDeliveryOrder, TypeCreditNote},
 	TypeReceipt:       {TypeTaxInvoice, TypeCreditNote},
 	TypeDeliveryOrder: {TypeInvoice, TypeReceipt},
+	TypeBill:          {TypeReceipt},
 	TypeTaxInvoice:    {TypeCreditNote},
 }
 
@@ -649,25 +650,28 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		docData.ReceiptTemplate = 2
 		docData.PaymentDate = doc.DocumentDate
 		docData.PaymentAmount = doc.TotalAmount
-		docData.PaymentDescription = "ชำระเงินตามเอกสาร " + doc.DocumentNoFull
-		docData.DeliveryRefNo = doc.InvoiceRefNo
-		if doc.SourceDocumentID != nil {
-			var source struct {
-				DocumentNoFull string
-				Type           DocumentType
+		billingRef, deliveryRef := s.resolveReceiptReferences(doc)
+		docData.PaymentDescription = buildReceiptPaymentDescription(
+			billingRef,
+			deliveryRef,
+			doc.DocumentNoFull,
+		)
+		docData.DeliveryRefNo = deliveryRef
+		docData.BillingRefNo = billingRef
+		settlements, settlementErr := s.repo.ListReceiptSettlements(doc.ID)
+		if settlementErr != nil {
+			return "", settlementErr
+		}
+		docData.ReceiptSettlements = make([]dochtml.ReceiptSettlementRow, 0, len(settlements))
+		for _, settlement := range settlements {
+			row := dochtml.ReceiptSettlementRow{Amount: settlement.AppliedAmount}
+			if settlement.BillingDocument != nil {
+				row.BillingRef = settlement.BillingDocument.DocumentNoFull
 			}
-			if sourceErr := s.db.WithContext(ctx).
-				Table("documents").
-				Select("document_no_full, type").
-				Where("id = ? AND store_id = ?", *doc.SourceDocumentID, storeID).
-				Take(&source).Error; sourceErr == nil {
-				switch source.Type {
-				case TypeDeliveryOrder:
-					docData.DeliveryRefNo = source.DocumentNoFull
-				case TypeBill:
-					docData.BillingRefNo = source.DocumentNoFull
-				}
+			if settlement.DeliveryOrder != nil {
+				row.DeliveryRef = settlement.DeliveryOrder.DocumentNoFull
 			}
+			docData.ReceiptSettlements = append(docData.ReceiptSettlements, row)
 		}
 	}
 	// ใบแจ้งหนี้ที่สร้างจากใบเสนอราคา → แถว "อ้างอิงใบเสนอราคา" ในหัวเอกสาร
@@ -709,16 +713,33 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		BankAccounts: bankAccounts,
 	}
 	if doc.Type == TypeReceipt && receiptTemplate == 2 {
-		// Receipt Type 2 deliberately reuses the standard A4 document template.
-		// Only the payment row data changes; layout, pagination, copies and styling
-		// stay identical to Receipt Type 1.
-		docData.Items = []dochtml.DocItem{{
-			Description: docData.PaymentDescription,
-			Quantity:    1,
-			Unit:        "รายการ",
-			Amount:      docData.PaymentAmount,
-			UnitPrice:   docData.PaymentAmount,
-		}}
+		// Type 2 prints one payment row per persisted settlement. Legacy receipts
+		// without settlement rows retain the single-row fallback.
+		if len(docData.ReceiptSettlements) > 0 {
+			docData.Items = make([]dochtml.DocItem, 0, len(docData.ReceiptSettlements))
+			for _, settlement := range docData.ReceiptSettlements {
+				description := buildReceiptPaymentDescription(
+					settlement.BillingRef,
+					settlement.DeliveryRef,
+					doc.DocumentNoFull,
+				)
+				docData.Items = append(docData.Items, dochtml.DocItem{
+					Description: description,
+					Quantity:    1,
+					Unit:        "รายการ",
+					Amount:      settlement.Amount,
+					UnitPrice:   settlement.Amount,
+				})
+			}
+		} else {
+			docData.Items = []dochtml.DocItem{{
+				Description: docData.PaymentDescription,
+				Quantity:    1,
+				Unit:        "รายการ",
+				Amount:      docData.PaymentAmount,
+				UnitPrice:   docData.PaymentAmount,
+			}}
+		}
 		docData.Subtotal = docData.PaymentAmount
 		docData.VatAmount = 0
 		docData.TotalAmount = docData.PaymentAmount
@@ -1069,6 +1090,176 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	return s.assignNumberAndInsert(doc)
 }
 
+// ConvertReceiptFromBills creates one receipt for multiple billing notices. Each
+// selected BILL contributes its delivery-order rows to receipt_settlements, so Type 2
+// can render one payment row per BN/DO relationship without parsing display text.
+func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims, storeID string, billIDs []string, receiptTemplate int) (*Document, error) {
+	if len(billIDs) == 0 {
+		return nil, fmt.Errorf("at least one billing document is required: %w", ErrInvalidInput)
+	}
+	if receiptTemplate != 1 && receiptTemplate != 2 {
+		return nil, fmt.Errorf("receipt template must be 1 or 2: %w", ErrInvalidInput)
+	}
+
+	seen := make(map[string]bool, len(billIDs))
+	bills := make([]*Document, 0, len(billIDs))
+	for _, id := range billIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		bill, err := s.GetDocument(ctx, actor, storeID, id)
+		if err != nil {
+			return nil, err
+		}
+		if bill.Type != TypeBill {
+			return nil, fmt.Errorf("document %s is not a billing notice: %w", id, ErrInvalidInput)
+		}
+		if bill.Status == StatusCancelled || bill.PaymentStatus == PaymentPaid || bill.PaymentStatus == PaymentPartial {
+			return nil, fmt.Errorf("billing document %s is not fully payable: %w", bill.DocumentNoFull, ErrInvalidInput)
+		}
+		if existing, err := s.repo.FindBySourceAndType(bill.ID, TypeReceipt); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, fmt.Errorf("%w: %s", ErrAlreadyConverted, existing.DocumentNoFull)
+		}
+		if len(bills) > 0 && bill.CustomerID != bills[0].CustomerID {
+			return nil, fmt.Errorf("billing documents must belong to the same customer: %w", ErrInvalidInput)
+		}
+		bills = append(bills, bill)
+	}
+
+	primary := bills[0]
+	var subtotal, billDiscount, vatAmount, totalAmount float64
+	items := make([]DocumentItem, 0)
+	for _, bill := range bills {
+		subtotal += bill.Subtotal
+		billDiscount += bill.BillDiscount
+		vatAmount += bill.VatAmount
+		totalAmount += bill.TotalAmount
+		for _, item := range bill.Items {
+			items = append(items, DocumentItem{
+				ID:            idgen.Generate(PrefixDocumentItem),
+				ProductID:     item.ProductID,
+				Description:   item.Description,
+				Unit:          item.Unit,
+				Quantity:      item.Quantity,
+				UnitPrice:     item.UnitPrice,
+				DiscountType:  item.DiscountType,
+				DiscountValue: item.DiscountValue,
+				Amount:        item.Amount,
+			})
+		}
+	}
+
+	receipt := &Document{
+		ID:               idgen.Generate(PrefixDocument),
+		StoreID:          storeID,
+		Type:             TypeReceipt,
+		Status:           StatusPending,
+		PaymentStatus:    PaymentUnpaid,
+		ReceiptTemplate:  receiptTemplate,
+		CustomerID:       primary.CustomerID,
+		CustomerName:     primary.CustomerName,
+		CustomerTaxID:    primary.CustomerTaxID,
+		CustomerAddress:  primary.CustomerAddress,
+		CustomerPhone:    primary.CustomerPhone,
+		StaffID:          actor.UserID,
+		StaffName:        actor.Name,
+		DocumentDate:     time.Now(),
+		InvoiceRefNo:     primary.DocumentNoFull,
+		SourceDocumentID: &primary.ID,
+		Subtotal:         subtotal,
+		BillDiscount:     billDiscount,
+		VatRate:          primary.VatRate,
+		VatAmount:        vatAmount,
+		TotalAmount:      totalAmount,
+		Notes:            primary.Notes,
+		Items:            items,
+		CreatedBy:        actor.UserID,
+	}
+
+	settlements := make([]ReceiptSettlement, 0)
+	for _, bill := range bills {
+		addedDelivery := false
+		for _, item := range bill.Items {
+			var delivery Document
+			err := s.db.WithContext(ctx).
+				Where("store_id = ? AND type = ? AND document_no_full = ?", storeID, TypeDeliveryOrder, strings.TrimSpace(item.Description)).
+				First(&delivery).Error
+			if err != nil {
+				continue
+			}
+			billingID := bill.ID
+			deliveryID := delivery.ID
+			settlements = append(settlements, ReceiptSettlement{
+				ID:                idgen.Generate(PrefixDocumentItem),
+				ReceiptDocumentID: receipt.ID,
+				BillingDocumentID: &billingID,
+				DeliveryOrderID:   &deliveryID,
+				AppliedAmount:     item.Amount,
+				SortOrder:         len(settlements) + 1,
+			})
+			addedDelivery = true
+		}
+		if !addedDelivery {
+			billingID := bill.ID
+			settlements = append(settlements, ReceiptSettlement{
+				ID:                idgen.Generate(PrefixDocumentItem),
+				ReceiptDocumentID: receipt.ID,
+				BillingDocumentID: &billingID,
+				AppliedAmount:     bill.TotalAmount,
+				SortOrder:         len(settlements) + 1,
+			})
+		}
+	}
+
+	receiptItems := receipt.Items
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		prefix := fmt.Sprintf("RCT%d%02d", now.Year()+543, now.Month())
+		var seq int64
+		if err := tx.Model(&Document{}).
+			Where("store_id = ? AND type = ? AND document_no LIKE ?", storeID, TypeReceipt, prefix+"-%").
+			Select("COALESCE(MAX(CAST(SUBSTRING(document_no FROM '[0-9]+$') AS INTEGER)), 0)").
+			Scan(&seq).Error; err != nil {
+			return err
+		}
+		receipt.DocumentNo = fmt.Sprintf("RCT%d%02d-%04d", now.Year()+543, now.Month(), seq+1)
+		receipt.DocumentNoFull = receipt.DocumentNo
+		receipt.Items = nil
+		if err := tx.Create(receipt).Error; err != nil {
+			return err
+		}
+		for i := range receiptItems {
+			receiptItems[i].DocumentID = receipt.ID
+		}
+		if len(receiptItems) > 0 {
+			if err := tx.Create(&receiptItems).Error; err != nil {
+				return err
+			}
+		}
+		if len(settlements) > 0 {
+			if err := tx.Create(&settlements).Error; err != nil {
+				return err
+			}
+		}
+		for _, bill := range bills {
+			if err := tx.Model(&Document{}).Where("id = ?", bill.ID).Updates(map[string]any{
+				"payment_status": PaymentPaid,
+				"updated_at":     time.Now(),
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	receipt.Items = receiptItems
+	return receipt, nil
+}
+
 // applyCustomerShipping overlays the customer's shipping profile onto a delivery
 // order request. Each field falls back to whatever buildConversionRequest already
 // set (the billing snapshot) when the shipping value is blank.
@@ -1166,6 +1357,69 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		req.InvoiceRefNo = src.DocumentNoFull
 	}
 	return req
+}
+
+// resolveReceiptReferences walks the source-document chain so Receipt Type 2 can show
+// the billing notice and delivery order that the payment settles. A receipt created
+// from a delivery order commonly has the DO as its direct source and the billing
+// reference one level further up, so looking only at the direct source is insufficient.
+func (s Service) resolveReceiptReferences(doc *Document) (billingRef, deliveryRef string) {
+	current := doc
+	seen := map[string]bool{}
+	for depth := 0; current != nil && current.SourceDocumentID != nil && depth < 8; depth++ {
+		sourceID := strings.TrimSpace(*current.SourceDocumentID)
+		if sourceID == "" || seen[sourceID] {
+			break
+		}
+		seen[sourceID] = true
+
+		source, err := s.repo.FindByID(sourceID)
+		if err != nil {
+			log.Printf("[document] receipt reference lookup failed: receipt=%s source=%s err=%v", doc.ID, sourceID, err)
+			break
+		}
+		switch source.Type {
+		case TypeBill:
+			if billingRef == "" {
+				billingRef = strings.TrimSpace(source.DocumentNoFull)
+			}
+			// BILL rows are the selected delivery-order register. Keep the
+			// first non-empty reference for the receipt description.
+			if deliveryRef == "" {
+				for _, item := range source.Items {
+					if ref := strings.TrimSpace(item.Description); ref != "" {
+						deliveryRef = ref
+						break
+					}
+				}
+			}
+		case TypeDeliveryOrder:
+			if deliveryRef == "" {
+				deliveryRef = strings.TrimSpace(source.DocumentNoFull)
+			}
+			if billingRef == "" {
+				ref := strings.TrimSpace(source.InvoiceRefNo)
+				if ref != "" && ref != deliveryRef {
+					billingRef = ref
+				}
+			}
+		}
+		current = source
+	}
+	return billingRef, deliveryRef
+}
+
+func buildReceiptPaymentDescription(billingRef, deliveryRef, receiptRef string) string {
+	switch {
+	case billingRef != "" && deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s (ใบส่งสินค้า %s)", billingRef, deliveryRef)
+	case billingRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s", billingRef)
+	case deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบส่งสินค้า %s", deliveryRef)
+	default:
+		return "ชำระเงินตามเอกสาร " + receiptRef
+	}
 }
 
 // quotationRefNoOf returns the visible "อ้างอิงใบเสนอราคา / Ref. Quotation" reference a

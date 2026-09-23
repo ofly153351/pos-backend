@@ -52,8 +52,9 @@ type UpdatePaymentStatusRequest struct {
 }
 
 type ConvertRequest struct {
-	TargetType      DocumentType `json:"target_type"`
-	ReceiptTemplate int          `json:"receipt_template,omitempty"`
+	TargetType        DocumentType `json:"target_type"`
+	ReceiptTemplate   int          `json:"receipt_template,omitempty"`
+	SourceDocumentIDs []string     `json:"source_document_ids,omitempty"`
 }
 
 // RelatedDoc is a lightweight projection of a document in the same conversion

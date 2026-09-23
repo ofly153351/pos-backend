@@ -267,7 +267,13 @@ func (h Handler) Convert(c *fiber.Ctx) error {
 		return httpx.Error(c, fiber.StatusBadRequest, "target_type required", nil)
 	}
 	claims := middleware.ClaimsFromContext(c)
-	doc, err := h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType)
+	var doc *Document
+	var err error
+	if req.TargetType == TypeReceipt && len(req.SourceDocumentIDs) > 0 {
+		doc, err = h.service.ConvertReceiptFromBills(c.UserContext(), claims, storeID, req.SourceDocumentIDs, req.ReceiptTemplate)
+	} else {
+		doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType)
+	}
 	if err != nil {
 		return writeError(c, err)
 	}

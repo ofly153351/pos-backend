@@ -104,5 +104,19 @@ type DocumentItem struct {
 	Amount        float64 `gorm:"not null;default:0" json:"amount"`
 }
 
+type ReceiptSettlement struct {
+	ID                string    `gorm:"primaryKey;type:varchar(30)" json:"id"`
+	ReceiptDocumentID string    `gorm:"not null;index" json:"receipt_document_id"`
+	BillingDocumentID *string   `json:"billing_document_id,omitempty"`
+	DeliveryOrderID   *string   `json:"delivery_order_id,omitempty"`
+	AppliedAmount     float64   `gorm:"not null" json:"applied_amount"`
+	SortOrder         int       `gorm:"not null;default:1" json:"sort_order"`
+	CreatedAt         time.Time `json:"created_at"`
+	BillingDocument   *Document `gorm:"foreignKey:BillingDocumentID" json:"billing_document,omitempty"`
+	DeliveryOrder     *Document `gorm:"foreignKey:DeliveryOrderID" json:"delivery_order,omitempty"`
+}
+
+func (ReceiptSettlement) TableName() string { return "receipt_settlements" }
+
 func (Document) TableName() string     { return "documents" }
 func (DocumentItem) TableName() string { return "document_items" }
