@@ -155,10 +155,38 @@ type DocData struct {
 	SalespersonName      string
 	InvoiceRefNo         string
 	PORefNo              string
-	ShippingFee          float64
-	CreditTermDays       int
-	PreVatAmount         float64
-	QRPaymentURL         template.URL
+	// QuotationRefNo = เลขที่ใบเสนอราคาต้นทาง แสดงเป็นแถว "อ้างอิงใบเสนอราคา
+	// (Ref. Quotation)" ในหัวเอกสารใบแจ้งหนี้ที่สร้างจากใบเสนอราคา (ว่าง = ไม่แสดง)
+	QuotationRefNo string
+	ShippingFee    float64
+	CreditTermDays int
+	PreVatAmount   float64
+	QRPaymentURL   template.URL
+	// Receipt Type 2 fields. They are optional so Receipt Type 1 remains unchanged.
+	ReceiptTemplate    int
+	PaymentMethod      string
+	PaymentDescription string
+	BillingRefNo       string
+	DeliveryRefNo      string
+	PaymentDate        time.Time
+	PaymentAmount      float64
+	PaymentBank        string
+	ReceiptSettlements []ReceiptSettlementRow
+	// BillRows is the delivery-order register printed inside a BILL document.
+	BillRows []BillRow
+}
+
+type ReceiptSettlementRow struct {
+	BillingRef  string
+	DeliveryRef string
+	Amount      float64
+}
+
+type BillRow struct {
+	DocumentNo string
+	IssueDate  time.Time
+	DueDate    *time.Time
+	Amount     float64
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).

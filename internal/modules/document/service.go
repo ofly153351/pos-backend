@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -26,6 +27,7 @@ var (
 	ErrNoItems           = errors.New("document must have at least one item")
 	ErrBadAction         = errors.New("unknown bulk action")
 	ErrInvalidConversion = errors.New("conversion not allowed for this document type")
+	ErrAlreadyConverted  = errors.New("document has already been converted to this type")
 )
 
 // fieldValidationError carries field-level failures so the handler can answer
@@ -54,6 +56,7 @@ var allowedConversions = map[DocumentType][]DocumentType{
 	TypeInvoice:       {TypeReceipt, TypeTaxInvoice, TypeDeliveryOrder, TypeCreditNote},
 	TypeReceipt:       {TypeTaxInvoice, TypeCreditNote},
 	TypeDeliveryOrder: {TypeInvoice, TypeReceipt},
+	TypeBill:          {TypeReceipt},
 	TypeTaxInvoice:    {TypeCreditNote},
 }
 
@@ -219,6 +222,16 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
 	}
 
+	if req.BankAccountID != nil && strings.TrimSpace(*req.BankAccountID) != "" {
+		var active bool
+		if err := s.db.Raw(
+			"SELECT is_active FROM store_bank_accounts WHERE id = ? AND store_id = ?",
+			strings.TrimSpace(*req.BankAccountID), storeID,
+		).Scan(&active).Error; err != nil || !active {
+			return nil, fmt.Errorf("bank account not found or inactive: %w", ErrInvalidInput)
+		}
+	}
+
 	docDate, err := time.Parse("2006-01-02", req.DocumentDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid document_date: %w", ErrInvalidInput)
@@ -341,6 +354,7 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		InvoiceRefNo:         req.InvoiceRefNo,
 		PORefNo:              req.PORefNo,
 		SourceDocumentID:     req.SourceDocumentID,
+		BankAccountID:        req.BankAccountID,
 		ShippingFee:          round2(req.ShippingFee),
 		CreditTermDays:       req.CreditTermDays,
 		Subtotal:             subtotal,
@@ -370,8 +384,8 @@ func (s Service) assignNumberAndInsert(doc *Document) (*Document, error) {
 	for attempt := 0; attempt < maxDocNoAttempts; attempt++ {
 		seq, _ := s.repo.NextSeq(doc.StoreID, doc.Type)
 		seq += int64(attempt)
-		doc.DocumentNo = fmt.Sprintf("%s-%02d%02d-%04d", prefix, now.Year()%100, int(now.Month()), seq)
-		doc.DocumentNoFull = fmt.Sprintf("%s/%d/%02d/%04d", prefix, buddhistYear, int(now.Month()), seq)
+		doc.DocumentNo = fmt.Sprintf("%s%d%02d-%04d", prefix, buddhistYear, int(now.Month()), seq)
+		doc.DocumentNoFull = fmt.Sprintf("%s%d%02d-%04d", prefix, buddhistYear, int(now.Month()), seq)
 		createErr = s.repo.Create(doc)
 		if createErr == nil {
 			return doc, nil
@@ -620,27 +634,79 @@ func (s Service) DeleteDocument(ctx context.Context, actor auth.Claims, storeID,
 	return s.repo.Delete(id)
 }
 
-func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) (string, error) {
+func (s Service) SetReceiptTemplate(ctx context.Context, actor auth.Claims, storeID, id string, template int) error {
+	if template != 1 && template != 2 {
+		return fmt.Errorf("receipt template must be 1 or 2")
+	}
+	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
+		return err
+	}
+	return s.repo.SetReceiptTemplate(id, template)
+}
+
+func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int) (string, error) {
 	doc, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return "", err
 	}
+	if receiptTemplate == 0 {
+		receiptTemplate = doc.ReceiptTemplate
+		if receiptTemplate == 0 {
+			receiptTemplate = 1
+		}
+	}
 
 	docData := toDocData(doc)
+	if doc.Type == TypeReceipt && receiptTemplate == 2 {
+		docData.ReceiptTemplate = 2
+		docData.PaymentDate = doc.DocumentDate
+		docData.PaymentAmount = doc.TotalAmount
+		billingRef, deliveryRef := s.resolveReceiptReferences(doc)
+		docData.PaymentDescription = buildReceiptPaymentDescription(
+			billingRef,
+			deliveryRef,
+			doc.DocumentNoFull,
+		)
+		docData.DeliveryRefNo = deliveryRef
+		docData.BillingRefNo = billingRef
+		settlements, settlementErr := s.repo.ListReceiptSettlements(doc.ID)
+		if settlementErr != nil {
+			return "", settlementErr
+		}
+		docData.ReceiptSettlements = make([]dochtml.ReceiptSettlementRow, 0, len(settlements))
+		for _, settlement := range settlements {
+			row := dochtml.ReceiptSettlementRow{Amount: settlement.AppliedAmount}
+			if settlement.BillingDocument != nil {
+				row.BillingRef = settlement.BillingDocument.DocumentNoFull
+			}
+			if settlement.DeliveryOrder != nil {
+				row.DeliveryRef = settlement.DeliveryOrder.DocumentNoFull
+			}
+			docData.ReceiptSettlements = append(docData.ReceiptSettlements, row)
+		}
+	}
+	// ใบแจ้งหนี้ที่สร้างจากใบเสนอราคา → แถว "อ้างอิงใบเสนอราคา" ในหัวเอกสาร
+	docData.QuotationRefNo = s.resolveQuotationRef(doc)
+
 	if doc.StorePromptPayID != "" {
 		docData.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(doc.StorePromptPayID, doc.TotalAmount)
 	}
 
 	// Fetch bank accounts for this store
 	var bankRows []struct {
+		ID          string `gorm:"column:id"`
 		BankName    string `gorm:"column:bank_name"`
 		AccountNo   string `gorm:"column:account_no"`
 		AccountName string `gorm:"column:account_name"`
 	}
-	_ = s.db.Raw(
-		"SELECT bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? ORDER BY created_at ASC",
-		storeID,
-	).Scan(&bankRows)
+	bankSQL := "SELECT id, bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? AND is_active = TRUE"
+	bankArgs := []any{storeID}
+	if doc.BankAccountID != nil && strings.TrimSpace(*doc.BankAccountID) != "" {
+		bankSQL += " AND id = ?"
+		bankArgs = append(bankArgs, strings.TrimSpace(*doc.BankAccountID))
+	}
+	bankSQL += " ORDER BY is_default DESC, created_at ASC LIMIT 1"
+	_ = s.db.Raw(bankSQL, bankArgs...).Scan(&bankRows)
 	bankAccounts := make([]dochtml.BankAccountInfo, len(bankRows))
 	for i, r := range bankRows {
 		bankAccounts[i] = dochtml.BankAccountInfo{
@@ -650,7 +716,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		}
 	}
 
-	return dochtml.RenderUnifiedDocumentCopies(docData, dochtml.StoreInfo{
+	storeInfo := dochtml.StoreInfo{
 		Name:         doc.StoreName,
 		Address:      doc.StoreAddress,
 		Phone:        doc.StorePhone,
@@ -661,7 +727,40 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		LogoURL:      inlineImageDataURI(ctx, doc.StoreLogoURL),
 		PromptPayID:  doc.StorePromptPayID,
 		BankAccounts: bankAccounts,
-	}, copyIdx)
+	}
+	if doc.Type == TypeReceipt && receiptTemplate == 2 {
+		// Type 2 prints one payment row per persisted settlement. Legacy receipts
+		// without settlement rows retain the single-row fallback.
+		if len(docData.ReceiptSettlements) > 0 {
+			docData.Items = make([]dochtml.DocItem, 0, len(docData.ReceiptSettlements))
+			for _, settlement := range docData.ReceiptSettlements {
+				description := buildReceiptPaymentDescription(
+					settlement.BillingRef,
+					settlement.DeliveryRef,
+					doc.DocumentNoFull,
+				)
+				docData.Items = append(docData.Items, dochtml.DocItem{
+					Description: description,
+					Quantity:    1,
+					Unit:        "รายการ",
+					Amount:      settlement.Amount,
+					UnitPrice:   settlement.Amount,
+				})
+			}
+		} else {
+			docData.Items = []dochtml.DocItem{{
+				Description: docData.PaymentDescription,
+				Quantity:    1,
+				Unit:        "รายการ",
+				Amount:      docData.PaymentAmount,
+				UnitPrice:   docData.PaymentAmount,
+			}}
+		}
+		docData.Subtotal = docData.PaymentAmount
+		docData.VatAmount = 0
+		docData.TotalAmount = docData.PaymentAmount
+	}
+	return dochtml.RenderUnifiedDocumentCopies(docData, storeInfo, copyIdx)
 }
 
 // inlineImageDataURI fetches an image URL and returns it as a base64 data: URI so
@@ -702,8 +801,8 @@ func inlineImageDataURI(ctx context.Context, rawURL string) string {
 // HTML as the on-screen preview / print, then converting it with headless Chrome.
 // The PDF is therefore byte-for-byte the same layout as the preview (no separate
 // gofpdf renderer to drift). copyIdx selects one copy or the whole set.
-func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int) ([]byte, error) {
-	html, err := s.RenderDocumentPrint(ctx, actor, storeID, id, copyIdx)
+func (s Service) RenderDocumentPDF(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int) ([]byte, error) {
+	html, err := s.RenderDocumentPrint(ctx, actor, storeID, id, copyIdx, receiptTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -902,7 +1001,7 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 // source via SourceDocumentID. The (source → target) pair must be permitted by
 // allowedConversions. This is a document-level copy — pricing / VAT / accounting
 // are NOT altered (a CREDIT_NOTE is copied as-is, not auto-negated).
-func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType, deliveryDateOverride ...*string) (*Document, error) {
+func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType, bankAccountID *string, deliveryDateOverride ...*string) (*Document, error) {
 	src, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return nil, err
@@ -910,10 +1009,32 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	if !canConvert(src.Type, target) {
 		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
+	if existing, err := s.repo.FindBySourceAndType(src.ID, target); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return nil, fmt.Errorf("%w: %s", ErrAlreadyConverted, existing.DocumentNoFull)
+	}
 
 	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
 	// (customer snapshot, delivery / reference fields, dates, notes, lineage link).
 	req := buildConversionRequest(src, target, deliveryDateOverride...)
+	if bankAccountID != nil && strings.TrimSpace(*bankAccountID) != "" {
+		req.BankAccountID = bankAccountID
+	}
+	if req.BankAccountID != nil && strings.TrimSpace(*req.BankAccountID) != "" {
+		var active bool
+		if err := s.db.Raw(
+			"SELECT is_active FROM store_bank_accounts WHERE id = ? AND store_id = ?",
+			strings.TrimSpace(*req.BankAccountID), storeID,
+		).Scan(&active).Error; err != nil || !active {
+			return nil, fmt.Errorf("bank account not found or inactive: %w", ErrInvalidInput)
+		}
+	}
+	// For DELIVERY_ORDER the optional second override is the purchase-order
+	// reference entered by the user during the invoice → DO conversion modal.
+	if target == TypeDeliveryOrder && len(deliveryDateOverride) > 1 && deliveryDateOverride[1] != nil {
+		req.PORefNo = strings.TrimSpace(*deliveryDateOverride[1])
+	}
 	// A DELIVERY_ORDER ships to the customer's saved delivery profile, not their
 	// billing snapshot — overlay it when one exists (blank fields keep the fallback).
 	if target == TypeDeliveryOrder && src.CustomerID != "" {
@@ -982,7 +1103,9 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		DeliveryContact:      req.DeliveryContact,
 		DeliveryPhone:        req.DeliveryPhone,
 		InvoiceRefNo:         req.InvoiceRefNo,
+		PORefNo:              req.PORefNo,
 		SourceDocumentID:     req.SourceDocumentID,
+		BankAccountID:        req.BankAccountID,
 		// Money — verbatim from the source, NOT recomputed.
 		Subtotal:     src.Subtotal,
 		BillDiscount: src.BillDiscount,
@@ -994,6 +1117,177 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		CreatedBy:    actor.UserID,
 	}
 	return s.assignNumberAndInsert(doc)
+}
+
+// ConvertReceiptFromBills creates one receipt for multiple billing notices. Each
+// selected BILL contributes its delivery-order rows to receipt_settlements, so Type 2
+// can render one payment row per BN/DO relationship without parsing display text.
+func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims, storeID string, billIDs []string, receiptTemplate int) (*Document, error) {
+	if len(billIDs) == 0 {
+		return nil, fmt.Errorf("at least one billing document is required: %w", ErrInvalidInput)
+	}
+	if receiptTemplate != 1 && receiptTemplate != 2 {
+		return nil, fmt.Errorf("receipt template must be 1 or 2: %w", ErrInvalidInput)
+	}
+
+	seen := make(map[string]bool, len(billIDs))
+	bills := make([]*Document, 0, len(billIDs))
+	for _, id := range billIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		bill, err := s.GetDocument(ctx, actor, storeID, id)
+		if err != nil {
+			return nil, err
+		}
+		if bill.Type != TypeBill {
+			return nil, fmt.Errorf("document %s is not a billing notice: %w", id, ErrInvalidInput)
+		}
+		if bill.Status == StatusCancelled || bill.PaymentStatus == PaymentPaid || bill.PaymentStatus == PaymentPartial {
+			return nil, fmt.Errorf("billing document %s is not fully payable: %w", bill.DocumentNoFull, ErrInvalidInput)
+		}
+		if existing, err := s.repo.FindBySourceAndType(bill.ID, TypeReceipt); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, fmt.Errorf("%w: %s", ErrAlreadyConverted, existing.DocumentNoFull)
+		}
+		if len(bills) > 0 && bill.CustomerID != bills[0].CustomerID {
+			return nil, fmt.Errorf("billing documents must belong to the same customer: %w", ErrInvalidInput)
+		}
+		bills = append(bills, bill)
+	}
+
+	primary := bills[0]
+	var subtotal, billDiscount, vatAmount, totalAmount float64
+	items := make([]DocumentItem, 0)
+	for _, bill := range bills {
+		subtotal += bill.Subtotal
+		billDiscount += bill.BillDiscount
+		vatAmount += bill.VatAmount
+		totalAmount += bill.TotalAmount
+		for _, item := range bill.Items {
+			items = append(items, DocumentItem{
+				ID:            idgen.Generate(PrefixDocumentItem),
+				ProductID:     item.ProductID,
+				Description:   item.Description,
+				Unit:          item.Unit,
+				Quantity:      item.Quantity,
+				UnitPrice:     item.UnitPrice,
+				DiscountType:  item.DiscountType,
+				DiscountValue: item.DiscountValue,
+				Amount:        item.Amount,
+			})
+		}
+	}
+
+	receipt := &Document{
+		ID:               idgen.Generate(PrefixDocument),
+		StoreID:          storeID,
+		Type:             TypeReceipt,
+		Status:           StatusPending,
+		PaymentStatus:    PaymentUnpaid,
+		ReceiptTemplate:  receiptTemplate,
+		CustomerID:       primary.CustomerID,
+		CustomerName:     primary.CustomerName,
+		CustomerTaxID:    primary.CustomerTaxID,
+		CustomerAddress:  primary.CustomerAddress,
+		CustomerPhone:    primary.CustomerPhone,
+		StaffID:          actor.UserID,
+		StaffName:        actor.Name,
+		DocumentDate:     time.Now(),
+		InvoiceRefNo:     primary.DocumentNoFull,
+		SourceDocumentID: &primary.ID,
+		BankAccountID:    primary.BankAccountID,
+		Subtotal:         subtotal,
+		BillDiscount:     billDiscount,
+		VatRate:          primary.VatRate,
+		VatAmount:        vatAmount,
+		TotalAmount:      totalAmount,
+		Notes:            primary.Notes,
+		Items:            items,
+		CreatedBy:        actor.UserID,
+	}
+
+	settlements := make([]ReceiptSettlement, 0)
+	for _, bill := range bills {
+		addedDelivery := false
+		for _, item := range bill.Items {
+			var delivery Document
+			err := s.db.WithContext(ctx).
+				Where("store_id = ? AND type = ? AND document_no_full = ?", storeID, TypeDeliveryOrder, strings.TrimSpace(item.Description)).
+				First(&delivery).Error
+			if err != nil {
+				continue
+			}
+			billingID := bill.ID
+			deliveryID := delivery.ID
+			settlements = append(settlements, ReceiptSettlement{
+				ID:                idgen.Generate(PrefixDocumentItem),
+				ReceiptDocumentID: receipt.ID,
+				BillingDocumentID: &billingID,
+				DeliveryOrderID:   &deliveryID,
+				AppliedAmount:     item.Amount,
+				SortOrder:         len(settlements) + 1,
+			})
+			addedDelivery = true
+		}
+		if !addedDelivery {
+			billingID := bill.ID
+			settlements = append(settlements, ReceiptSettlement{
+				ID:                idgen.Generate(PrefixDocumentItem),
+				ReceiptDocumentID: receipt.ID,
+				BillingDocumentID: &billingID,
+				AppliedAmount:     bill.TotalAmount,
+				SortOrder:         len(settlements) + 1,
+			})
+		}
+	}
+
+	receiptItems := receipt.Items
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		prefix := fmt.Sprintf("RCT%d%02d", now.Year()+543, now.Month())
+		var seq int64
+		if err := tx.Model(&Document{}).
+			Where("store_id = ? AND type = ? AND document_no LIKE ?", storeID, TypeReceipt, prefix+"-%").
+			Select("COALESCE(MAX(CAST(SUBSTRING(document_no FROM '[0-9]+$') AS INTEGER)), 0)").
+			Scan(&seq).Error; err != nil {
+			return err
+		}
+		receipt.DocumentNo = fmt.Sprintf("RCT%d%02d-%04d", now.Year()+543, now.Month(), seq+1)
+		receipt.DocumentNoFull = receipt.DocumentNo
+		receipt.Items = nil
+		if err := tx.Create(receipt).Error; err != nil {
+			return err
+		}
+		for i := range receiptItems {
+			receiptItems[i].DocumentID = receipt.ID
+		}
+		if len(receiptItems) > 0 {
+			if err := tx.Create(&receiptItems).Error; err != nil {
+				return err
+			}
+		}
+		if len(settlements) > 0 {
+			if err := tx.Create(&settlements).Error; err != nil {
+				return err
+			}
+		}
+		for _, bill := range bills {
+			if err := tx.Model(&Document{}).Where("id = ?", bill.ID).Updates(map[string]any{
+				"payment_status": PaymentPaid,
+				"updated_at":     time.Now(),
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	receipt.Items = receiptItems
+	return receipt, nil
 }
 
 // applyCustomerShipping overlays the customer's shipping profile onto a delivery
@@ -1068,6 +1362,7 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		VatRate:                 src.VatRate,
 		Notes:                   src.Notes,
 		SourceDocumentID:        &srcID,
+		BankAccountID:           src.BankAccountID,
 		Items:                   items,
 	}
 	req.PriceValidityDays = src.PriceValidityDays
@@ -1095,25 +1390,118 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 	return req
 }
 
+// resolveReceiptReferences walks the source-document chain so Receipt Type 2 can show
+// the billing notice and delivery order that the payment settles. A receipt created
+// from a delivery order commonly has the DO as its direct source and the billing
+// reference one level further up, so looking only at the direct source is insufficient.
+func (s Service) resolveReceiptReferences(doc *Document) (billingRef, deliveryRef string) {
+	current := doc
+	seen := map[string]bool{}
+	for depth := 0; current != nil && current.SourceDocumentID != nil && depth < 8; depth++ {
+		sourceID := strings.TrimSpace(*current.SourceDocumentID)
+		if sourceID == "" || seen[sourceID] {
+			break
+		}
+		seen[sourceID] = true
+
+		source, err := s.repo.FindByID(sourceID)
+		if err != nil {
+			log.Printf("[document] receipt reference lookup failed: receipt=%s source=%s err=%v", doc.ID, sourceID, err)
+			break
+		}
+		switch source.Type {
+		case TypeBill:
+			if billingRef == "" {
+				billingRef = strings.TrimSpace(source.DocumentNoFull)
+			}
+			// BILL rows are the selected delivery-order register. Keep the
+			// first non-empty reference for the receipt description.
+			if deliveryRef == "" {
+				for _, item := range source.Items {
+					if ref := strings.TrimSpace(item.Description); ref != "" {
+						deliveryRef = ref
+						break
+					}
+				}
+			}
+		case TypeDeliveryOrder:
+			if deliveryRef == "" {
+				deliveryRef = strings.TrimSpace(source.DocumentNoFull)
+			}
+			if billingRef == "" {
+				ref := strings.TrimSpace(source.InvoiceRefNo)
+				if ref != "" && ref != deliveryRef {
+					billingRef = ref
+				}
+			}
+		}
+		current = source
+	}
+	return billingRef, deliveryRef
+}
+
+func buildReceiptPaymentDescription(billingRef, deliveryRef, receiptRef string) string {
+	switch {
+	case billingRef != "" && deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s (ใบส่งสินค้า %s)", billingRef, deliveryRef)
+	case billingRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s", billingRef)
+	case deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบส่งสินค้า %s", deliveryRef)
+	default:
+		return "ชำระเงินตามเอกสาร " + receiptRef
+	}
+}
+
+// quotationRefNoOf returns the visible "อ้างอิงใบเสนอราคา / Ref. Quotation" reference a
+// source document contributes: only a QUOTATION does, every other source type renders
+// nothing. Pure, so it is unit-testable without a DB.
+func quotationRefNoOf(src *Document) string {
+	if src == nil || src.Type != TypeQuotation {
+		return ""
+	}
+	if full := strings.TrimSpace(src.DocumentNoFull); full != "" {
+		return full
+	}
+	return strings.TrimSpace(src.DocumentNo)
+}
+
+// resolveQuotationRef loads the document `doc` was created from (SourceDocumentID) and
+// returns its number when that source is a QUOTATION — the "อ้างอิงใบเสนอราคา
+// (Ref. Quotation)" row on an invoice created from a quotation. Resolved at render time
+// (never stored) so invoices created before this row existed display it too.
+// A lookup failure degrades to "no row" but is logged, not swallowed.
+func (s Service) resolveQuotationRef(doc *Document) string {
+	if doc == nil || doc.SourceDocumentID == nil || strings.TrimSpace(*doc.SourceDocumentID) == "" {
+		return ""
+	}
+	src, err := s.repo.FindByID(*doc.SourceDocumentID)
+	if err != nil {
+		log.Printf("[document] quotation ref lookup failed: doc=%s source=%s err=%v", doc.ID, *doc.SourceDocumentID, err)
+		return ""
+	}
+	return quotationRefNoOf(src)
+}
+
 func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
 	// Delegate to Convert so the tax invoice inherits the invoice's totals verbatim
 	// (bill discount + VAT treatment preserved) instead of being recomputed.
-	return s.Convert(ctx, actor, storeID, src.ID, TypeTaxInvoice)
+	return s.Convert(ctx, actor, storeID, src.ID, TypeTaxInvoice, nil)
 }
 
 // ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
 func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeTaxInvoice)
+	return s.Convert(ctx, actor, storeID, id, TypeTaxInvoice, nil)
 }
 
 // ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
-func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate *string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, deliveryDate)
+func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate, poRefNo *string) (*Document, error) {
+	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, nil, deliveryDate, poRefNo)
 }
 
 // ConvertQuotation creates an INVOICE document from an existing QUOTATION.
 func (s Service) ConvertQuotation(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeInvoice)
+	return s.Convert(ctx, actor, storeID, id, TypeInvoice, nil)
 }
 
 // toDocData maps a *Document to dochtml.DocData for HTML rendering.
@@ -1140,6 +1528,22 @@ func toDocData(doc *Document) dochtml.DocData {
 
 	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
 
+	var billRows []dochtml.BillRow
+	if doc.Type == TypeBill {
+		billRows = make([]dochtml.BillRow, 0, len(doc.Items))
+		for _, item := range doc.Items {
+			if strings.TrimSpace(item.Description) == "" {
+				continue
+			}
+			billRows = append(billRows, dochtml.BillRow{
+				DocumentNo: item.Description,
+				IssueDate:  doc.DocumentDate,
+				DueDate:    doc.DueDate,
+				Amount:     item.Amount,
+			})
+		}
+	}
+
 	return dochtml.DocData{
 		Type:              string(doc.Type),
 		DocumentNo:        doc.DocumentNo,
@@ -1154,6 +1558,7 @@ func toDocData(doc *Document) dochtml.DocData {
 		CustomerTaxID:     doc.CustomerTaxID,
 		StaffName:         doc.StaffName,
 		Items:             items,
+		BillRows:          billRows,
 		Subtotal:          doc.Subtotal,
 		TotalDiscount:     totalDiscount,
 		VatRate:           doc.VatRate,

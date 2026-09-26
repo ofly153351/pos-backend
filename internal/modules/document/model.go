@@ -38,6 +38,7 @@ type Document struct {
 	Type              DocumentType   `gorm:"not null;type:varchar(20)" json:"type"`
 	Status            DocumentStatus `gorm:"not null;type:varchar(20);default:'PENDING'" json:"status"`
 	PaymentStatus     PaymentStatus  `gorm:"not null;type:varchar(20);default:'UNPAID'" json:"payment_status"`
+	ReceiptTemplate   int            `gorm:"not null;default:1" json:"receipt_template"`
 	CustomerID        string         `gorm:"not null" json:"customer_id"`
 	CustomerName      string         `gorm:"not null" json:"customer_name"`
 	CustomerTaxID     *string        `json:"customer_tax_id,omitempty"`
@@ -70,6 +71,7 @@ type Document struct {
 	SalespersonName      string         `gorm:"not null;default:''" json:"salesperson_name"`
 	InvoiceRefNo         string         `gorm:"not null;default:''" json:"invoice_ref_no"`
 	SourceDocumentID     *string        `gorm:"type:varchar(30)" json:"source_document_id,omitempty"`
+	BankAccountID        *string        `gorm:"type:varchar(30)" json:"bank_account_id,omitempty"`
 	PORefNo              string         `gorm:"not null;default:''" json:"po_ref_no"`
 	ShippingFee          float64        `gorm:"not null;default:0" json:"shipping_fee"`
 	CreditTermDays       int            `gorm:"not null;default:0" json:"credit_term_days"`
@@ -102,6 +104,20 @@ type DocumentItem struct {
 	DiscountValue float64 `gorm:"not null;default:0" json:"discount_value"`
 	Amount        float64 `gorm:"not null;default:0" json:"amount"`
 }
+
+type ReceiptSettlement struct {
+	ID                string    `gorm:"primaryKey;type:varchar(30)" json:"id"`
+	ReceiptDocumentID string    `gorm:"not null;index" json:"receipt_document_id"`
+	BillingDocumentID *string   `json:"billing_document_id,omitempty"`
+	DeliveryOrderID   *string   `json:"delivery_order_id,omitempty"`
+	AppliedAmount     float64   `gorm:"not null" json:"applied_amount"`
+	SortOrder         int       `gorm:"not null;default:1" json:"sort_order"`
+	CreatedAt         time.Time `json:"created_at"`
+	BillingDocument   *Document `gorm:"foreignKey:BillingDocumentID" json:"billing_document,omitempty"`
+	DeliveryOrder     *Document `gorm:"foreignKey:DeliveryOrderID" json:"delivery_order,omitempty"`
+}
+
+func (ReceiptSettlement) TableName() string { return "receipt_settlements" }
 
 func (Document) TableName() string     { return "documents" }
 func (DocumentItem) TableName() string { return "document_items" }

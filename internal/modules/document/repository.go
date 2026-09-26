@@ -1,6 +1,7 @@
 package document
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,10 +12,13 @@ import (
 type Repository interface {
 	List(q ListQuery) ([]DocumentListItem, int64, DocumentStats, error)
 	FindByID(id string) (*Document, error)
+	FindBySourceAndType(sourceID string, target DocumentType) (*Document, error)
 	Create(doc *Document) error
 	UpdateStatus(id string, status DocumentStatus) error
 	MarkPaid(id string) error
 	SetPaymentStatus(id string, status PaymentStatus) error
+	SetReceiptTemplate(id string, template int) error
+	ListReceiptSettlements(receiptID string) ([]ReceiptSettlement, error)
 	Delete(id string) error
 	BulkDelete(storeID string, ids []string) error
 	BulkSetStatus(storeID string, ids []string, status DocumentStatus) error
@@ -91,8 +95,10 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 
 	var rows []DocumentListItem
 	err := base.
-		Select("id, document_no, document_no_full, type, status, payment_status, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
-		Order("document_date DESC, created_at DESC").
+		Select("id, document_no, document_no_full, type, status, payment_status, customer_id, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
+		// The document list is a creation feed: newest added records first.
+		// document_date is only a deterministic tie-breaker for equal timestamps.
+		Order("created_at DESC, document_date DESC").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error
 
@@ -102,6 +108,20 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 func (r *repository) FindByID(id string) (*Document, error) {
 	var doc Document
 	err := r.db.Preload("Items").First(&doc, "id = ?", id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r *repository) FindBySourceAndType(sourceID string, target DocumentType) (*Document, error) {
+	var doc Document
+	err := r.db.Preload("Items").
+		Where("source_document_id = ? AND type = ?", sourceID, target).
+		First(&doc).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +162,23 @@ func (r *repository) SetPaymentStatus(id string, status PaymentStatus) error {
 		}).Error
 }
 
+func (r *repository) SetReceiptTemplate(id string, template int) error {
+	return r.db.Model(&Document{}).
+		Where("id = ? AND type = ?", id, TypeReceipt).
+		Updates(map[string]any{
+			"receipt_template": template,
+			"updated_at":       time.Now(),
+		}).Error
+}
+
+func (r *repository) ListReceiptSettlements(receiptID string) ([]ReceiptSettlement, error) {
+	var rows []ReceiptSettlement
+	err := r.db.Preload("BillingDocument").Preload("DeliveryOrder").
+		Where("receipt_document_id = ?", receiptID).
+		Order("sort_order ASC, created_at ASC").Find(&rows).Error
+	return rows, err
+}
+
 func (r *repository) Delete(id string) error {
 	return r.db.Delete(&Document{}, "id = ?", id).Error
 }
@@ -166,7 +203,7 @@ func (r *repository) BulkSetStatus(storeID string, ids []string, status Document
 // numbering monotonic across deletes.
 func (r *repository) NextSeq(storeID string, docType DocumentType) (int64, error) {
 	now := time.Now()
-	prefix := fmt.Sprintf("%s-%02d%02d", typePrefix(docType), now.Year()%100, now.Month())
+	prefix := fmt.Sprintf("%s%d%02d", typePrefix(docType), now.Year()+543, now.Month())
 	var maxSeq int64
 	r.db.Model(&Document{}).
 		Where("store_id = ? AND document_no LIKE ?", storeID, prefix+"-%").

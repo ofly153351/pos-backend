@@ -45,6 +45,36 @@ func (s Service) BillHTML(ctx context.Context, actor auth.Claims, storeID, credi
 	}
 
 	doc := dochtml.BuildCreditSaleBillDocData(in, store)
+	// BILL shows document-level DO rows; product lines belong to the source DO,
+	// so suppress them here to keep the notice focused and one-row-per-DO.
+	doc.Items = nil
+	// A billing notice is a register of delivery orders for this customer, not
+	// the product lines of one receivable. Reuse the repository's customer-scoped
+	// statement query so every non-cancelled credit sale contributes one DO row.
+	statement, err := s.repo.StatementContext(ctx, storeID, creditSaleID)
+	if err != nil {
+		return "", err
+	}
+	doc.BillRows = make([]dochtml.BillRow, 0, len(statement.Sales))
+	for _, sale := range statement.Sales {
+		if sale.Type != typeCredit {
+			continue
+		}
+		issue := parseTimestamp(sale.CreatedAt)
+		if issue.IsZero() {
+			continue
+		}
+		var due *time.Time
+		if parsed := parseDateOnly(sale.DueDate); !parsed.IsZero() {
+			due = &parsed
+		}
+		doc.BillRows = append(doc.BillRows, dochtml.BillRow{
+			DocumentNo: sale.DocumentNumber,
+			IssueDate:  issue,
+			DueDate:    due,
+			Amount:     sale.TotalAmount,
+		})
+	}
 	return dochtml.RenderUnifiedDocumentHTML(doc, store)
 }
 

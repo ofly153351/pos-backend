@@ -21,6 +21,9 @@ type InvoicePDFInput struct {
 	IssueDate   time.Time
 	DueDate     time.Time
 	ReferenceDO string // optional
+	// ReferenceQuotation = เลขที่ใบเสนอราคาต้นทาง (optional) — พิมพ์เป็นแถว
+	// "อ้างอิงใบเสนอราคา / Ref. Quotation" เมื่อใบแจ้งหนี้สร้างจากใบเสนอราคา
+	ReferenceQuotation string
 
 	// Document identity + copy context (per Thai Revenue copy/original rules).
 	DocTitleTH    string // e.g. "ใบส่งของ / ใบกำกับภาษี" (empty → falls back to Invoice)

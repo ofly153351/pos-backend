@@ -77,12 +77,22 @@ func (p docProfile) footerBlockH(hasNotes bool) float64 {
 	if p.ShowPayBox && hPayBox > gridH {
 		gridH = hPayBox
 	}
+	if !p.ShowPayBox && hRemarks > gridH {
+		// Non-payment documents place remarks beside the summary inside foot-grid.
+		// It must not be reserved again as a stacked block below the grid.
+		gridH = hRemarks
+	}
 
 	h := gridH
 	// กล่องหมายเหตุขึ้นเสมอ (เป็น form field สำหรับเขียน ไม่ผูกกับว่ามี Notes ไหม)
-	// จึงสำรองพื้นที่ทุกครั้ง — hasNotes ไม่ได้ใช้ตัดสินความสูงอีกต่อไป
+	// เอกสารที่มี paybox วาง remarks เป็นกล่องแยกด้านล่าง; เอกสารอื่นวางไว้ใน grid แล้ว
 	_ = hasNotes
-	h += hRemarks  // remarks box (stacked below the grid)
+	if p.ShowPayBox {
+		h += hRemarks
+	}
+	if p.IsDelivery {
+		h += 8 // baht-text row below the item table
+	}
 	h += hSigBlock // signatures stacked below remarks
 	return h
 }
@@ -92,7 +102,7 @@ func profileFor(docType string) docProfile {
 	case "DELIVERY_ORDER":
 		return docProfile{
 			TitleTH: "ใบส่งของ / ใบกำกับภาษี", TitleEN: "Delivery Note / Tax Invoice",
-			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: true,
+			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: false,
 			ShowDeliveryBox: true, IsDelivery: true, SpecialLabel: "วันที่จัดส่ง (Delivery)",
 			SigLeftTH: "ผู้ส่งสินค้า", SigLeftEN: "Delivered By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Received By",
 		}
@@ -105,13 +115,13 @@ func profileFor(docType string) docProfile {
 	case "RECEIPT":
 		return docProfile{
 			TitleTH: "ใบเสร็จรับเงิน", TitleEN: "Receipt",
-			ShowDiscount: false, ShowPayBox: true, PayCash: true, SpecialLabel: "วันที่รับเงิน (Paid)",
+			ShowDiscount: false, ShowPayBox: false, PayCash: true, SpecialLabel: "วันที่รับเงิน (Paid)",
 			SigLeftTH: "ผู้รับเงิน", SigLeftEN: "Received By", SigRightTH: "ผู้จ่ายเงิน", SigRightEN: "Paid By",
 		}
 	case "TAX_INVOICE":
 		return docProfile{
 			TitleTH: "ใบกำกับภาษี", TitleEN: "Tax Invoice",
-			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: true, SpecialLabel: "",
+			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: false, SpecialLabel: "",
 			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Goods Receiver",
 		}
 	case "QUOTATION":
@@ -165,6 +175,11 @@ type summaryLine struct {
 
 type bankView struct{ Name, No, Holder string }
 
+type billRowView struct {
+	No                                     int
+	DocumentNo, IssueDate, DueDate, Amount string
+}
+
 type renderView struct {
 	// ร้าน
 	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch string
@@ -179,10 +194,12 @@ type renderView struct {
 	SpecialLabel, SpecialValue string
 	// ลูกค้า / จัดส่ง
 	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
-	StaffName, SalespersonName, RefNo, DeliveryDate          string
-	PriceTerms, DeliveryTerms                                string
-	DeliveryAddr, DeliveryContact, DeliveryPhone             string
-	BahtText                                                 string
+	StaffName, SalespersonName, RefNo, PORefNo, DeliveryDate string
+	// QuotationRefNo = แถว "อ้างอิงใบเสนอราคา (Ref. Quotation)" ในตารางหัวเอกสาร
+	QuotationRefNo                               string
+	PriceTerms, DeliveryTerms                    string
+	DeliveryAddr, DeliveryContact, DeliveryPhone string
+	BahtText                                     string
 	// flags
 	ShowDiscount, ShowDeliveryBox, ShowPayBox, PayCash bool
 	// footer
@@ -190,6 +207,7 @@ type renderView struct {
 	Notes                                        string
 	Banks                                        []bankView
 	QRURL                                        template.URL
+	BillRows                                     []billRowView
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 	// pages
 	Pages        []pageView
@@ -341,14 +359,31 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		})
 	}
 
-	banks := make([]bankView, 0, len(store.BankAccounts))
-	if p.ShowPayBox {
-		for _, b := range store.BankAccounts {
-			banks = append(banks, bankView{Name: b.BankName, No: b.AccountNo, Holder: b.AccountName})
-		}
+	banks := make([]bankView, 0, 1)
+	if p.ShowPayBox && len(store.BankAccounts) > 0 {
+		// Store settings may contain several accounts, but a document must render
+		// exactly one account. Selection is resolved by the document service before
+		// reaching the renderer; keeping this boundary defensive prevents accidental
+		// multi-account output if an older caller still passes the full list.
+		b := store.BankAccounts[0]
+		banks = append(banks, bankView{Name: b.BankName, No: b.AccountNo, Holder: b.AccountName})
 	}
 
 	priceTerms, deliveryTerms := quotationTerms(d)
+	billRows := make([]billRowView, 0, len(d.BillRows))
+	for _, row := range d.BillRows {
+		due := "_"
+		if row.DueDate != nil {
+			due = thaiDate(*row.DueDate)
+		}
+		billRows = append(billRows, billRowView{
+			No:         len(billRows) + 1,
+			DocumentNo: row.DocumentNo,
+			IssueDate:  thaiDate(row.IssueDate),
+			DueDate:    due,
+			Amount:     money(row.Amount),
+		})
+	}
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
 		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: template.URL(store.LogoURL),
@@ -362,6 +397,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		CustomerName: d.CustomerName, CustomerTaxID: derefStr(d.CustomerTaxID),
 		CustomerAddr: d.CustomerAddress, CustomerPhone: d.CustomerPhone,
 		StaffName: d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
+		PORefNo: d.PORefNo, QuotationRefNo: d.QuotationRefNo,
 		DeliveryDate: func() string {
 			if d.DeliveryDate != nil {
 				return thaiDate(*d.DeliveryDate)
@@ -382,7 +418,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		ShowPayBox: p.ShowPayBox, PayCash: p.PayCash,
 
 		Summary: buildSummary(d, p), Notes: derefStr(d.Notes),
-		Banks: banks, QRURL: d.QRPaymentURL,
+		Banks: banks, QRURL: d.QRPaymentURL, BillRows: billRows,
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
 
@@ -539,6 +575,11 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .items .left{ text-align:left; } .items .num{ text-align:right; }
 .items tr.filler td{ height:var(--row-h); }
 .col-no{ width:9mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
+.bill-items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
+.bill-items th{ background:var(--ink); color:#fff; border:1px solid #444; padding:2.2mm 2mm; font-size:10px; text-align:center; }
+.bill-items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; }
+.bill-items .left{ text-align:left; } .bill-items .num{ text-align:right; }
+.bill-col-no{ width:14mm; } .bill-col-date{ width:38mm; } .bill-col-due{ width:38mm; } .bill-col-amount{ width:42mm; }
 tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
 /* ---- footer: summary + paybox + remarks + signatures ---- */
@@ -550,7 +591,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .pay-lbl{ white-space:nowrap; flex-shrink:0; margin-right:1mm; }
 .pay-dot{ flex:1; border-bottom:1px dashed var(--line); margin:0 1.5mm; position:relative; top:-1.5px; }
 .pay-baht{ white-space:nowrap; flex-shrink:0; font-size:9px; }
-.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:9px; color:var(--muted); }
+.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:10px; line-height:1.2; font-weight:700; color:var(--ink); }
 .bank-sub-lbl{ white-space:nowrap; flex-shrink:0; }
 .bank-sub-ln{ flex:1; border-bottom:1px solid var(--line); position:relative; top:-2px; }
 .pay-cheque-area{ display:flex; gap:2mm; align-items:flex-start; margin-top:0.5mm; }
@@ -568,18 +609,19 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sum-row{ display:flex; justify-content:space-between; padding:1mm 0; border-bottom:1px dashed var(--line); }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
 .remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
+.remarks-inline{ flex:1; margin-top:0; min-width:0; }
 .remarks .rh{ color:var(--muted); }
 /* center the whole signature GROUP, and center the content INSIDE each column
    (otherwise the fixed-width underlines left-pack inside 56mm boxes and the
    visible ink drifts left of the page centerline despite justify-content:center) */
-.signatures{ display:flex; justify-content:center; gap:20mm; margin-top:7mm; break-inside:avoid; }
-.sig{ width:56mm; flex-shrink:0; }
-.sig-t{ font-size:10px; font-weight:700; margin-bottom:3mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:1mm; }
-.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1.5mm; margin-top:7mm; margin-bottom:3mm; }
-.sig-write-lbl{ font-size:10px; white-space:nowrap; flex-shrink:0; }
-.sig-ln{ width:40mm; border-bottom:1px solid var(--ink); }
-.sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:1mm; font-size:9px; color:var(--muted); }
-.sig-date-seg{ width:10mm; border-bottom:1px solid var(--ink); position:relative; top:-2px; }
+.signatures{ display:flex; justify-content:center; gap:14mm; margin-top:4mm; break-inside:avoid; }
+.sig{ width:52mm; flex-shrink:0; }
+.sig-t{ font-size:9px; font-weight:700; margin-bottom:2mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:.5mm; }
+.sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1mm; margin-top:4mm; margin-bottom:2mm; }
+.sig-write-lbl{ font-size:9px; white-space:nowrap; flex-shrink:0; }
+.sig-ln{ width:36mm; border-bottom:1px solid var(--ink); }
+.sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:.8mm; font-size:8px; color:var(--muted); }
+.sig-date-seg{ width:8mm; border-bottom:1px solid var(--ink); position:relative; top:-1px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
 
 /* ---- bottom strip (absolute ทุกหน้า) ---- */
@@ -609,6 +651,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <table class="doc-meta">
         <tr><td>เลขที่ (No.)</td><td class="b">{{$root.DocNo}}</td></tr>
         <tr><td>วันที่ (Date)</td><td class="b">{{$root.DocDate}}</td></tr>
+        {{if $root.ShowDeliveryBox}}{{if $root.PORefNo}}<tr><td>อ้างอิงใบสั่งซื้อ (Ref. PO)</td><td class="b">{{$root.PORefNo}}</td></tr>{{end}}{{if $root.RefNo}}<tr><td>อ้างอิงใบกำกับภาษี (Ref. Invoice)</td><td class="b">{{$root.RefNo}}</td></tr>{{end}}{{end}}
+        {{if $root.QuotationRefNo}}<tr><td>อ้างอิงใบเสนอราคา (Ref. Quotation)</td><td class="b">{{$root.QuotationRefNo}}</td></tr>{{end}}
         {{if $root.SpecialLabel}}<tr><td>{{$root.SpecialLabel}}</td><td class="b">{{$root.SpecialValue}}</td></tr>{{end}}
         {{if $root.StaffName}}<tr><td>ผู้ออกเอกสาร (Issued By)</td><td class="b">{{$root.StaffName}}</td></tr>{{end}}
       </table>
@@ -649,6 +693,25 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
   {{if not $pg.FooterOnly}}
   <div class="doc-body">
+    {{if eq $root.TitleTH "ใบวางบิล"}}
+    <table class="bill-items">
+      <thead><tr>
+        <th class="bill-col-no">ลำดับ</th>
+        <th class="left">ใบส่งสินค้า (DO)</th>
+        <th class="bill-col-date">วันที่ออกเอกสาร</th>
+        <th class="bill-col-due">วันครบกำหนด</th>
+        <th class="bill-col-amount">จำนวนเงิน</th>
+      </tr></thead>
+      <tbody>
+      {{range $row := $root.BillRows}}
+        <tr><td>{{$row.No}}</td><td class="left">ใบส่งสินค้าเลขที่ {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td></tr>
+      {{end}}
+      {{range $pg.FillerRows}}
+        <tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
     <table class="items">
       <thead><tr>
         <th class="col-no">ลำดับ</th>
@@ -678,6 +741,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       {{end}}
       </tbody>
     </table>
+    {{end}}
   </div>
   {{end}}
 
@@ -692,7 +756,13 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <div class="paybox">
         <div class="pay-row"><span class="pay-chk">{{if $root.PayCash}}&#9745;{{else}}&#9744;{{end}}</span><span class="pay-lbl">เงินสด (Cash)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
         <div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">โอนเงินเข้าบัญชี (Bank Transfer)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
-        <div class="bank-sub"><span class="bank-sub-lbl">ธนาคาร</span><span class="bank-sub-ln"></span><span class="bank-sub-lbl">เลขบัญชี</span><span class="bank-sub-ln"></span></div>
+        {{if $root.Banks}}
+          {{range $bank := $root.Banks}}
+          <div class="bank-sub"><span class="bank-sub-lbl">{{$bank.Name}}</span><span class="bank-sub-lbl">เลขบัญชี {{$bank.No}}</span><span class="bank-sub-lbl">{{$bank.Holder}}</span></div>
+          {{end}}
+        {{else}}
+          <div class="bank-sub"><span class="bank-sub-lbl">ธนาคาร</span><span class="bank-sub-ln"></span><span class="bank-sub-lbl">เลขบัญชี</span><span class="bank-sub-ln"></span></div>
+        {{end}}
         <div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">เครดิต (Credit)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
         <div class="pay-cheque-area">
           <div class="pay-cheque-left"><div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">เช็ค (Cheque)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div></div>
@@ -705,6 +775,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
           </div>
         </div>
       </div>
+      {{else}}
+      <div class="remarks remarks-inline"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
       {{end}}
       <div class="summary">
         {{range $root.Summary}}
@@ -713,7 +785,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       </div>
     </div>
 
-    <div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
+    {{if $root.ShowPayBox}}<div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>{{end}}
     {{if $root.PriceTerms}}<section class="termsrow"><div class="terms-title">เงื่อนไข (Terms)</div><div>1. {{$root.PriceTerms}}</div><div>2. {{$root.DeliveryTerms}}</div></section>{{end}}
 
     {{if $root.ShowSignature}}

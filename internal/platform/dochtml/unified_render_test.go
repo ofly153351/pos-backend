@@ -52,7 +52,83 @@ var renderTypes = []string{
 	"DELIVERY_ORDER", "INVOICE", "RECEIPT", "TAX_INVOICE", "QUOTATION", "BILL", "CREDIT_NOTE",
 }
 
-// Every document type must execute the unified template without error and emit the
+func TestProfile_PaymentSectionOnlyForInvoiceAndBill(t *testing.T) {
+	for _, docType := range []string{"INVOICE", "BILL"} {
+		if !profileFor(docType).ShowPayBox {
+			t.Fatalf("%s should show payment section", docType)
+		}
+	}
+	for _, docType := range []string{"QUOTATION", "DELIVERY_ORDER", "RECEIPT", "TAX_INVOICE", "CREDIT_NOTE"} {
+		if profileFor(docType).ShowPayBox {
+			t.Fatalf("%s should not show payment section", docType)
+		}
+	}
+}
+
+func TestUnifiedRender_PaymentBoxUsesStoreBankAccounts(t *testing.T) {
+	doc := makeDoc("INVOICE", 1)
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{
+		Name: "ร้าน",
+		BankAccounts: []BankAccountInfo{{
+			BankName:    "ธนาคารทดสอบ",
+			AccountNo:   "123-4-56789-0",
+			AccountName: "ร้านทดสอบ",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	for _, want := range []string{"ธนาคารทดสอบ", "เลขบัญชี 123-4-56789-0", "ร้านทดสอบ"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("payment box missing bank setting %q", want)
+		}
+	}
+}
+func TestUnifiedRender_PaymentBoxRendersOnlyOneBankAccount(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("INVOICE", 1), StoreInfo{
+		Name: "ร้าน",
+		BankAccounts: []BankAccountInfo{
+			{BankName: "ธนาคารกรุงเทพ", AccountNo: "5664332667", AccountName: "บัญชีหนึ่ง"},
+			{BankName: "ธนาคารกรุงไทย", AccountNo: "32142495834", AccountName: "บัญชีสอง"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if !strings.Contains(html, "ธนาคารกรุงเทพ") || !strings.Contains(html, "5664332667") {
+		t.Fatal("the selected first bank account was not rendered")
+	}
+	if strings.Contains(html, "ธนาคารกรุงไทย") || strings.Contains(html, "32142495834") {
+		t.Fatal("payment box must render exactly one bank account")
+	}
+	if !strings.Contains(html, `.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:10px; line-height:1.2; font-weight:700; color:var(--ink); }`) {
+		t.Fatal("bank detail row must match the payment box font scale and use bold text")
+	}
+}
+
+func TestUnifiedRender_NonPaymentFooterReleasesPaymentBoxSpace(t *testing.T) {
+	paymentFooter := profileFor("INVOICE").footerBlockH(false)
+	nonPaymentFooter := profileFor("QUOTATION").footerBlockH(false)
+	if paymentFooter-nonPaymentFooter != hPayBox-hRemarks {
+		t.Fatalf("non-payment footer should release paybox space: payment=%v non-payment=%v", paymentFooter, nonPaymentFooter)
+	}
+}
+
+func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing.T) {
+	for _, docType := range []string{"QUOTATION", "DELIVERY_ORDER", "RECEIPT", "TAX_INVOICE", "CREDIT_NOTE"} {
+		html, err := RenderUnifiedDocumentHTML(makeDoc(docType, 1), StoreInfo{Name: "ร้าน"})
+		if err != nil {
+			t.Fatalf("%s: execute error: %v", docType, err)
+		}
+		if strings.Contains(html, `class="paybox"`) {
+			t.Fatalf("%s must not render payment box", docType)
+		}
+		if !strings.Contains(html, `class="remarks remarks-inline"`) {
+			t.Fatalf("%s must render full-width remarks beside the summary", docType)
+		}
+	}
+}
+
 // page-number footer + grand-total label — catches template field-name typos that
 // only surface at execution time.
 func TestUnifiedRender_AllTypesExecute(t *testing.T) {
@@ -137,8 +213,57 @@ func TestUnifiedRender_SinglePagePin(t *testing.T) {
 	}
 }
 
-// A copy set (ต้นฉบับ/สำเนา) must wrap each copy in .copy-break so it page-breaks
-// in print AND is visually separated on screen (preview drawer).
+func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
+	doc := makeDoc("DELIVERY_ORDER", 1)
+	doc.PORefNo = "PO256909-0015"
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	want := `<tr><td>อ้างอิงใบสั่งซื้อ (Ref. PO)</td><td class="b">PO256909-0015</td></tr>`
+	if !strings.Contains(html, want) {
+		t.Fatalf("missing PO reference row %q", want)
+	}
+}
+
+func TestUnifiedRender_BillUsesDeliveryOrderRegister(t *testing.T) {
+	doc := makeDoc("BILL", 0)
+	due := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
+	doc.BillRows = []BillRow{{DocumentNo: "DO256909-0001", IssueDate: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), DueDate: &due, Amount: 1250}}
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	for _, want := range []string{"ใบส่งสินค้า (DO)", "วันที่ออกเอกสาร", "วันครบกำหนด", "จำนวนเงิน", "DO256909-0001", "1,250.00"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("billing notice missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<table class="items">`) {
+		t.Fatalf("billing notice must not render product-line table")
+	}
+	if !strings.Contains(html, `<tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>`) {
+		t.Fatal("billing notice must fill the remaining table rows")
+	}
+}
+
+func TestUnifiedRender_BillEmptyRowsKeepTableCells(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("BILL", 0), StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if strings.Contains(html, "ไม่มีใบส่งสินค้าที่ค้างวางบิล") {
+		t.Fatal("empty BILL must not replace the table row with a message")
+	}
+	if !strings.Contains(html, `<tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>`) {
+		t.Fatal("empty BILL must render five empty table cells")
+	}
+	if !strings.Contains(html, `.bill-items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; }`) {
+		t.Fatal("BILL rows must use the same row height and cell padding as other document tables")
+	}
+}
 func TestUnifiedRender_CopySeparation(t *testing.T) {
 	html, err := RenderUnifiedDocumentCopies(makeDoc("TAX_INVOICE", 3), StoreInfo{Name: "ร้านทดสอบ"}, -1)
 	if err != nil {

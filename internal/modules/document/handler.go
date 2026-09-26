@@ -116,7 +116,7 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
 	// ?copy=N selects a single copy (0-based); absent/-1 prints the whole set.
-	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
+	html, err := h.service.RenderDocumentPrint(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1), c.QueryInt("receipt_template", 0))
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -131,7 +131,7 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 func (h Handler) GetDocumentPDF(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
-	data, err := h.service.RenderDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1))
+	data, err := h.service.RenderDocumentPDF(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, c.QueryInt("copy", -1), c.QueryInt("receipt_template", 0))
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -234,9 +234,10 @@ func (h Handler) ConvertToDeliveryOrder(c *fiber.Ctx) error {
 	id := c.Params("docID")
 	var req struct {
 		DeliveryDate *string `json:"delivery_date,omitempty"`
+		PORefNo      *string `json:"po_ref_no,omitempty"`
 	}
 	_ = c.BodyParser(&req)
-	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.DeliveryDate)
+	doc, err := h.service.ConvertToDeliveryOrder(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.DeliveryDate, req.PORefNo)
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -265,9 +266,22 @@ func (h Handler) Convert(c *fiber.Ctx) error {
 	if req.TargetType == "" {
 		return httpx.Error(c, fiber.StatusBadRequest, "target_type required", nil)
 	}
-	doc, err := h.service.Convert(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req.TargetType)
+	claims := middleware.ClaimsFromContext(c)
+	var doc *Document
+	var err error
+	if req.TargetType == TypeReceipt && len(req.SourceDocumentIDs) > 0 {
+		doc, err = h.service.ConvertReceiptFromBills(c.UserContext(), claims, storeID, req.SourceDocumentIDs, req.ReceiptTemplate)
+	} else {
+		doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType, req.BankAccountID)
+	}
 	if err != nil {
 		return writeError(c, err)
+	}
+	if req.TargetType == TypeReceipt && req.ReceiptTemplate != 0 {
+		if err := h.service.SetReceiptTemplate(c.UserContext(), claims, storeID, doc.ID, req.ReceiptTemplate); err != nil {
+			return writeError(c, err)
+		}
+		doc.ReceiptTemplate = req.ReceiptTemplate
 	}
 	return httpx.Success(c, fiber.StatusCreated, "document converted", doc)
 }
@@ -310,6 +324,8 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, "not found", err.Error())
 	case errors.Is(err, ErrForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, "forbidden", err.Error())
+	case errors.Is(err, ErrAlreadyConverted):
+		return httpx.Error(c, fiber.StatusConflict, "document already exists", err.Error())
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction), errors.Is(err, ErrInvalidConversion):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:

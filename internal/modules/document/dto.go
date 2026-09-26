@@ -25,6 +25,7 @@ type CreateDocumentRequest struct {
 	SalespersonName         string                    `json:"salesperson_name"`
 	InvoiceRefNo            string                    `json:"invoice_ref_no"`
 	SourceDocumentID        *string                   `json:"source_document_id,omitempty"`
+	BankAccountID           *string                   `json:"bank_account_id,omitempty"`
 	PORefNo                 string                    `json:"po_ref_no"`
 	ShippingFee             float64                   `json:"shipping_fee"`
 	CreditTermDays          int                       `json:"credit_term_days"`
@@ -52,7 +53,10 @@ type UpdatePaymentStatusRequest struct {
 }
 
 type ConvertRequest struct {
-	TargetType DocumentType `json:"target_type"`
+	TargetType        DocumentType `json:"target_type"`
+	ReceiptTemplate   int          `json:"receipt_template,omitempty"`
+	BankAccountID     *string      `json:"bank_account_id,omitempty"`
+	SourceDocumentIDs []string     `json:"source_document_ids,omitempty"`
 }
 
 // RelatedDoc is a lightweight projection of a document in the same conversion
@@ -105,6 +109,7 @@ type DocumentListItem struct {
 	Type             DocumentType   `json:"type"`
 	Status           DocumentStatus `json:"status"`
 	PaymentStatus    PaymentStatus  `json:"payment_status"`
+	CustomerID       string         `json:"customer_id"`
 	CustomerName     string         `json:"customer_name"`
 	StaffName        string         `json:"staff_name"`
 	DocumentDate     time.Time      `json:"document_date"`
