@@ -25,6 +25,7 @@ type CreateDocumentRequest struct {
 	SalespersonName         string                    `json:"salesperson_name"`
 	InvoiceRefNo            string                    `json:"invoice_ref_no"`
 	SourceDocumentID        *string                   `json:"source_document_id,omitempty"`
+	BankAccountID           *string                   `json:"bank_account_id,omitempty"`
 	PORefNo                 string                    `json:"po_ref_no"`
 	ShippingFee             float64                   `json:"shipping_fee"`
 	CreditTermDays          int                       `json:"credit_term_days"`
@@ -54,6 +55,7 @@ type UpdatePaymentStatusRequest struct {
 type ConvertRequest struct {
 	TargetType        DocumentType `json:"target_type"`
 	ReceiptTemplate   int          `json:"receipt_template,omitempty"`
+	BankAccountID     *string      `json:"bank_account_id,omitempty"`
 	SourceDocumentIDs []string     `json:"source_document_ids,omitempty"`
 }
 

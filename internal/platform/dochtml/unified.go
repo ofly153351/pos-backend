@@ -95,7 +95,7 @@ func profileFor(docType string) docProfile {
 	case "DELIVERY_ORDER":
 		return docProfile{
 			TitleTH: "ใบส่งของ / ใบกำกับภาษี", TitleEN: "Delivery Note / Tax Invoice",
-			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: true,
+			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: false,
 			ShowDeliveryBox: true, IsDelivery: true, SpecialLabel: "วันที่จัดส่ง (Delivery)",
 			SigLeftTH: "ผู้ส่งสินค้า", SigLeftEN: "Delivered By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Received By",
 		}
@@ -108,13 +108,13 @@ func profileFor(docType string) docProfile {
 	case "RECEIPT":
 		return docProfile{
 			TitleTH: "ใบเสร็จรับเงิน", TitleEN: "Receipt",
-			ShowDiscount: false, ShowPayBox: true, PayCash: true, SpecialLabel: "วันที่รับเงิน (Paid)",
+			ShowDiscount: false, ShowPayBox: false, PayCash: true, SpecialLabel: "วันที่รับเงิน (Paid)",
 			SigLeftTH: "ผู้รับเงิน", SigLeftEN: "Received By", SigRightTH: "ผู้จ่ายเงิน", SigRightEN: "Paid By",
 		}
 	case "TAX_INVOICE":
 		return docProfile{
 			TitleTH: "ใบกำกับภาษี", TitleEN: "Tax Invoice",
-			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: true, SpecialLabel: "",
+			Badge: "ต้นฉบับ (ORIGINAL)", ShowDiscount: true, ShowPayBox: false, SpecialLabel: "",
 			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับสินค้า", SigRightEN: "Goods Receiver",
 		}
 	case "QUOTATION":
@@ -352,11 +352,14 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		})
 	}
 
-	banks := make([]bankView, 0, len(store.BankAccounts))
-	if p.ShowPayBox {
-		for _, b := range store.BankAccounts {
-			banks = append(banks, bankView{Name: b.BankName, No: b.AccountNo, Holder: b.AccountName})
-		}
+	banks := make([]bankView, 0, 1)
+	if p.ShowPayBox && len(store.BankAccounts) > 0 {
+		// Store settings may contain several accounts, but a document must render
+		// exactly one account. Selection is resolved by the document service before
+		// reaching the renderer; keeping this boundary defensive prevents accidental
+		// multi-account output if an older caller still passes the full list.
+		b := store.BankAccounts[0]
+		banks = append(banks, bankView{Name: b.BankName, No: b.AccountNo, Holder: b.AccountName})
 	}
 
 	priceTerms, deliveryTerms := quotationTerms(d)
@@ -599,6 +602,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sum-row{ display:flex; justify-content:space-between; padding:1mm 0; border-bottom:1px dashed var(--line); }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
 .remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
+.remarks-inline{ flex:1; margin-top:0; min-width:0; }
 .remarks .rh{ color:var(--muted); }
 /* center the whole signature GROUP, and center the content INSIDE each column
    (otherwise the fixed-width underlines left-pack inside 56mm boxes and the
@@ -695,7 +699,9 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       {{range $row := $root.BillRows}}
         <tr><td>{{$row.No}}</td><td class="left">ใบส่งสินค้าเลขที่ {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td></tr>
       {{end}}
-      {{if not $root.BillRows}}<tr><td colspan="5">ไม่มีใบส่งสินค้าที่ค้างวางบิล</td></tr>{{end}}
+      {{range $pg.FillerRows}}
+        <tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>
+      {{end}}
       </tbody>
     </table>
     {{else}}
@@ -743,7 +749,13 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <div class="paybox">
         <div class="pay-row"><span class="pay-chk">{{if $root.PayCash}}&#9745;{{else}}&#9744;{{end}}</span><span class="pay-lbl">เงินสด (Cash)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
         <div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">โอนเงินเข้าบัญชี (Bank Transfer)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
-        <div class="bank-sub"><span class="bank-sub-lbl">ธนาคาร</span><span class="bank-sub-ln"></span><span class="bank-sub-lbl">เลขบัญชี</span><span class="bank-sub-ln"></span></div>
+        {{if $root.Banks}}
+          {{range $bank := $root.Banks}}
+          <div class="bank-sub"><span class="bank-sub-lbl">{{$bank.Name}}</span><span class="bank-sub-lbl">เลขบัญชี {{$bank.No}}</span><span class="bank-sub-lbl">{{$bank.Holder}}</span></div>
+          {{end}}
+        {{else}}
+          <div class="bank-sub"><span class="bank-sub-lbl">ธนาคาร</span><span class="bank-sub-ln"></span><span class="bank-sub-lbl">เลขบัญชี</span><span class="bank-sub-ln"></span></div>
+        {{end}}
         <div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">เครดิต (Credit)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
         <div class="pay-cheque-area">
           <div class="pay-cheque-left"><div class="pay-row"><span class="pay-chk">&#9744;</span><span class="pay-lbl">เช็ค (Cheque)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div></div>
@@ -756,6 +768,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
           </div>
         </div>
       </div>
+      {{else}}
+      <div class="remarks remarks-inline"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
       {{end}}
       <div class="summary">
         {{range $root.Summary}}
@@ -764,7 +778,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       </div>
     </div>
 
-    <div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
+    {{if $root.ShowPayBox}}<div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>{{end}}
     {{if $root.PriceTerms}}<section class="termsrow"><div class="terms-title">เงื่อนไข (Terms)</div><div>1. {{$root.PriceTerms}}</div><div>2. {{$root.DeliveryTerms}}</div></section>{{end}}
 
     {{if $root.ShowSignature}}

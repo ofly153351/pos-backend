@@ -52,7 +52,72 @@ var renderTypes = []string{
 	"DELIVERY_ORDER", "INVOICE", "RECEIPT", "TAX_INVOICE", "QUOTATION", "BILL", "CREDIT_NOTE",
 }
 
-// Every document type must execute the unified template without error and emit the
+func TestProfile_PaymentSectionOnlyForInvoiceAndBill(t *testing.T) {
+	for _, docType := range []string{"INVOICE", "BILL"} {
+		if !profileFor(docType).ShowPayBox {
+			t.Fatalf("%s should show payment section", docType)
+		}
+	}
+	for _, docType := range []string{"QUOTATION", "DELIVERY_ORDER", "RECEIPT", "TAX_INVOICE", "CREDIT_NOTE"} {
+		if profileFor(docType).ShowPayBox {
+			t.Fatalf("%s should not show payment section", docType)
+		}
+	}
+}
+
+func TestUnifiedRender_PaymentBoxUsesStoreBankAccounts(t *testing.T) {
+	doc := makeDoc("INVOICE", 1)
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{
+		Name: "ร้าน",
+		BankAccounts: []BankAccountInfo{{
+			BankName:    "ธนาคารทดสอบ",
+			AccountNo:   "123-4-56789-0",
+			AccountName: "ร้านทดสอบ",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	for _, want := range []string{"ธนาคารทดสอบ", "เลขบัญชี 123-4-56789-0", "ร้านทดสอบ"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("payment box missing bank setting %q", want)
+		}
+	}
+}
+func TestUnifiedRender_PaymentBoxRendersOnlyOneBankAccount(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("INVOICE", 1), StoreInfo{
+		Name: "ร้าน",
+		BankAccounts: []BankAccountInfo{
+			{BankName: "ธนาคารกรุงเทพ", AccountNo: "5664332667", AccountName: "บัญชีหนึ่ง"},
+			{BankName: "ธนาคารกรุงไทย", AccountNo: "32142495834", AccountName: "บัญชีสอง"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if !strings.Contains(html, "ธนาคารกรุงเทพ") || !strings.Contains(html, "5664332667") {
+		t.Fatal("the selected first bank account was not rendered")
+	}
+	if strings.Contains(html, "ธนาคารกรุงไทย") || strings.Contains(html, "32142495834") {
+		t.Fatal("payment box must render exactly one bank account")
+	}
+}
+
+func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing.T) {
+	for _, docType := range []string{"QUOTATION", "DELIVERY_ORDER", "RECEIPT", "TAX_INVOICE", "CREDIT_NOTE"} {
+		html, err := RenderUnifiedDocumentHTML(makeDoc(docType, 1), StoreInfo{Name: "ร้าน"})
+		if err != nil {
+			t.Fatalf("%s: execute error: %v", docType, err)
+		}
+		if strings.Contains(html, `class="paybox"`) {
+			t.Fatalf("%s must not render payment box", docType)
+		}
+		if !strings.Contains(html, `class="remarks remarks-inline"`) {
+			t.Fatalf("%s must render full-width remarks beside the summary", docType)
+		}
+	}
+}
+
 // page-number footer + grand-total label — catches template field-name typos that
 // only surface at execution time.
 func TestUnifiedRender_AllTypesExecute(t *testing.T) {
@@ -168,8 +233,23 @@ func TestUnifiedRender_BillUsesDeliveryOrderRegister(t *testing.T) {
 	if strings.Contains(html, `<table class="items">`) {
 		t.Fatalf("billing notice must not render product-line table")
 	}
+	if !strings.Contains(html, `<tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>`) {
+		t.Fatal("billing notice must fill the remaining table rows")
+	}
 }
 
+func TestUnifiedRender_BillEmptyRowsKeepTableCells(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("BILL", 0), StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	if strings.Contains(html, "ไม่มีใบส่งสินค้าที่ค้างวางบิล") {
+		t.Fatal("empty BILL must not replace the table row with a message")
+	}
+	if !strings.Contains(html, `<tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>`) {
+		t.Fatal("empty BILL must render five empty table cells")
+	}
+}
 func TestUnifiedRender_CopySeparation(t *testing.T) {
 	html, err := RenderUnifiedDocumentCopies(makeDoc("TAX_INVOICE", 3), StoreInfo{Name: "ร้านทดสอบ"}, -1)
 	if err != nil {

@@ -222,6 +222,16 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
 	}
 
+	if req.BankAccountID != nil && strings.TrimSpace(*req.BankAccountID) != "" {
+		var active bool
+		if err := s.db.Raw(
+			"SELECT is_active FROM store_bank_accounts WHERE id = ? AND store_id = ?",
+			strings.TrimSpace(*req.BankAccountID), storeID,
+		).Scan(&active).Error; err != nil || !active {
+			return nil, fmt.Errorf("bank account not found or inactive: %w", ErrInvalidInput)
+		}
+	}
+
 	docDate, err := time.Parse("2006-01-02", req.DocumentDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid document_date: %w", ErrInvalidInput)
@@ -344,6 +354,7 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		InvoiceRefNo:         req.InvoiceRefNo,
 		PORefNo:              req.PORefNo,
 		SourceDocumentID:     req.SourceDocumentID,
+		BankAccountID:        req.BankAccountID,
 		ShippingFee:          round2(req.ShippingFee),
 		CreditTermDays:       req.CreditTermDays,
 		Subtotal:             subtotal,
@@ -683,14 +694,19 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 
 	// Fetch bank accounts for this store
 	var bankRows []struct {
+		ID          string `gorm:"column:id"`
 		BankName    string `gorm:"column:bank_name"`
 		AccountNo   string `gorm:"column:account_no"`
 		AccountName string `gorm:"column:account_name"`
 	}
-	_ = s.db.Raw(
-		"SELECT bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? ORDER BY created_at ASC",
-		storeID,
-	).Scan(&bankRows)
+	bankSQL := "SELECT id, bank_name, account_no, account_name FROM store_bank_accounts WHERE store_id = ? AND is_active = TRUE"
+	bankArgs := []any{storeID}
+	if doc.BankAccountID != nil && strings.TrimSpace(*doc.BankAccountID) != "" {
+		bankSQL += " AND id = ?"
+		bankArgs = append(bankArgs, strings.TrimSpace(*doc.BankAccountID))
+	}
+	bankSQL += " ORDER BY is_default DESC, created_at ASC LIMIT 1"
+	_ = s.db.Raw(bankSQL, bankArgs...).Scan(&bankRows)
 	bankAccounts := make([]dochtml.BankAccountInfo, len(bankRows))
 	for i, r := range bankRows {
 		bankAccounts[i] = dochtml.BankAccountInfo{
@@ -985,7 +1001,7 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 // source via SourceDocumentID. The (source → target) pair must be permitted by
 // allowedConversions. This is a document-level copy — pricing / VAT / accounting
 // are NOT altered (a CREDIT_NOTE is copied as-is, not auto-negated).
-func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType, deliveryDateOverride ...*string) (*Document, error) {
+func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id string, target DocumentType, bankAccountID *string, deliveryDateOverride ...*string) (*Document, error) {
 	src, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return nil, err
@@ -1002,6 +1018,18 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
 	// (customer snapshot, delivery / reference fields, dates, notes, lineage link).
 	req := buildConversionRequest(src, target, deliveryDateOverride...)
+	if bankAccountID != nil && strings.TrimSpace(*bankAccountID) != "" {
+		req.BankAccountID = bankAccountID
+	}
+	if req.BankAccountID != nil && strings.TrimSpace(*req.BankAccountID) != "" {
+		var active bool
+		if err := s.db.Raw(
+			"SELECT is_active FROM store_bank_accounts WHERE id = ? AND store_id = ?",
+			strings.TrimSpace(*req.BankAccountID), storeID,
+		).Scan(&active).Error; err != nil || !active {
+			return nil, fmt.Errorf("bank account not found or inactive: %w", ErrInvalidInput)
+		}
+	}
 	// For DELIVERY_ORDER the optional second override is the purchase-order
 	// reference entered by the user during the invoice → DO conversion modal.
 	if target == TypeDeliveryOrder && len(deliveryDateOverride) > 1 && deliveryDateOverride[1] != nil {
@@ -1077,6 +1105,7 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		InvoiceRefNo:         req.InvoiceRefNo,
 		PORefNo:              req.PORefNo,
 		SourceDocumentID:     req.SourceDocumentID,
+		BankAccountID:        req.BankAccountID,
 		// Money — verbatim from the source, NOT recomputed.
 		Subtotal:     src.Subtotal,
 		BillDiscount: src.BillDiscount,
@@ -1169,6 +1198,7 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 		DocumentDate:     time.Now(),
 		InvoiceRefNo:     primary.DocumentNoFull,
 		SourceDocumentID: &primary.ID,
+		BankAccountID:    primary.BankAccountID,
 		Subtotal:         subtotal,
 		BillDiscount:     billDiscount,
 		VatRate:          primary.VatRate,
@@ -1332,6 +1362,7 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		VatRate:                 src.VatRate,
 		Notes:                   src.Notes,
 		SourceDocumentID:        &srcID,
+		BankAccountID:           src.BankAccountID,
 		Items:                   items,
 	}
 	req.PriceValidityDays = src.PriceValidityDays
@@ -1455,22 +1486,22 @@ func (s Service) resolveQuotationRef(doc *Document) string {
 func (s Service) createTaxInvoiceFrom(ctx context.Context, actor auth.Claims, storeID string, src *Document) (*Document, error) {
 	// Delegate to Convert so the tax invoice inherits the invoice's totals verbatim
 	// (bill discount + VAT treatment preserved) instead of being recomputed.
-	return s.Convert(ctx, actor, storeID, src.ID, TypeTaxInvoice)
+	return s.Convert(ctx, actor, storeID, src.ID, TypeTaxInvoice, nil)
 }
 
 // ConvertToTaxInvoice creates a TAX_INVOICE from an existing INVOICE (without marking paid).
 func (s Service) ConvertToTaxInvoice(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeTaxInvoice)
+	return s.Convert(ctx, actor, storeID, id, TypeTaxInvoice, nil)
 }
 
 // ConvertToDeliveryOrder creates a DELIVERY_ORDER from an existing INVOICE.
 func (s Service) ConvertToDeliveryOrder(ctx context.Context, actor auth.Claims, storeID, id string, deliveryDate, poRefNo *string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, deliveryDate, poRefNo)
+	return s.Convert(ctx, actor, storeID, id, TypeDeliveryOrder, nil, deliveryDate, poRefNo)
 }
 
 // ConvertQuotation creates an INVOICE document from an existing QUOTATION.
 func (s Service) ConvertQuotation(ctx context.Context, actor auth.Claims, storeID, id string) (*Document, error) {
-	return s.Convert(ctx, actor, storeID, id, TypeInvoice)
+	return s.Convert(ctx, actor, storeID, id, TypeInvoice, nil)
 }
 
 // toDocData maps a *Document to dochtml.DocData for HTML rendering.

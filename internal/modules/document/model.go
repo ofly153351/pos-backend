@@ -71,6 +71,7 @@ type Document struct {
 	SalespersonName      string         `gorm:"not null;default:''" json:"salesperson_name"`
 	InvoiceRefNo         string         `gorm:"not null;default:''" json:"invoice_ref_no"`
 	SourceDocumentID     *string        `gorm:"type:varchar(30)" json:"source_document_id,omitempty"`
+	BankAccountID        *string        `gorm:"type:varchar(30)" json:"bank_account_id,omitempty"`
 	PORefNo              string         `gorm:"not null;default:''" json:"po_ref_no"`
 	ShippingFee          float64        `gorm:"not null;default:0" json:"shipping_fee"`
 	CreditTermDays       int            `gorm:"not null;default:0" json:"credit_term_days"`

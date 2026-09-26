@@ -272,7 +272,7 @@ func (h Handler) Convert(c *fiber.Ctx) error {
 	if req.TargetType == TypeReceipt && len(req.SourceDocumentIDs) > 0 {
 		doc, err = h.service.ConvertReceiptFromBills(c.UserContext(), claims, storeID, req.SourceDocumentIDs, req.ReceiptTemplate)
 	} else {
-		doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType)
+		doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType, req.BankAccountID)
 	}
 	if err != nil {
 		return writeError(c, err)

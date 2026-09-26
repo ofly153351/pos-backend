@@ -415,13 +415,23 @@ func (r PostgresRepository) CreateBankAccount(ctx context.Context, acc StoreBank
 
 func (r PostgresRepository) UpdateBankAccount(ctx context.Context, storeID, id string, updates map[string]interface{}) (StoreBankAccount, error) {
 	updates["updated_at"] = time.Now()
-	if err := r.db.WithContext(ctx).Model(&StoreBankAccount{}).
-		Where("id = ? AND store_id = ?", id, storeID).
-		Updates(updates).Error; err != nil {
-		return StoreBankAccount{}, err
-	}
 	var acc StoreBankAccount
-	if err := r.db.WithContext(ctx).Where("id = ? AND store_id = ?", id, storeID).First(&acc).Error; err != nil {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if isDefault, ok := updates["is_default"].(bool); ok && isDefault {
+			if err := tx.Model(&StoreBankAccount{}).
+				Where("store_id = ? AND id <> ?", storeID, id).
+				Update("is_default", false).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Model(&StoreBankAccount{}).
+			Where("id = ? AND store_id = ?", id, storeID).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND store_id = ?", id, storeID).First(&acc).Error
+	})
+	if err != nil {
 		return StoreBankAccount{}, err
 	}
 	return acc, nil
