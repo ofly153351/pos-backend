@@ -77,15 +77,22 @@ func (p docProfile) footerBlockH(hasNotes bool) float64 {
 	if p.ShowPayBox && hPayBox > gridH {
 		gridH = hPayBox
 	}
+	if !p.ShowPayBox && hRemarks > gridH {
+		// Non-payment documents place remarks beside the summary inside foot-grid.
+		// It must not be reserved again as a stacked block below the grid.
+		gridH = hRemarks
+	}
 
 	h := gridH
 	// กล่องหมายเหตุขึ้นเสมอ (เป็น form field สำหรับเขียน ไม่ผูกกับว่ามี Notes ไหม)
-	// จึงสำรองพื้นที่ทุกครั้ง — hasNotes ไม่ได้ใช้ตัดสินความสูงอีกต่อไป
+	// เอกสารที่มี paybox วาง remarks เป็นกล่องแยกด้านล่าง; เอกสารอื่นวางไว้ใน grid แล้ว
 	_ = hasNotes
+	if p.ShowPayBox {
+		h += hRemarks
+	}
 	if p.IsDelivery {
 		h += 8 // baht-text row below the item table
 	}
-	h += hRemarks  // remarks box (stacked below the grid)
 	h += hSigBlock // signatures stacked below remarks
 	return h
 }
@@ -570,7 +577,7 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .col-no{ width:9mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
 .bill-items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
 .bill-items th{ background:var(--ink); color:#fff; border:1px solid #444; padding:2.2mm 2mm; font-size:10px; text-align:center; }
-.bill-items td{ height:10mm; border:1px solid var(--line); padding:1.5mm 2mm; vertical-align:middle; text-align:center; }
+.bill-items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; }
 .bill-items .left{ text-align:left; } .bill-items .num{ text-align:right; }
 .bill-col-no{ width:14mm; } .bill-col-date{ width:38mm; } .bill-col-due{ width:38mm; } .bill-col-amount{ width:42mm; }
 tr{ break-inside:avoid; } thead{ display:table-header-group; }
@@ -584,7 +591,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .pay-lbl{ white-space:nowrap; flex-shrink:0; margin-right:1mm; }
 .pay-dot{ flex:1; border-bottom:1px dashed var(--line); margin:0 1.5mm; position:relative; top:-1.5px; }
 .pay-baht{ white-space:nowrap; flex-shrink:0; font-size:9px; }
-.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:9px; color:var(--muted); }
+.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:10px; line-height:1.2; font-weight:700; color:var(--ink); }
 .bank-sub-lbl{ white-space:nowrap; flex-shrink:0; }
 .bank-sub-ln{ flex:1; border-bottom:1px solid var(--line); position:relative; top:-2px; }
 .pay-cheque-area{ display:flex; gap:2mm; align-items:flex-start; margin-top:0.5mm; }

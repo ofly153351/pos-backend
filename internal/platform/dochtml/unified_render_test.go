@@ -101,6 +101,17 @@ func TestUnifiedRender_PaymentBoxRendersOnlyOneBankAccount(t *testing.T) {
 	if strings.Contains(html, "ธนาคารกรุงไทย") || strings.Contains(html, "32142495834") {
 		t.Fatal("payment box must render exactly one bank account")
 	}
+	if !strings.Contains(html, `.bank-sub{ display:flex; align-items:baseline; gap:1.5mm; margin:-0.5mm 0 1.5mm 3.5mm; font-size:10px; line-height:1.2; font-weight:700; color:var(--ink); }`) {
+		t.Fatal("bank detail row must match the payment box font scale and use bold text")
+	}
+}
+
+func TestUnifiedRender_NonPaymentFooterReleasesPaymentBoxSpace(t *testing.T) {
+	paymentFooter := profileFor("INVOICE").footerBlockH(false)
+	nonPaymentFooter := profileFor("QUOTATION").footerBlockH(false)
+	if paymentFooter-nonPaymentFooter != hPayBox-hRemarks {
+		t.Fatalf("non-payment footer should release paybox space: payment=%v non-payment=%v", paymentFooter, nonPaymentFooter)
+	}
 }
 
 func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing.T) {
@@ -248,6 +259,9 @@ func TestUnifiedRender_BillEmptyRowsKeepTableCells(t *testing.T) {
 	}
 	if !strings.Contains(html, `<tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>`) {
 		t.Fatal("empty BILL must render five empty table cells")
+	}
+	if !strings.Contains(html, `.bill-items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; }`) {
+		t.Fatal("BILL rows must use the same row height and cell padding as other document tables")
 	}
 }
 func TestUnifiedRender_CopySeparation(t *testing.T) {
