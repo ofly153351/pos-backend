@@ -119,7 +119,25 @@ docker_failure() {
 
 info "Pulling PostgreSQL and MinIO images..."
 if ! docker compose pull postgres minio; then
-  docker_failure "ไม่สามารถ pull image ของ PostgreSQL หรือ MinIO ได้"
+  warn "ไม่สามารถ pull image ใหม่ของ PostgreSQL หรือ MinIO ได้"
+  warn "ตรวจสอบว่ามี container เดิมที่ healthy และใช้ image ในเครื่องได้หรือไม่"
+
+  postgres_running="$(docker compose ps --status running -q postgres 2>/dev/null || true)"
+  minio_running="$(docker compose ps --status running -q minio 2>/dev/null || true)"
+  postgres_ready=false
+  minio_ready=false
+  if [[ -n "$postgres_running" ]] && docker compose exec -T postgres \
+      pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" &>/dev/null; then
+    postgres_ready=true
+  fi
+  if [[ -n "$minio_running" ]] && curl -sf "http://localhost:${MINIO_API_PORT:-9000}/minio/health/live" &>/dev/null; then
+    minio_ready=true
+  fi
+
+  if [[ "$postgres_ready" != true || "$minio_ready" != true ]]; then
+    docker_failure "pull ล้มเหลวและไม่มี PostgreSQL/MinIO เดิมที่พร้อมใช้งาน"
+  fi
+  warn "ใช้ PostgreSQL และ MinIO container เดิมต่อ เพราะ services ยัง healthy"
 fi
 
 info "Starting PostgreSQL and MinIO..."
