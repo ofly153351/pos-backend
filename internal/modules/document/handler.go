@@ -136,7 +136,7 @@ func (h Handler) GetDocumentPDF(c *fiber.Ctx) error {
 		return writeError(c, err)
 	}
 	c.Set("Content-Type", "application/pdf")
-	c.Set("Content-Disposition", "inline; filename=\"document.pdf\"")
+	c.Set("Content-Disposition", "inline; filename=\""+id+".pdf\"")
 	c.Set("Cache-Control", "no-store")
 	return c.Send(data)
 }
@@ -326,6 +326,8 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, ErrAlreadyConverted):
 		return httpx.Error(c, fiber.StatusConflict, "document already exists", err.Error())
+	case errors.Is(err, ErrDocumentReferenced):
+		return httpx.Error(c, fiber.StatusConflict, "document cannot be deleted because it is referenced", err.Error())
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction), errors.Is(err, ErrInvalidConversion):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:

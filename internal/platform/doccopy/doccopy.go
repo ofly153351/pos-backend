@@ -23,7 +23,7 @@ const (
 // common gas-trade / VAT credit-sale workflow:
 //   - DELIVERY_ORDER (combined ใบส่งของ/ใบกำกับภาษี, credit) → 3 copies; every copy
 //     carries the delivered-by / received-by signature box.
-//   - QUOTATION, RECEIPT, and the rest → 2 copies (customer original + company copy).
+//   - TAX_INVOICE → 3 copies (customer original, company accounting copy, payment-follow-up/billing copy).
 //
 // A single-copy fallback is never returned — every type prints at least the
 // original + one company copy, matching real-world filing.
@@ -37,6 +37,12 @@ func SpecFor(docType string) []CopyVariant {
 			{BadgeTH: badgeOriginalTH, BadgeEN: badgeOriginalEN, Purpose: "(สำหรับลูกค้า)", ShowSignature: true},
 			{BadgeTH: badgeCopyTH, BadgeEN: badgeCopyEN, Purpose: "(สำหรับลูกค้า — ตั้งหนี้)", ShowSignature: true},
 			{BadgeTH: badgeCopyTH, BadgeEN: badgeCopyEN, Purpose: "(สำหรับบริษัท)", ShowSignature: true},
+		}
+	case "TAX_INVOICE":
+		return []CopyVariant{
+			{BadgeTH: badgeOriginalTH, BadgeEN: badgeOriginalEN, Purpose: "(สำหรับลูกค้า)", ShowSignature: true},
+			{BadgeTH: badgeCopyTH, BadgeEN: badgeCopyEN, Purpose: "(สำหรับบริษัท — ฝ่ายบัญชีบริษัท)", ShowSignature: true},
+			{BadgeTH: badgeCopyTH, BadgeEN: badgeCopyEN, Purpose: "(สำหรับติดตามการชำระเงิน — วางบิล)", ShowSignature: true},
 		}
 	case "QUOTATION":
 		return []CopyVariant{

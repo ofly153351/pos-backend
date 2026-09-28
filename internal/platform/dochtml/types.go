@@ -132,6 +132,7 @@ type DocData struct {
 	PriceValidityDays *int
 	CustomerName      string
 	CustomerAddress   string
+	QuotationSummary  string
 	CustomerPhone     string
 	CustomerTaxID     *string
 	CustomerBranch    *string // สาขาผู้ซื้อ (optional)

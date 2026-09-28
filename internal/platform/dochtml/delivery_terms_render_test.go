@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestQuotationDeliveryTerms_BlankPODateUsesUnderscore(t *testing.T) {
+func TestQuotationDeliveryTerms_BlankPODateUsesDatePlaceholder(t *testing.T) {
 	days := 15
 	price, delivery := quotationTerms(DocData{
 		Type:                 "QUOTATION",
@@ -14,11 +14,22 @@ func TestQuotationDeliveryTerms_BlankPODateUsesUnderscore(t *testing.T) {
 		DeliveryLeadTimeDays: &days,
 	})
 	got := price + " · " + delivery
-	if !strings.Contains(got, "ระยะเวลา _ วัน") || !strings.Contains(got, "ภายใน 15 วัน") || !strings.Contains(got, "วันที่ _") {
+	if !strings.Contains(got, "ระยะเวลา _ วัน") || !strings.Contains(got, "ภายใน 15 วัน") || !strings.Contains(got, "วันที่ _/_/_") {
 		t.Fatalf("terms = %q, expected underscores for blank values", got)
 	}
 }
 
+func TestQuotationDeliveryTerms_ZeroPODateUsesDatePlaceholder(t *testing.T) {
+	zero := time.Time{}
+	_, delivery := quotationTerms(DocData{
+		Type:                 "QUOTATION",
+		DeliveryLeadTimeDays: func() *int { v := 7; return &v }(),
+		POReceivedDate:       &zero,
+	})
+	if !strings.Contains(delivery, "วันที่ _/_/_") {
+		t.Fatalf("delivery = %q, expected zero PO date placeholder", delivery)
+	}
+}
 func TestQuotationDeliveryTerms_ZeroDaysUsesUnderscore(t *testing.T) {
 	zero := 0
 	price, delivery := quotationTerms(DocData{

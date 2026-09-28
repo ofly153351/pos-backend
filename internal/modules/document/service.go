@@ -21,13 +21,14 @@ import (
 )
 
 var (
-	ErrNotFound          = errors.New("document not found")
-	ErrForbidden         = errors.New("forbidden")
-	ErrInvalidInput      = errors.New("invalid input")
-	ErrNoItems           = errors.New("document must have at least one item")
-	ErrBadAction         = errors.New("unknown bulk action")
-	ErrInvalidConversion = errors.New("conversion not allowed for this document type")
-	ErrAlreadyConverted  = errors.New("document has already been converted to this type")
+	ErrNotFound           = errors.New("document not found")
+	ErrForbidden          = errors.New("forbidden")
+	ErrInvalidInput       = errors.New("invalid input")
+	ErrNoItems            = errors.New("document must have at least one item")
+	ErrBadAction          = errors.New("unknown bulk action")
+	ErrInvalidConversion  = errors.New("conversion not allowed for this document type")
+	ErrDocumentReferenced = errors.New("document is referenced by an existing receipt")
+	ErrAlreadyConverted   = errors.New("document has already been converted to this type")
 )
 
 // fieldValidationError carries field-level failures so the handler can answer
@@ -362,6 +363,7 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		VatAmount:            vatAmount,
 		TotalAmount:          totalAmount,
 		Notes:                req.Notes,
+		QuotationSummary:     req.QuotationSummary,
 		Items:                items,
 		CreatedBy:            actor.UserID,
 	}
@@ -657,6 +659,20 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 	}
 
 	docData := toDocData(doc)
+	// Legacy documents may have an empty address snapshot even though the linked
+	// customer now has a primary address. Keep complete document snapshots intact;
+	// only backfill the missing legacy value for rendering.
+	if strings.TrimSpace(docData.CustomerAddress) == "" && doc.CustomerID != "" {
+		var customerAddress struct {
+			Address string
+		}
+		if err := s.db.WithContext(ctx).Raw(
+			"SELECT COALESCE(address, '') AS address FROM customers WHERE id = ? AND store_id = ?",
+			doc.CustomerID, storeID,
+		).Scan(&customerAddress).Error; err == nil {
+			docData.CustomerAddress = customerAddress.Address
+		}
+	}
 	if doc.Type == TypeReceipt && receiptTemplate == 2 {
 		docData.ReceiptTemplate = 2
 		docData.PaymentDate = doc.DocumentDate
@@ -870,6 +886,9 @@ func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeI
 }
 
 func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) error {
+	if len(req.IDs) == 0 {
+		return ErrInvalidInput
+	}
 	switch req.Action {
 	case "DELETE":
 		return s.repo.BulkDelete(storeID, req.IDs)
@@ -1107,14 +1126,15 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		SourceDocumentID:     req.SourceDocumentID,
 		BankAccountID:        req.BankAccountID,
 		// Money — verbatim from the source, NOT recomputed.
-		Subtotal:     src.Subtotal,
-		BillDiscount: src.BillDiscount,
-		VatRate:      src.VatRate,
-		VatAmount:    src.VatAmount,
-		TotalAmount:  src.TotalAmount,
-		Notes:        req.Notes,
-		Items:        items,
-		CreatedBy:    actor.UserID,
+		Subtotal:         src.Subtotal,
+		BillDiscount:     src.BillDiscount,
+		VatRate:          src.VatRate,
+		VatAmount:        src.VatAmount,
+		TotalAmount:      src.TotalAmount,
+		Notes:            req.Notes,
+		QuotationSummary: src.QuotationSummary,
+		Items:            items,
+		CreatedBy:        actor.UserID,
 	}
 	return s.assignNumberAndInsert(doc)
 }
@@ -1527,6 +1547,10 @@ func toDocData(doc *Document) dochtml.DocData {
 	totalDiscount += doc.BillDiscount
 
 	preVat := math.Round((doc.Subtotal-totalDiscount)*100) / 100
+	quotationSummary := ""
+	if doc.QuotationSummary != nil {
+		quotationSummary = strings.TrimSpace(*doc.QuotationSummary)
+	}
 
 	var billRows []dochtml.BillRow
 	if doc.Type == TypeBill {
@@ -1566,6 +1590,7 @@ func toDocData(doc *Document) dochtml.DocData {
 		TotalAmount:       doc.TotalAmount,
 		PreVatAmount:      preVat,
 		Notes:             doc.Notes,
+		QuotationSummary:  quotationSummary,
 		// Delivery order fields
 		DeliveryDate:         doc.DeliveryDate,
 		DeliveryLeadTimeDays: doc.DeliveryLeadTimeDays,

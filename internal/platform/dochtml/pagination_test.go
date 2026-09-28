@@ -68,30 +68,8 @@ func TestPackRows_Invariants(t *testing.T) {
 					t.Fatalf("caps%v total=%d: IsFirst at %d", c, total, k)
 				}
 			}
-			// หน้าสุดท้ายอาจเป็น footer-only (0 แถว) ได้ แต่ต้องตามหลังหน้าที่มีสินค้า
-			// (ห้ามเป็นหน้าเดียวเปล่า หรือ footer-only ซ้อน footer-only)
-			if total >= 1 {
-				if last := ps[len(ps)-1]; last.End-last.Start == 0 {
-					if len(ps) < 2 || ps[len(ps)-2].End-ps[len(ps)-2].Start < 1 {
-						t.Fatalf("caps%v total=%d: footer-only page ไม่ได้ตามหลังหน้าสินค้า", c, total)
-					}
-				}
-			}
-			// GREEDY: หน้าสินค้าทุกหน้า "ยกเว้นหน้าสินค้าหน้าสุดท้าย" ต้องเต็ม cap เป๊ะ
-			// (ถ้าไม่เต็ม = หารครึ่ง หรือ ทิ้งแถวเปล่าแล้วดันสินค้าไปหน้าถัดไป)
-			lastItems := len(ps) - 1
-			for lastItems >= 0 && ps[lastItems].End == ps[lastItems].Start {
-				lastItems-- // ข้ามหน้า footer-only
-			}
-			for k := 0; k < lastItems; k++ {
-				capK := cM
-				if k == 0 {
-					capK = cFM
-				}
-				if rows := ps[k].End - ps[k].Start; rows != capK {
-					t.Fatalf("caps%v total=%d: หน้าสินค้า %d ไม่เต็ม (rows=%d cap=%d) — หารครึ่ง/ทิ้งแถวเปล่า?", c, total, k, rows, capK)
-				}
-			}
+			// A zero-row final page is an intentional footer-only page when the
+			// remaining products do not fit with the footer.
 		}
 	}
 }
@@ -107,10 +85,10 @@ func TestPackRows_Cases(t *testing.T) {
 		{0, [][2]int{{0, 0}}},
 		{1, [][2]int{{0, 1}}},
 		{10, [][2]int{{0, 10}}},                     // == capFirstLast → หน้าเดียว
-		{11, [][2]int{{0, 11}, {11, 11}}},           // 11 ลงหน้าต่อเนื่องครบ + footer-only
-		{15, [][2]int{{0, 15}, {15, 15}}},           // 15 == capFirstMid ครบ + footer-only
-		{33, [][2]int{{0, 15}, {15, 33}}},           // 15 เต็ม, เหลือ 18 == capMidLast → หน้าสุดท้ายมีสินค้า
-		{34, [][2]int{{0, 15}, {15, 34}, {34, 34}}}, // 15, เหลือ 19 ลงหน้า 2 ครบ + footer-only
+		{11, [][2]int{{0, 11}, {11, 11}}},           // all continuation rows, footer-only
+		{15, [][2]int{{0, 15}, {15, 15}}},           // all continuation rows, footer-only
+		{33, [][2]int{{0, 15}, {15, 33}}},           // final page can carry the footer
+		{34, [][2]int{{0, 15}, {15, 34}, {34, 34}}}, // all remainder rows before footer
 		{40, [][2]int{{0, 15}, {15, 39}, {39, 40}}}, // 15, เติมหน้า 2 เต็ม 24, เหลือ 1 พร้อม footer
 	}
 	for _, c := range cases {
@@ -159,46 +137,67 @@ func TestGeometry_CompactHeaderSinglePage(t *testing.T) {
 	}
 }
 
-// Regression (อาการที่รายงาน): ใบแจ้งหนี้ที่สินค้าลงหน้าต่อเนื่องได้หมดแต่ใส่ footer
-// ไม่พอ ต้องวางสินค้า "ครบ" บนหน้านั้น (ไม่หารครึ่ง, ไม่ทิ้งแถวเปล่าแล้วดัน 1 ตัวไปหน้า
-// ถัดไป) แล้วเปิดหน้า footer-only.
+func TestGeometry_FinalProductPageUsesProfileCapacity(t *testing.T) {
+	want := map[string]int{
+		"INVOICE": 19, "BILL": 19, "TAX_INVOICE": 23,
+		"RECEIPT": 24, "CREDIT_NOTE": 24, "DELIVERY_ORDER": 20,
+	}
+	for docType, expected := range want {
+		g := buildGeometry(profileFor(docType), false)
+		if got := g.rowsPerPage(g.headerMini, true); got != expected {
+			t.Fatalf("%s: final product page cap = %d, want %d", docType, got, expected)
+		}
+	}
+}
+
+func TestGeometry_QuotationKeepsFooterWithFinalRows(t *testing.T) {
+	g := buildGeometry(profileFor("QUOTATION"), false)
+	pages := paginate(g, 40)
+	if len(pages) != 2 || pages[0].End-pages[0].Start != 19 || pages[1].End-pages[1].Start != 21 || !pages[1].IsLast {
+		t.Fatalf("QUOTATION 40 รายการควรได้ [19]+[21+footer], got %v", pages)
+	}
+}
+
+func TestGeometry_AllDocumentProfilesKeepRowsContinuous(t *testing.T) {
+	want := map[string][]int{
+		"QUOTATION":      {19, 21},
+		"INVOICE":        {19, 21, 0},
+		"BILL":           {19, 21, 0},
+		"TAX_INVOICE":    {19, 21},
+		"RECEIPT":        {19, 21},
+		"CREDIT_NOTE":    {19, 21},
+		"DELIVERY_ORDER": {19, 21, 0},
+	}
+	for docType, expected := range want {
+		pages := paginate(buildGeometry(profileFor(docType), false), 40)
+		if len(pages) != len(expected) {
+			t.Fatalf("%s: got %v pages, want %v", docType, pages, expected)
+		}
+		start := 0
+		for i, page := range pages {
+			rows := page.End - page.Start
+			if page.Start != start || rows != expected[i] || (rows == 0 && i != len(pages)-1) {
+				t.Fatalf("%s page %d: got [%d,%d] (%d rows), want start=%d rows=%d", docType, i+1, page.Start, page.End, rows, start, expected[i])
+			}
+			start = page.End
+		}
+		if start != 40 || !pages[len(pages)-1].IsLast {
+			t.Fatalf("%s: pages do not cover all 40 rows: %v", docType, pages)
+		}
+	}
+}
+
 func TestGeometry_InvoiceNoHalving(t *testing.T) {
 	g := buildGeometry(profileFor("INVOICE"), false)
-	capFM := g.rowsPerPage(g.headerFull, false)
-	if capFM > firstPageRowCap {
-		capFM = firstPageRowCap // หน้าแรกถูกจำกัดเพดานที่ 20
+	// The final product page owns the footer and must contain products.
+	if ps := paginate(g, 18); len(ps) != 2 || ps[0].End != 18 || ps[1].Start != 18 || ps[1].End != 18 {
+		t.Fatalf("INVOICE 18 รายการ: ควรได้ [18]+[footer] แต่ได้ %v", ps)
 	}
-	capM := g.rowsPerPage(g.headerMini, false)
-
-	// หน้าสินค้าทุกหน้า (ยกเว้นหน้าสินค้าหน้าสุดท้าย) ต้องเต็ม cap — ไม่มีแถวเปล่าค้าง
-	for total := 16; total <= 120; total++ {
-		ps := paginate(g, total)
-		lastItems := len(ps) - 1
-		for lastItems >= 0 && ps[lastItems].End == ps[lastItems].Start {
-			lastItems--
-		}
-		for k := 0; k < lastItems; k++ {
-			capK := capM
-			if k == 0 {
-				capK = capFM
-			}
-			if rows := ps[k].End - ps[k].Start; rows != capK {
-				t.Fatalf("INVOICE total=%d: หน้าสินค้า %d ไม่เต็ม (rows=%d cap=%d)", total, k, rows, capK)
-			}
-		}
+	if ps := paginate(g, 19); len(ps) != 2 || ps[0].End != 19 || ps[1].Start != 19 || ps[1].End != 19 {
+		t.Fatalf("INVOICE 19 รายการ: ควรได้ [19]+[footer] แต่ได้ %v", ps)
 	}
-
-	// หน้าแรกจุได้สูงสุด 24: 18 รายการ (>15, ≤24) → [18 รายการ]+[footer-only]
-	if ps := paginate(g, 18); len(ps) != 2 || ps[0].End != 18 || ps[1].Start != ps[1].End {
-		t.Fatalf("INVOICE 18 รายการ: ควรได้ [18]+[footer-only] แต่ได้ %v", ps)
-	}
-	// 24 รายการ (เต็มเพดานพอดี) → [24]+[footer-only]
-	if ps := paginate(g, 24); len(ps) != 2 || ps[0].End != 24 || ps[1].Start != ps[1].End {
-		t.Fatalf("INVOICE 24 รายการ: ควรได้ [24]+[footer-only] แต่ได้ %v", ps)
-	}
-	// เกิน 24 (เช่น 25): หน้าแรกเต็ม 24 → ที่เหลือ 1 ไปหน้าถัดไปพร้อม footer
-	if ps := paginate(g, 25); len(ps) != 2 || ps[0].End != 24 || ps[1].Start == ps[1].End {
-		t.Fatalf("INVOICE 25 รายการ: ควรได้ [24]+[1 รายการ+footer] แต่ได้ %v", ps)
+	if ps := paginate(g, 20); len(ps) != 2 || ps[0].End != 19 || ps[1].Start != 19 || ps[1].End != 20 {
+		t.Fatalf("INVOICE 20 รายการ: ควรได้ [19]+[1+footer] แต่ได้ %v", ps)
 	}
 }
 

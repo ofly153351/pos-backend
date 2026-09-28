@@ -25,7 +25,7 @@ func makeDoc(docType string, n int) DocData {
 	note := "ทดสอบหมายเหตุ"
 	return DocData{
 		Type:            docType,
-		DocumentNoFull:  "DOC-0001",
+		DocumentNoFull:  "INV256909-0001",
 		DocumentDate:    time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC),
 		DueDate:         &due,
 		ValidUntil:      &due,
@@ -50,6 +50,23 @@ func makeDoc(docType string, n int) DocData {
 
 var renderTypes = []string{
 	"DELIVERY_ORDER", "INVOICE", "RECEIPT", "TAX_INVOICE", "QUOTATION", "BILL", "CREDIT_NOTE",
+}
+
+func TestUnifiedRender_QuotationIntroUsesSummaryBelowDocumentInfo(t *testing.T) {
+	doc := makeDoc("QUOTATION", 1)
+	doc.QuotationSummary = "เครื่องใช้สำนักงานและอุปกรณ์ที่เกี่ยวข้อง"
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้านทดสอบ"})
+	if err != nil {
+		t.Fatalf("render quotation: %v", err)
+	}
+	infoEnd := strings.Index(html, `class="doc-info-row"`)
+	introStart := strings.Index(html, `class="quotation-intro"`)
+	if infoEnd < 0 || introStart < 0 || introStart <= infoEnd {
+		t.Fatal("quotation intro should be directly below doc-info-row")
+	}
+	if !strings.Contains(html, "<strong>ร้านทดสอบ</strong> ขอเสนอราคา <strong>เครื่องใช้สำนักงานและอุปกรณ์ที่เกี่ยวข้อง</strong> เพื่อโปรดพิจารณา โดยมีรายละเอียดดังต่อไปนี้") {
+		t.Fatal("quotation intro text missing")
+	}
 }
 
 func TestProfile_PaymentSectionOnlyForInvoiceAndBill(t *testing.T) {
@@ -106,10 +123,55 @@ func TestUnifiedRender_PaymentBoxRendersOnlyOneBankAccount(t *testing.T) {
 	}
 }
 
+func TestUnifiedRender_DocumentMetaAndPartyShareSixtyFortyRow(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("DELIVERY_ORDER", 1), StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	for _, want := range []string{
+		`class="doc-id">INV256909-0001</div>`,
+		`class="doc-info-row"`,
+		`combined-parties"`,
+		`class="doc-meta-panel"`,
+		`.parties{ display:flex; flex-direction:column; gap:0; margin:0; border:1px solid var(--line); border-right:0; min-width:0; }`,
+		`.combined-parties .section-body{ gap:.75mm; }`,
+		`class="doc-meta-line"`,
+		`class="header-section-title"`,
+		`class="info-row"`,
+		`รายละเอียดเอกสาร · DOCUMENT DETAILS`,
+		`ชื่อหน่วยงาน`,
+		`เลขผู้เสียภาษี`,
+		`ข้อมูลลูกค้าและจัดส่ง · CUSTOMER / DELIVERY`,
+		`วันที่จัดส่ง`,
+		`.doc-info-row .parties{ flex:6 1 0; min-width:0; margin:0; }`,
+		`.doc-meta-panel{ flex:4 1 0; min-width:0; display:flex; align-items:stretch; border:1px solid var(--line); padding:0 3mm 2mm; }`,
+		`.header-section-title{ font-size:10px; font-weight:700; color:var(--ink); background:#f6f6f6; margin:0 -3mm 2mm; padding:1mm 3mm; line-height:1.5; border-bottom:1px solid var(--line); }`,
+		`.info-row{ display:flex; align-items:flex-start; gap:2mm; min-width:0; line-height:1.5; }`,
+		`.combined-parties .info-row{ line-height:1.35; }`,
+		`.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:0; background:#f6f6f6; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("document info layout missing %q", want)
+		}
+	}
+	if strings.Contains(html, `<table class="doc-meta">`) {
+		t.Fatal("doc-meta should render as plain text, not a table box")
+	}
+	for _, removed := range []string{
+		`ข้อมูลลูกค้าและเอกสาร (Customer &amp; Document Information)`,
+		`class="doc-purpose"`,
+		`class="doc-title-en"`,
+	} {
+		if strings.Contains(html, removed) {
+			t.Fatalf("removed document header content still rendered: %q", removed)
+		}
+	}
+}
+
 func TestUnifiedRender_NonPaymentFooterReleasesPaymentBoxSpace(t *testing.T) {
 	paymentFooter := profileFor("INVOICE").footerBlockH(false)
 	nonPaymentFooter := profileFor("QUOTATION").footerBlockH(false)
-	if paymentFooter-nonPaymentFooter != hPayBox-hRemarks {
+	if paymentFooter-nonPaymentFooter != hPayBox-hRemarks-hTerms {
 		t.Fatalf("non-payment footer should release paybox space: payment=%v non-payment=%v", paymentFooter, nonPaymentFooter)
 	}
 }
@@ -125,6 +187,15 @@ func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing
 		}
 		if !strings.Contains(html, `class="remarks remarks-inline"`) {
 			t.Fatalf("%s must render full-width remarks beside the summary", docType)
+		}
+		if !strings.Contains(html, `class="foot-grid remarks-grid"`) {
+			t.Fatalf("%s footer must use the stretch layout for remarks and summary", docType)
+		}
+		if !strings.Contains(html, `.remarks-inline{ flex:1; min-width:0; height:100%; align-self:stretch; margin-top:0; }`) {
+			t.Fatalf("%s remarks must keep full-height styling", docType)
+		}
+		if !strings.Contains(html, `.foot-grid.remarks-grid{ align-items:stretch; }`) {
+			t.Fatalf("%s remarks must stretch to the summary height", docType)
 		}
 	}
 }
@@ -175,7 +246,7 @@ func TestUnifiedRender_MultiPage(t *testing.T) {
 // เมื่อสินค้าลงหน้าต่อเนื่องได้หมดแต่ใส่ footer ไม่พอ (เช่น INVOICE 18 รายการ):
 // หน้าสุดท้ายเป็น footer-only (ไม่มีตารางสินค้า) และหน้าสินค้าถูกเติม ledger ให้เต็ม
 // (ไม่เหลือช่องว่างดิบท้ายหน้า).
-func TestUnifiedRender_FooterOnlyLastPage(t *testing.T) {
+func TestUnifiedRender_InvoiceUsesDedicatedFooterPageWhenNeeded(t *testing.T) {
 	html, err := RenderUnifiedDocumentHTML(makeDoc("INVOICE", 18), StoreInfo{Name: "ร้านทดสอบ"})
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
@@ -184,18 +255,58 @@ func TestUnifiedRender_FooterOnlyLastPage(t *testing.T) {
 		t.Fatalf("expected exactly 2 pages")
 	}
 	if !strings.Contains(html, "footer-only") {
-		t.Fatalf("missing footer-only page class")
+		t.Fatalf("invoice must render a dedicated footer page")
 	}
-	// ตารางสินค้ามีแค่หน้าเดียว (หน้า footer-only ไม่มีตาราง)
 	if n := strings.Count(html, `<table class="items">`); n != 1 {
-		t.Fatalf("ตารางสินค้าควรมีแค่ 1 (หน้าสินค้า) แต่พบ %d — หน้า footer-only ไม่ควรมีตาราง", n)
+		t.Fatalf("หน้าสินค้าควรมีตารางเดียว แต่พบ %d ตาราง", n)
 	}
-	// หน้าสินค้าถูกเติม ledger ให้เต็ม (18 รายการ < ความจุหน้า → ต้องมี filler)
-	if !strings.Contains(html, `class="filler"`) {
-		t.Fatalf("หน้าสินค้าควรถูกเติม ledger ให้เต็ม (filler) ไม่เหลือช่องว่างดิบ")
+	if strings.Contains(html, `class="filler"`) {
+		t.Fatalf("หน้าสินค้าที่มีหน้าถัดไปไม่ควรมี filler row")
 	}
 	if !strings.Contains(html, "Grand Total") {
-		t.Fatalf("footer (สรุปยอด) ต้อง render บนหน้า footer-only")
+		t.Fatalf("footer (สรุปยอด) ต้อง render บนหน้า footer")
+	}
+}
+
+func TestUnifiedRender_AllDocumentTypesMultiPageWithoutFooterOnly(t *testing.T) {
+	wantPages := map[string]int{
+		"QUOTATION": 2, "INVOICE": 3, "BILL": 3,
+		"TAX_INVOICE": 2, "RECEIPT": 2, "CREDIT_NOTE": 2,
+		"DELIVERY_ORDER": 3,
+	}
+	for docType, want := range wantPages {
+		html, err := RenderUnifiedDocumentHTML(makeDoc(docType, 40), StoreInfo{Name: "ร้านทดสอบ"})
+		if err != nil {
+			t.Fatalf("%s: execute error: %v", docType, err)
+		}
+		if got := strings.Count(html, `<div class="page`) - strings.Count(html, `<div class="page-no`); got != want {
+			t.Fatalf("%s: got %d logical pages, want %d", docType, got, want)
+		}
+		if docType == "QUOTATION" || docType == "TAX_INVOICE" || docType == "RECEIPT" || docType == "CREDIT_NOTE" {
+			if strings.Contains(html, "footer-only") {
+				t.Fatalf("%s: footer should fit with final product page", docType)
+			}
+		} else if !strings.Contains(html, "footer-only") {
+			t.Fatalf("%s: expected dedicated footer page", docType)
+		}
+	}
+}
+func TestUnifiedRender_MultiPageDoesNotPadNonFinalPage(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("QUOTATION", 40), StoreInfo{Name: "ร้านทดสอบ"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	firstPage := strings.Index(html, `<div class="page`)
+	secondPage := strings.Index(html[firstPage+1:], `<div class="page`)
+	if firstPage < 0 || secondPage < 0 {
+		t.Fatal("expected a multi-page quotation")
+	}
+	secondPage += firstPage + 1
+	if strings.Contains(html[firstPage:secondPage], `class="filler"`) {
+		t.Fatal("first page must contain product rows only, without filler rows")
+	}
+	if strings.Contains(html, `class="filler"`) {
+		t.Fatal("multi-page document must not add filler rows that can push the footer to a new page")
 	}
 }
 
@@ -211,6 +322,9 @@ func TestUnifiedRender_SinglePagePin(t *testing.T) {
 	if !strings.Contains(html, "หน้า 1 / 1") {
 		t.Fatalf("expected single page footer")
 	}
+	if !strings.Contains(html, `.page-no{ position:absolute; top:6mm; right:12mm; bottom:auto; font-size:9px; color:var(--muted); white-space:nowrap; }`) {
+		t.Fatal("page number must be absolutely positioned at the top without consuming page flow")
+	}
 }
 
 func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
@@ -221,7 +335,7 @@ func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
-	want := `<tr><td>อ้างอิงใบสั่งซื้อ (Ref. PO)</td><td class="b">PO256909-0015</td></tr>`
+	want := `<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบสั่งซื้อ</span><span class="doc-meta-value">PO256909-0015</span></div>`
 	if !strings.Contains(html, want) {
 		t.Fatalf("missing PO reference row %q", want)
 	}
@@ -275,5 +389,11 @@ func TestUnifiedRender_CopySeparation(t *testing.T) {
 	// screen separator must be present so the preview drawer splits the copies
 	if !strings.Contains(html, "copy-break:not(:last-child)") {
 		t.Fatalf("missing on-screen separator between copies")
+	}
+	if !strings.Contains(html, `.page:last-child{ page-break-after:auto; margin-bottom:0; }`) {
+		t.Fatalf("last page in each copy must not create a trailing blank PDF page")
+	}
+	if !strings.Contains(html, `@media print{ body{background:#fff;} .page{ margin:0; box-shadow:none; } .copy-break{ display:contents; page-break-after:auto !important; } }`) {
+		t.Fatalf("print copy wrapper must not introduce an extra blank page")
 	}
 }

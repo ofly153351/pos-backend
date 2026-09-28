@@ -184,7 +184,28 @@ func (r *repository) Delete(id string) error {
 }
 
 func (r *repository) BulkDelete(storeID string, ids []string) error {
-	return r.db.Delete(&Document{}, "store_id = ? AND id IN ?", storeID, ids).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var blocked int64
+		if err := tx.Table("receipt_settlements").
+			Where("(billing_document_id IN ? OR delivery_order_id IN ?) AND receipt_document_id NOT IN ?", ids, ids, ids).
+			Count(&blocked).Error; err != nil {
+			return err
+		}
+		if blocked > 0 {
+			return ErrDocumentReferenced
+		}
+
+		// Remove settlement rows in the same transaction before deleting their
+		// documents. This satisfies the RESTRICT foreign keys while preserving
+		// all-or-nothing behavior for bulk deletion.
+		if err := tx.Exec(
+			"DELETE FROM receipt_settlements WHERE receipt_document_id IN ? OR billing_document_id IN ? OR delivery_order_id IN ?",
+			ids, ids, ids,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&Document{}, "store_id = ? AND id IN ?", storeID, ids).Error
+	})
 }
 
 func (r *repository) BulkSetStatus(storeID string, ids []string, status DocumentStatus) error {

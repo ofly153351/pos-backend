@@ -17,7 +17,7 @@ func TestInvoiceRender_QuotationRefRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
-	want := `<tr><td>อ้างอิงใบเสนอราคา (Ref. Quotation)</td><td class="b">QUO256909-0009</td></tr>`
+	want := `<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบเสนอราคา</span><span class="doc-meta-value">QUO256909-0009</span></div>`
 	if !strings.Contains(html, want) {
 		t.Errorf("expected quotation ref row %q in invoice HTML", want)
 	}
@@ -53,10 +53,10 @@ func TestInvoiceCopies_QuotationRefRowOnEveryCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render copies failed: %v", err)
 	}
-	if got := strings.Count(html, "อ้างอิงใบเสนอราคา (Ref. Quotation)"); got == 0 {
+	if got := strings.Count(html, "อ้างอิงใบเสนอราคา"); got == 0 {
 		t.Fatal("expected the quotation ref row in the copy set")
 	}
-	if !strings.Contains(html, `<td class="b">QUO256909-0009</td>`) {
+	if !strings.Contains(html, `<span class="doc-meta-value">QUO256909-0009</span>`) {
 		t.Error("expected the quotation number in the copy set")
 	}
 }

@@ -56,6 +56,7 @@ type docProfile struct {
 	IsDelivery                                   bool   // มี ค่าจัดส่ง + ยอดก่อน VAT ใน summary
 	PayCash                                      bool   // ติ๊ก "เงินสด" อัตโนมัติ (ใบเสร็จ)
 	SpecialLabel                                 string // ป้ายฟิลด์พิเศษหัวขวา ("" = ไม่มี)
+	ShowTerms                                    bool   // quotation terms block below the footer grid
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 }
 
@@ -93,6 +94,9 @@ func (p docProfile) footerBlockH(hasNotes bool) float64 {
 	if p.IsDelivery {
 		h += 8 // baht-text row below the item table
 	}
+	if p.ShowTerms {
+		h += hTerms
+	}
 	h += hSigBlock // signatures stacked below remarks
 	return h
 }
@@ -127,7 +131,7 @@ func profileFor(docType string) docProfile {
 	case "QUOTATION":
 		return docProfile{
 			TitleTH: "ใบเสนอราคา", TitleEN: "Quotation",
-			ShowDiscount: true, ShowPayBox: false, SpecialLabel: "",
+			ShowDiscount: true, ShowPayBox: false, SpecialLabel: "", ShowTerms: true,
 			SigLeftTH: "ผู้จัดทำ", SigLeftEN: "Prepared By", SigRightTH: "ผู้อนุมัติ", SigRightEN: "Approved By",
 		}
 	case "BILL":
@@ -187,13 +191,15 @@ type renderView struct {
 	// to #ZgotmplZ by html/template's URL sanitizer.
 	LogoURL template.URL
 	// หัวเอกสาร
-	TitleTH, TitleEN, Badge    string
-	Purpose                    string // copy purpose tag e.g. "(สำหรับลูกค้า)"
-	ShowSignature              bool   // render the signature block on this copy
-	DocNo, DocDate             string
-	SpecialLabel, SpecialValue string
+	TitleTH, TitleEN, Badge                       string
+	Purpose                                       string // copy purpose tag e.g. "(สำหรับลูกค้า)"
+	ShowSignature                                 bool   // render the signature block on this copy
+	DocNo, DocDate                                string
+	PriceValidity, PaymentTerms, DeliveryLeadTime string
+	SpecialLabel, SpecialValue                    string
 	// ลูกค้า / จัดส่ง
 	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
+	QuotationSummary                                         string
 	StaffName, SalespersonName, RefNo, PORefNo, DeliveryDate string
 	// QuotationRefNo = แถว "อ้างอิงใบเสนอราคา (Ref. Quotation)" ในตารางหัวเอกสาร
 	QuotationRefNo                               string
@@ -246,6 +252,13 @@ func specialValue(d DocData, docType string) string {
 	return ""
 }
 
+func termDays(days *int) string {
+	if days == nil || *days <= 0 {
+		return "_"
+	}
+	return strconv.Itoa(*days) + " วัน"
+}
+
 func quotationTerms(d DocData) (priceTerms, deliveryTerms string) {
 	if d.Type != "QUOTATION" {
 		return "", ""
@@ -258,8 +271,8 @@ func quotationTerms(d DocData) (priceTerms, deliveryTerms string) {
 	if d.DeliveryLeadTimeDays != nil && *d.DeliveryLeadTimeDays > 0 {
 		deliveryDays = strconv.Itoa(*d.DeliveryLeadTimeDays)
 	}
-	poDate := "_"
-	if d.POReceivedDate != nil {
+	poDate := "_/_/_"
+	if d.POReceivedDate != nil && !d.POReceivedDate.IsZero() {
 		poDate = thaiDate(*d.POReceivedDate)
 	}
 	priceTerms = fmt.Sprintf("ราคานี้ยืนราคาเป็นระยะเวลา %s วัน นับจากวันที่ออกใบเสนอราคา", validDays)
@@ -301,10 +314,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 
 	// ความจุเชิงกายภาพต่อชนิดหน้า — ใช้ pad แถวเปล่า (ledger) ให้ตารางเต็มถึงล่าง/footer
 	// ทุกหน้าที่มีตาราง (รวมหน้าต่อเนื่อง) เพื่อไม่ให้เหลือ "ช่องว่างดิบ" ท้ายหน้า
-	capFM := g.rowsPerPage(g.headerFull, false) // หน้าแรกแบบต่อเนื่อง
-	capFL := g.rowsPerPage(g.headerFull, true)  // หน้าเดียว
-	capM := g.rowsPerPage(g.headerMini, false)  // หน้ากลาง
-	capML := g.rowsPerPage(g.headerMini, true)  // หน้าสุดท้ายแบบหัวย่อ
+	capFL := g.rowsPerPage(g.headerFull, true)
 
 	pages := make([]pageView, 0, totalPages)
 	for idx, sl := range slices {
@@ -333,20 +343,12 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		// หน้าสุดท้ายที่ไม่มีสินค้า = footer-only (สินค้าเต็มอยู่หน้าก่อนหน้าแล้ว)
 		footerOnly := sl.IsLast && !sl.IsFirst && len(items) == 0
 
-		// เติมแถวเปล่า (ledger) ให้ตารางเต็มถึงล่างหน้า — ทุกหน้าที่มีตาราง
-		// (หน้า footer-only ไม่มีตาราง จึงข้าม). กันช่องว่างดิบท้ายหน้าเมื่อสินค้าไม่เต็ม
-		// เช่น 18 รายการในหน้าที่จุ 24 → เติม 6 แถวให้ตารางเต็ม
+		// เติม filler เฉพาะเอกสารหน้าเดียวเท่านั้น
+		// หน้าสุดท้ายของเอกสารหลายหน้าต้องเก็บพื้นที่ไว้สำหรับ footer/signature
+		// หากเติม filler จะดัน footer ไปหน้าใหม่และสร้างหน้าว่าง/หน้าล้นใน PDF.
 		fillerN := 0
-		if !footerOnly {
-			pageCap := capM
-			switch {
-			case sl.IsFirst && sl.IsLast:
-				pageCap = capFL // หน้าเดียว
-			case sl.IsFirst:
-				pageCap = capFM // หน้าแรกต่อเนื่อง
-			case sl.IsLast:
-				pageCap = capML // หน้าสุดท้ายมีสินค้า
-			}
+		if sl.IsLast && sl.IsFirst {
+			pageCap := capFL
 			if fillerN = pageCap - len(items); fillerN < 0 {
 				fillerN = 0
 			}
@@ -370,6 +372,20 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	}
 
 	priceTerms, deliveryTerms := quotationTerms(d)
+	priceValidity := "_"
+	if d.PriceValidityDays != nil && *d.PriceValidityDays > 0 {
+		priceValidity = strconv.Itoa(*d.PriceValidityDays) + " วัน"
+	}
+	paymentTerms := "_"
+	if d.CreditTermDays > 0 {
+		paymentTerms = strconv.Itoa(d.CreditTermDays) + " วัน"
+	}
+	deliveryLeadTime := termDays(d.DeliveryLeadTimeDays)
+	if d.Type != "QUOTATION" {
+		priceValidity = ""
+		paymentTerms = ""
+		deliveryLeadTime = ""
+	}
 	billRows := make([]billRowView, 0, len(d.BillRows))
 	for _, row := range d.BillRows {
 		due := "_"
@@ -392,11 +408,13 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		// Single-render default: signatures shown (copy renderer overrides per variant).
 		ShowSignature: true,
 		DocNo:         d.DocumentNoFull, DocDate: thaiDate(d.DocumentDate),
+		PriceValidity: priceValidity, PaymentTerms: paymentTerms, DeliveryLeadTime: deliveryLeadTime,
 		SpecialLabel: p.SpecialLabel, SpecialValue: specialValue(d, d.Type),
 
 		CustomerName: d.CustomerName, CustomerTaxID: derefStr(d.CustomerTaxID),
 		CustomerAddr: d.CustomerAddress, CustomerPhone: d.CustomerPhone,
-		StaffName: d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
+		QuotationSummary: strings.TrimSpace(d.QuotationSummary),
+		StaffName:        d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
 		PORefNo: d.PORefNo, QuotationRefNo: d.QuotationRefNo,
 		DeliveryDate: func() string {
 			if d.DeliveryDate != nil {
@@ -511,18 +529,13 @@ const unifiedDocHTML = `{{$root := .}}<!DOCTYPE html>
 @page{ size:A4; margin:0; }
 body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11px; background:#eee; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 
-.page{
-  position:relative; width:210mm; min-height:297mm;
-  padding:12mm 12mm 16mm; margin:0 auto 6mm; background:#fff;
-  display:flex; flex-direction:column; page-break-after:always;
-}
-.page:last-of-type{ page-break-after:auto; margin-bottom:0; }
-/* copy-set: แต่ละ copy (ต้นฉบับ/สำเนา) เป็นชีตของตัวเอง — แยกหน้าตอน print และ
-   แยกชัดบนจอ (preview drawer) ด้วยช่องว่าง + เส้นประ */
-.copy-break{ page-break-after:always; }
+.page{ position:relative; width:210mm; min-height:297mm; padding:12mm 12mm 16mm; margin:0 auto 6mm; background:#fff; display:flex; flex-direction:column; page-break-after:always; }
+.page:last-child{ page-break-after:auto; margin-bottom:0; }
+/* copy-set: แต่ละ copy ใช้ .page เป็นตัวควบคุม page break เพียงจุดเดียว */
+.copy-break{ page-break-after:auto; }
 .copy-break:last-child{ page-break-after:auto; }
 @media screen{ .copy-break:not(:last-child){ margin-bottom:16mm; border-bottom:2px dashed #94a3b8; } }
-@media print{ body{background:#fff;} .page{ margin:0; box-shadow:none; } }
+@media print{ body{background:#fff;} .page{ margin:0; box-shadow:none; } .copy-break{ display:contents; page-break-after:auto !important; } }
 
 /* ---- footer-pin: spacer พองเฉพาะ "หน้าเดียว" → ลายเซ็นติดล่าง A4 ---- */
 .doc-body{ flex:0 0 auto; }
@@ -540,13 +553,19 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .store-meta{ font-size:10px; color:#333; line-height:1.45; }
 .hdr-right{ text-align:right; min-width:62mm; }
 .doc-title{ font-size:22px; font-weight:700; letter-spacing:.5px; }
-.doc-title-en{ font-size:11px; color:var(--muted); margin-bottom:1mm; }
+.doc-id{ display:inline-block; border:1.2px solid var(--ink); border-radius:1mm; padding:.5mm 2mm; font-size:9px; font-weight:700; letter-spacing:.25px; margin-top:1mm; font-family:var(--mono); background:#fff; }
 .doc-badge{ display:inline-block; border:1.2px solid var(--ink); border-radius:1mm; padding:.5mm 2mm; font-size:9px; font-weight:bold; margin-bottom:1mm; }
-.doc-purpose{ font-size:8px; color:var(--muted); margin-bottom:2mm; }
-.doc-meta{ width:100%; border-collapse:collapse; font-size:10px; }
-.doc-meta td{ border:1px solid var(--line); padding:1mm 2mm; text-align:left; }
-.doc-meta td:first-child{ color:var(--muted); background:#f6f6f6; white-space:nowrap; }
-.doc-meta .b{ font-weight:700; text-align:right; }
+.doc-info-row{ display:flex; align-items:stretch; margin:0 0 3mm; }
+.quotation-intro{ margin:0 0 3mm; font-size:11px; line-height:1.5; }
+.quotation-intro strong{ font-weight:700; }
+.doc-info-row .parties{ flex:6 1 0; min-width:0; margin:0; }
+.doc-meta-panel{ flex:4 1 0; min-width:0; display:flex; align-items:stretch; border:1px solid var(--line); padding:0 3mm 2mm; }
+.doc-meta{ width:100%; min-height:100%; padding:0; font-size:10px; line-height:1.5; }
+.doc-meta .section-body{ gap:1mm; }
+.doc-meta-line{ display:flex; align-items:flex-start; gap:2mm; min-width:0; line-height:1.5; }
+.doc-meta-label{ flex:0 0 30mm; color:var(--muted); }
+.doc-meta-value{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; font-weight:700; }
+.doc-meta .b{ font-weight:700; margin-left:0; }
 
 /* ---- header ย่อ (หน้าต่อ) ---- */
 .hdr-mini{ display:flex; justify-content:space-between; align-items:baseline; padding-bottom:2mm; border-bottom:1px solid var(--ink); }
@@ -554,17 +573,27 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .m-title{ font-size:10px; color:var(--muted); }
 
 /* ---- กล่องลูกค้า/จัดส่ง ---- */
-.parties{ display:flex; gap:4mm; margin:3mm 0; }
-.party{ flex:1; border:1px solid var(--line); padding:2mm 3mm; line-height:1.5; }
-.party-h{ font-size:10px; font-weight:700; color:#fff; background:var(--ink); margin:-2mm -3mm 2mm; padding:1mm 3mm; }
+.parties{ display:flex; flex-direction:column; gap:0; margin:0; border:1px solid var(--line); border-right:0; min-width:0; }
+.party{ flex:1 1 auto; min-width:0; border:0; padding:0 3mm 2mm; line-height:1.5; }
+.combined-parties .section-body{ gap:.75mm; }
+.combined-parties .info-row{ line-height:1.35; }
+.header-section-title{ font-size:10px; font-weight:700; color:var(--ink); background:#f6f6f6; margin:0 -3mm 2mm; padding:1mm 3mm; line-height:1.5; border-bottom:1px solid var(--line); }
+.section-body{ display:flex; flex-direction:column; gap:1mm; }
+.info-row{ display:flex; align-items:flex-start; gap:2mm; min-width:0; line-height:1.5; }
+.info-label{ flex:0 0 30mm; color:var(--muted); }
+.info-value{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
 .party-name{ font-weight:700; }
-.refrow{ display:flex; gap:6mm; font-size:10px; margin-bottom:2mm; padding:1.5mm 3mm; background:#f6f6f6; border:1px solid var(--line); }
+.party strong{ font-weight:700; color:var(--ink); }
+.delivery-section{ font-size:9px; line-height:1.2; }
+.delivery-section .section-body{ gap:.5mm; }
+.delivery-section .info-row{ gap:1.5mm; line-height:1.2; }
+.delivery-section .info-label{ flex-basis:25mm; }
+.delivery-section .info-value{ line-height:1.2; }
 .termsrow{ font-size:10px; margin:2mm 0 0; padding:0; border:0; background:transparent; line-height:1.5; }
 .terms-title{ font-weight:700; margin-bottom:0.5mm; }
-.baht-text-row{ display:flex; gap:2mm; margin-top:0; padding:1.5mm 3mm; border:1px solid var(--line); background:#f6f6f6; font-size:13px; line-height:1.5; }
+.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:0; background:#f6f6f6; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }
 .baht-text-row span:first-child{ color:var(--muted); }
 .baht-text-row span:last-child{ margin-left:auto; text-align:right; font-size:13px; }
-.refrow .lbl{ color:var(--muted); margin-right:1mm; }
 
 /* ---- ตารางสินค้า: full grid + คอลัมน์กึ่งกลาง (desc ชิดซ้าย) ---- */
 .items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
@@ -585,6 +614,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 /* ---- footer: summary + paybox + remarks + signatures ---- */
 .doc-footer{ margin-top:3mm; }
 .foot-grid{ display:flex; gap:4mm; align-items:flex-start; }
+.foot-grid.remarks-grid{ align-items:stretch; }
 .paybox{ flex:1; border:1px solid var(--line); padding:2mm 3mm; font-size:10px; }
 .pay-row{ display:flex; align-items:baseline; gap:0; margin-bottom:1.5mm; }
 .pay-chk{ width:3.5mm; flex-shrink:0; }
@@ -609,7 +639,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sum-row{ display:flex; justify-content:space-between; padding:1mm 0; border-bottom:1px dashed var(--line); }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
 .remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
-.remarks-inline{ flex:1; margin-top:0; min-width:0; }
+.remarks-inline{ flex:1; min-width:0; height:100%; align-self:stretch; margin-top:0; }
 .remarks .rh{ color:var(--muted); }
 /* center the whole signature GROUP, and center the content INSIDE each column
    (otherwise the fixed-width underlines left-pack inside 56mm boxes and the
@@ -624,8 +654,8 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sig-date-seg{ width:8mm; border-bottom:1px solid var(--ink); position:relative; top:-1px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
 
-/* ---- bottom strip (absolute ทุกหน้า) ---- */
-.page-no{ position:absolute; right:12mm; bottom:6mm; font-size:9px; color:var(--muted); }
+/* ---- page number: absolute ไม่กินพื้นที่ layout และไม่ล้นไปหน้าใหม่ ---- */
+.page-no{ position:absolute; top:6mm; right:12mm; bottom:auto; font-size:9px; color:var(--muted); white-space:nowrap; }
 </style></head>
 <body>
 {{range $pg := .Pages}}
@@ -645,45 +675,47 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
     </div>
     <div class="hdr-right">
       <div class="doc-title">{{$root.TitleTH}}</div>
-      <div class="doc-title-en">{{$root.TitleEN}}</div>
       {{if $root.Badge}}<div class="doc-badge">{{$root.Badge}}</div>{{end}}
-      {{if $root.Purpose}}<div class="doc-purpose">{{$root.Purpose}}</div>{{end}}
-      <table class="doc-meta">
-        <tr><td>เลขที่ (No.)</td><td class="b">{{$root.DocNo}}</td></tr>
-        <tr><td>วันที่ (Date)</td><td class="b">{{$root.DocDate}}</td></tr>
-        {{if $root.ShowDeliveryBox}}{{if $root.PORefNo}}<tr><td>อ้างอิงใบสั่งซื้อ (Ref. PO)</td><td class="b">{{$root.PORefNo}}</td></tr>{{end}}{{if $root.RefNo}}<tr><td>อ้างอิงใบกำกับภาษี (Ref. Invoice)</td><td class="b">{{$root.RefNo}}</td></tr>{{end}}{{end}}
-        {{if $root.QuotationRefNo}}<tr><td>อ้างอิงใบเสนอราคา (Ref. Quotation)</td><td class="b">{{$root.QuotationRefNo}}</td></tr>{{end}}
-        {{if $root.SpecialLabel}}<tr><td>{{$root.SpecialLabel}}</td><td class="b">{{$root.SpecialValue}}</td></tr>{{end}}
-        {{if $root.StaffName}}<tr><td>ผู้ออกเอกสาร (Issued By)</td><td class="b">{{$root.StaffName}}</td></tr>{{end}}
-      </table>
+      <div class="doc-id">{{$root.DocNo}}</div>
     </div>
   </header>
 
-  <section class="parties">
-    <div class="party">
-      <div class="party-h">ข้อมูลลูกค้า · Customer</div>
-      <div class="party-name">{{$root.CustomerName}}</div>
-      {{if $root.CustomerTaxID}}<div>เลขผู้เสียภาษี: {{$root.CustomerTaxID}}</div>{{end}}
-      {{if $root.CustomerAddr}}<div>{{$root.CustomerAddr}}</div>{{end}}
-      {{if $root.CustomerPhone}}<div>โทร. {{$root.CustomerPhone}}</div>{{end}}
+  <section class="doc-info-row">
+    <section class="parties combined-parties">
+      <div class="party customer-section">
+        <div class="header-section-title">{{if $root.ShowDeliveryBox}}ข้อมูลลูกค้าและจัดส่ง · CUSTOMER / DELIVERY{{else}}ข้อมูลลูกค้า / หน่วยงาน · CUSTOMER{{end}}</div>
+        <div class="section-body">
+          <div class="info-row"><span class="info-label">ชื่อหน่วยงาน</span><span class="info-value">{{$root.CustomerName}}</span></div>
+          <div class="info-row"><span class="info-label">ที่อยู่</span><span class="info-value">{{if $root.CustomerAddr}}{{$root.CustomerAddr}}{{else}}-{{end}}</span></div>
+          {{if and $root.DeliveryAddr (ne $root.DeliveryAddr $root.CustomerAddr)}}<div class="info-row"><span class="info-label">ที่อยู่จัดส่ง</span><span class="info-value">{{$root.DeliveryAddr}}</span></div>{{end}}
+          {{if $root.DeliveryContact}}<div class="info-row"><span class="info-label">ผู้ติดต่อ / เซ็น</span><span class="info-value">{{$root.DeliveryContact}}</span></div>{{end}}
+          {{if $root.CustomerPhone}}<div class="info-row"><span class="info-label">โทรศัพท์</span><span class="info-value">{{$root.CustomerPhone}}</span></div>{{else if $root.DeliveryPhone}}<div class="info-row"><span class="info-label">โทรศัพท์</span><span class="info-value">{{$root.DeliveryPhone}}</span></div>{{end}}
+          <div class="info-row"><span class="info-label">เลขผู้เสียภาษี</span><span class="info-value">{{if $root.CustomerTaxID}}{{$root.CustomerTaxID}}{{else}}-{{end}}</span></div>
+          {{if $root.DeliveryDate}}<div class="info-row"><span class="info-label">วันที่จัดส่ง</span><span class="info-value">{{$root.DeliveryDate}}</span></div>{{end}}
+        </div>
+      </div>
+    </section>
+    <div class="doc-meta-panel">
+      <div class="doc-meta">
+        <div class="header-section-title">รายละเอียดเอกสาร · DOCUMENT DETAILS</div>
+        <div class="section-body">
+          <div class="doc-meta-line"><span class="doc-meta-label">เลขที่เอกสาร</span><span class="doc-meta-value">{{$root.DocNo}}</span></div>
+          <div class="doc-meta-line"><span class="doc-meta-label">วันที่ออกเอกสาร</span><span class="doc-meta-value">{{$root.DocDate}}</span></div>
+          {{if $root.PriceValidity}}<div class="doc-meta-line"><span class="doc-meta-label">ระยะเวลาใบเสนอราคา</span><span class="doc-meta-value">{{$root.PriceValidity}}</span></div>{{end}}
+          {{if $root.PaymentTerms}}<div class="doc-meta-line"><span class="doc-meta-label">เงื่อนไขการชำระเงิน</span><span class="doc-meta-value">ภายใน {{$root.PaymentTerms}}</span></div>{{end}}
+          {{if $root.DeliveryLeadTime}}<div class="doc-meta-line"><span class="doc-meta-label">กำหนดส่งสินค้า</span><span class="doc-meta-value">ภายใน {{$root.DeliveryLeadTime}} หลังได้รับใบสั่งซื้อ</span></div>{{end}}
+          {{if $root.ShowDeliveryBox}}{{if $root.PORefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบสั่งซื้อ</span><span class="doc-meta-value">{{$root.PORefNo}}</span></div>{{end}}{{if $root.RefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบกำกับภาษี</span><span class="doc-meta-value">{{$root.RefNo}}</span></div>{{end}}{{end}}
+          {{if $root.QuotationRefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบเสนอราคา</span><span class="doc-meta-value">{{$root.QuotationRefNo}}</span></div>{{end}}
+          {{if $root.SpecialLabel}}<div class="doc-meta-line"><span class="doc-meta-label">{{$root.SpecialLabel}}</span><span class="doc-meta-value">{{$root.SpecialValue}}</span></div>{{end}}
+          {{if $root.StaffName}}<div class="doc-meta-line"><span class="doc-meta-label">ผู้ออกเอกสาร</span><span class="doc-meta-value">{{$root.StaffName}}</span></div>{{end}}
+        </div>
+      </div>
     </div>
-    {{if $root.ShowDeliveryBox}}
-    <div class="party">
-      <div class="party-h">ที่อยู่จัดส่ง · Delivery Address</div>
-      {{if $root.DeliveryAddr}}<div>{{$root.DeliveryAddr}}</div>{{end}}
-      {{if $root.DeliveryContact}}<div>ผู้ติดต่อ: {{$root.DeliveryContact}}</div>{{end}}
-      {{if $root.DeliveryPhone}}<div>โทร. {{$root.DeliveryPhone}}</div>{{end}}
-    </div>
-    {{end}}
   </section>
-
-  {{if or $root.ShowDeliveryBox $root.RefNo}}
-  <section class="refrow">
-    {{if $root.ShowDeliveryBox}}<div><span class="lbl">วันที่จัดส่ง</span>{{$root.DeliveryDate}}</div>{{end}}
-    {{if $root.RefNo}}<div><span class="lbl">อ้างอิง</span>{{$root.RefNo}}</div>{{end}}
-    {{if $root.SalespersonName}}<div><span class="lbl">พนักงานขาย</span>{{$root.SalespersonName}}</div>{{end}}
-  </section>
+  {{if and (eq $root.TitleTH "ใบเสนอราคา") $root.QuotationSummary}}
+  <div class="quotation-intro"><strong>{{$root.StoreName}}</strong> ขอเสนอราคา <strong>{{$root.QuotationSummary}}</strong> เพื่อโปรดพิจารณา โดยมีรายละเอียดดังต่อไปนี้</div>
   {{end}}
+
   {{else}}
   <header class="hdr-mini">
     <span class="m-store">{{$root.StoreName}}</span>
@@ -751,7 +783,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 
   {{if $pg.IsLast}}
   <footer class="doc-footer">
-    <div class="foot-grid">
+    <div class="foot-grid{{if not $root.ShowPayBox}} remarks-grid{{end}}">
       {{if $root.ShowPayBox}}
       <div class="paybox">
         <div class="pay-row"><span class="pay-chk">{{if $root.PayCash}}&#9745;{{else}}&#9744;{{end}}</span><span class="pay-lbl">เงินสด (Cash)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>

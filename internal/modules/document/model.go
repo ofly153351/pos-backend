@@ -60,6 +60,7 @@ type Document struct {
 	VatAmount            float64        `gorm:"not null;default:0" json:"vat_amount"`
 	TotalAmount          float64        `gorm:"not null;default:0" json:"total_amount"`
 	Notes                *string        `json:"notes,omitempty"`
+	QuotationSummary     *string        `json:"quotation_summary,omitempty"`
 	DeliveryDate         *time.Time     `json:"delivery_date,omitempty"`
 	DeliveryLeadTimeDays *int           `json:"delivery_lead_time_days,omitempty"`
 	POReceivedDate       *time.Time     `json:"po_received_date,omitempty"`

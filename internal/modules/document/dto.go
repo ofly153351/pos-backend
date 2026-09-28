@@ -32,6 +32,7 @@ type CreateDocumentRequest struct {
 	Items                   []CreateDocumentItemInput `json:"items"`
 	VatRate                 float64                   `json:"vat_rate"`
 	Notes                   *string                   `json:"notes,omitempty"`
+	QuotationSummary        *string                   `json:"quotation_summary,omitempty"`
 }
 
 type CreateDocumentItemInput struct {
