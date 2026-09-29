@@ -1410,22 +1410,22 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 	return req
 }
 
-// resolveReceiptReferences resolves the invoice and delivery order that Receipt Type 2
+// resolveReceiptReferences resolves the payment reference and delivery order that Receipt Type 2
 // settles. Settlement rows are the source of truth when a receipt was created from a
 // billing notice; the source-document chain remains a fallback for legacy receipts.
-func (s Service) resolveReceiptReferences(doc *Document) (invoiceRef, deliveryRef string) {
+func (s Service) resolveReceiptReferences(doc *Document) (paymentRef, deliveryRef string) {
 	if settlements, err := s.repo.ListReceiptSettlements(doc.ID); err == nil {
 		for _, settlement := range settlements {
+			if paymentRef == "" && settlement.BillingDocument != nil {
+				paymentRef = strings.TrimSpace(settlement.BillingDocument.DocumentNoFull)
+			}
 			if settlement.DeliveryOrder != nil {
 				if deliveryRef == "" {
 					deliveryRef = strings.TrimSpace(settlement.DeliveryOrder.DocumentNoFull)
 				}
-				if invoiceRef == "" {
-					invoiceRef = strings.TrimSpace(settlement.DeliveryOrder.InvoiceRefNo)
+				if paymentRef == "" {
+					paymentRef = strings.TrimSpace(settlement.DeliveryOrder.InvoiceRefNo)
 				}
-			}
-			if invoiceRef == "" && settlement.BillingDocument != nil {
-				invoiceRef = strings.TrimSpace(settlement.BillingDocument.InvoiceRefNo)
 			}
 		}
 	} else {
@@ -1448,11 +1448,9 @@ func (s Service) resolveReceiptReferences(doc *Document) (invoiceRef, deliveryRe
 		}
 		switch source.Type {
 		case TypeBill:
-			if invoiceRef == "" {
-				invoiceRef = strings.TrimSpace(source.InvoiceRefNo)
+			if paymentRef == "" {
+				paymentRef = strings.TrimSpace(source.DocumentNoFull)
 			}
-			// BILL rows are the selected delivery-order register. Keep the
-			// first non-empty reference for the receipt description.
 			if deliveryRef == "" {
 				for _, item := range source.Items {
 					if ref := strings.TrimSpace(item.Description); ref != "" {
@@ -1465,28 +1463,37 @@ func (s Service) resolveReceiptReferences(doc *Document) (invoiceRef, deliveryRe
 			if deliveryRef == "" {
 				deliveryRef = strings.TrimSpace(source.DocumentNoFull)
 			}
-			if invoiceRef == "" {
+			if paymentRef == "" {
 				ref := strings.TrimSpace(source.InvoiceRefNo)
 				if ref != "" && ref != deliveryRef {
-					invoiceRef = ref
+					paymentRef = ref
 				}
 			}
 		}
 		current = source
 	}
-	return invoiceRef, deliveryRef
+	return paymentRef, deliveryRef
 }
 
-func buildReceiptPaymentDescription(invoiceRef, deliveryRef, receiptRef string) string {
+func receiptPaymentReferenceLabel(reference string) string {
+	ref := strings.ToUpper(strings.TrimSpace(reference))
+	if strings.HasPrefix(ref, "BILL") || strings.HasPrefix(ref, "BN") {
+		return "ใบวางบิล"
+	}
+	return "ใบแจ้งหนี้"
+}
+
+func buildReceiptPaymentDescription(paymentRef, deliveryRef, receiptRef string) string {
+	label := receiptPaymentReferenceLabel(paymentRef)
 	switch {
-	case invoiceRef != "" && deliveryRef != "":
-		return fmt.Sprintf("ชำระค่าสินค้าตามใบแจ้งหนี้ เลขที่ %s (ใบส่งสินค้า %s)", invoiceRef, deliveryRef)
-	case invoiceRef != "":
-		return fmt.Sprintf("ชำระค่าสินค้าตามใบแจ้งหนี้ เลขที่ %s", invoiceRef)
+	case paymentRef != "" && deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตาม%s เลขที่ %s (ใบส่งสินค้า %s)", label, paymentRef, deliveryRef)
+	case paymentRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตาม%s เลขที่ %s", label, paymentRef)
 	case deliveryRef != "":
 		return fmt.Sprintf("ชำระค่าสินค้าตามใบส่งสินค้า %s", deliveryRef)
 	default:
-		return "ชำระเงินตามเอกสาร " + receiptRef
+		return fmt.Sprintf("ชำระเงินตามเอกสาร %s", receiptRef)
 	}
 }
 

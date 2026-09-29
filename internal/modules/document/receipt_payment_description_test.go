@@ -21,3 +21,11 @@ func TestBuildReceiptPaymentDescriptionFallsBackWithoutReferences(t *testing.T) 
 		t.Fatalf("unexpected receipt payment fallback: got %q, want %q", got, want)
 	}
 }
+
+func TestBuildReceiptPaymentDescriptionUsesBillLabelForBillReference(t *testing.T) {
+	got := buildReceiptPaymentDescription("BILL256909-0001", "DO256909-0001", "RCT256909-0001")
+	want := "ชำระค่าสินค้าตามใบวางบิล เลขที่ BILL256909-0001 (ใบส่งสินค้า DO256909-0001)"
+	if got != want {
+		t.Fatalf("unexpected bill payment description: got %q, want %q", got, want)
+	}
+}
