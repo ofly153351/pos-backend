@@ -143,7 +143,7 @@ func profileFor(docType string) docProfile {
 	case "CREDIT_NOTE":
 		return docProfile{
 			TitleTH: "ใบลดหนี้", TitleEN: "Credit Note",
-			ShowDiscount: false, ShowPayBox: false, SpecialLabel: "อ้างอิงใบกำกับ (Ref.)",
+			ShowDiscount: false, ShowPayBox: false, SpecialLabel: "อ้างอิงใบกำกับภาษี (Ref. Tax Invoice)",
 			SigLeftTH: "ผู้ออกเอกสาร", SigLeftEN: "Issued By", SigRightTH: "ผู้รับเอกสาร", SigRightEN: "Document Receiver",
 		}
 	default:
@@ -198,9 +198,9 @@ type renderView struct {
 	PriceValidity, PaymentTerms, DeliveryLeadTime string
 	SpecialLabel, SpecialValue                    string
 	// ลูกค้า / จัดส่ง
-	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone string
-	QuotationSummary                                         string
-	StaffName, SalespersonName, RefNo, PORefNo, DeliveryDate string
+	CustomerName, CustomerTaxID, CustomerAddr, CustomerPhone           string
+	QuotationSummary                                                   string
+	StaffName, SalespersonName, RefNo, RefLabel, PORefNo, DeliveryDate string
 	// QuotationRefNo = แถว "อ้างอิงใบเสนอราคา (Ref. Quotation)" ในตารางหัวเอกสาร
 	QuotationRefNo                               string
 	PriceTerms, DeliveryTerms                    string
@@ -415,6 +415,12 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		CustomerAddr: d.CustomerAddress, CustomerPhone: d.CustomerPhone,
 		QuotationSummary: strings.TrimSpace(d.QuotationSummary),
 		StaffName:        d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
+		RefLabel: func() string {
+			if d.Type == "DELIVERY_ORDER" {
+				return "อ้างอิงใบแจ้งหนี้"
+			}
+			return "อ้างอิงใบกำกับภาษี"
+		}(),
 		PORefNo: d.PORefNo, QuotationRefNo: d.QuotationRefNo,
 		DeliveryDate: func() string {
 			if d.DeliveryDate != nil {
@@ -704,7 +710,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
           {{if $root.PriceValidity}}<div class="doc-meta-line"><span class="doc-meta-label">ระยะเวลาใบเสนอราคา</span><span class="doc-meta-value">{{$root.PriceValidity}}</span></div>{{end}}
           {{if $root.PaymentTerms}}<div class="doc-meta-line"><span class="doc-meta-label">เงื่อนไขการชำระเงิน</span><span class="doc-meta-value">ภายใน {{$root.PaymentTerms}}</span></div>{{end}}
           {{if $root.DeliveryLeadTime}}<div class="doc-meta-line"><span class="doc-meta-label">กำหนดส่งสินค้า</span><span class="doc-meta-value">ภายใน {{$root.DeliveryLeadTime}} หลังได้รับใบสั่งซื้อ</span></div>{{end}}
-          {{if $root.ShowDeliveryBox}}{{if $root.PORefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบสั่งซื้อ</span><span class="doc-meta-value">{{$root.PORefNo}}</span></div>{{end}}{{if $root.RefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบกำกับภาษี</span><span class="doc-meta-value">{{$root.RefNo}}</span></div>{{end}}{{end}}
+          {{if $root.ShowDeliveryBox}}{{if $root.PORefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบสั่งซื้อ</span><span class="doc-meta-value">{{$root.PORefNo}}</span></div>{{end}}{{if $root.RefNo}}<div class="doc-meta-line"><span class="doc-meta-label">{{$root.RefLabel}}</span><span class="doc-meta-value">{{$root.RefNo}}</span></div>{{end}}{{end}}
           {{if $root.QuotationRefNo}}<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบเสนอราคา</span><span class="doc-meta-value">{{$root.QuotationRefNo}}</span></div>{{end}}
           {{if $root.SpecialLabel}}<div class="doc-meta-line"><span class="doc-meta-label">{{$root.SpecialLabel}}</span><span class="doc-meta-value">{{$root.SpecialValue}}</span></div>{{end}}
           {{if $root.StaffName}}<div class="doc-meta-line"><span class="doc-meta-label">ผู้ออกเอกสาร</span><span class="doc-meta-value">{{$root.StaffName}}</span></div>{{end}}

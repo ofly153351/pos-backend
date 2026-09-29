@@ -341,6 +341,37 @@ func TestUnifiedRender_DeliveryOrderIncludesPOReferenceRow(t *testing.T) {
 	}
 }
 
+func TestUnifiedRender_DeliveryOrderUsesInvoiceReferenceLabel(t *testing.T) {
+	doc := makeDoc("DELIVERY_ORDER", 1)
+	doc.InvoiceRefNo = "INV256909-0001"
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	want := `<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบแจ้งหนี้</span><span class="doc-meta-value">INV256909-0001</span></div>`
+	if !strings.Contains(html, want) {
+		t.Fatalf("missing invoice reference row %q", want)
+	}
+	if strings.Contains(html, "อ้างอิงใบกำกับภาษี") {
+		t.Fatal("delivery order must not label the invoice reference as a tax invoice")
+	}
+}
+
+func TestUnifiedRender_CreditNoteUsesTaxInvoiceReferenceLabel(t *testing.T) {
+	doc := makeDoc("CREDIT_NOTE", 1)
+	doc.InvoiceRefNo = "TAX256909-0001"
+
+	html, err := RenderUnifiedDocumentHTML(doc, StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("execute error: %v", err)
+	}
+	want := `<div class="doc-meta-line"><span class="doc-meta-label">อ้างอิงใบกำกับภาษี (Ref. Tax Invoice)</span><span class="doc-meta-value">TAX256909-0001</span></div>`
+	if !strings.Contains(html, want) {
+		t.Fatalf("missing tax invoice reference row %q", want)
+	}
+}
+
 func TestUnifiedRender_BillUsesDeliveryOrderRegister(t *testing.T) {
 	doc := makeDoc("BILL", 0)
 	due := time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC)
