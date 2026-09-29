@@ -677,14 +677,14 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		docData.ReceiptTemplate = 2
 		docData.PaymentDate = doc.DocumentDate
 		docData.PaymentAmount = doc.TotalAmount
-		billingRef, deliveryRef := s.resolveReceiptReferences(doc)
+		invoiceRef, deliveryRef := s.resolveReceiptReferences(doc)
 		docData.PaymentDescription = buildReceiptPaymentDescription(
-			billingRef,
+			invoiceRef,
 			deliveryRef,
 			doc.DocumentNoFull,
 		)
 		docData.DeliveryRefNo = deliveryRef
-		docData.BillingRefNo = billingRef
+		docData.BillingRefNo = invoiceRef
 		settlements, settlementErr := s.repo.ListReceiptSettlements(doc.ID)
 		if settlementErr != nil {
 			return "", settlementErr
@@ -1410,11 +1410,28 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 	return req
 }
 
-// resolveReceiptReferences walks the source-document chain so Receipt Type 2 can show
-// the billing notice and delivery order that the payment settles. A receipt created
-// from a delivery order commonly has the DO as its direct source and the billing
-// reference one level further up, so looking only at the direct source is insufficient.
-func (s Service) resolveReceiptReferences(doc *Document) (billingRef, deliveryRef string) {
+// resolveReceiptReferences resolves the invoice and delivery order that Receipt Type 2
+// settles. Settlement rows are the source of truth when a receipt was created from a
+// billing notice; the source-document chain remains a fallback for legacy receipts.
+func (s Service) resolveReceiptReferences(doc *Document) (invoiceRef, deliveryRef string) {
+	if settlements, err := s.repo.ListReceiptSettlements(doc.ID); err == nil {
+		for _, settlement := range settlements {
+			if settlement.DeliveryOrder != nil {
+				if deliveryRef == "" {
+					deliveryRef = strings.TrimSpace(settlement.DeliveryOrder.DocumentNoFull)
+				}
+				if invoiceRef == "" {
+					invoiceRef = strings.TrimSpace(settlement.DeliveryOrder.InvoiceRefNo)
+				}
+			}
+			if invoiceRef == "" && settlement.BillingDocument != nil {
+				invoiceRef = strings.TrimSpace(settlement.BillingDocument.InvoiceRefNo)
+			}
+		}
+	} else {
+		log.Printf("[document] receipt settlement lookup failed: receipt=%s err=%v", doc.ID, err)
+	}
+
 	current := doc
 	seen := map[string]bool{}
 	for depth := 0; current != nil && current.SourceDocumentID != nil && depth < 8; depth++ {
@@ -1431,8 +1448,8 @@ func (s Service) resolveReceiptReferences(doc *Document) (billingRef, deliveryRe
 		}
 		switch source.Type {
 		case TypeBill:
-			if billingRef == "" {
-				billingRef = strings.TrimSpace(source.DocumentNoFull)
+			if invoiceRef == "" {
+				invoiceRef = strings.TrimSpace(source.InvoiceRefNo)
 			}
 			// BILL rows are the selected delivery-order register. Keep the
 			// first non-empty reference for the receipt description.
@@ -1448,24 +1465,24 @@ func (s Service) resolveReceiptReferences(doc *Document) (billingRef, deliveryRe
 			if deliveryRef == "" {
 				deliveryRef = strings.TrimSpace(source.DocumentNoFull)
 			}
-			if billingRef == "" {
+			if invoiceRef == "" {
 				ref := strings.TrimSpace(source.InvoiceRefNo)
 				if ref != "" && ref != deliveryRef {
-					billingRef = ref
+					invoiceRef = ref
 				}
 			}
 		}
 		current = source
 	}
-	return billingRef, deliveryRef
+	return invoiceRef, deliveryRef
 }
 
-func buildReceiptPaymentDescription(billingRef, deliveryRef, receiptRef string) string {
+func buildReceiptPaymentDescription(invoiceRef, deliveryRef, receiptRef string) string {
 	switch {
-	case billingRef != "" && deliveryRef != "":
-		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s (ใบส่งสินค้า %s)", billingRef, deliveryRef)
-	case billingRef != "":
-		return fmt.Sprintf("ชำระค่าสินค้าตามใบวางบิล เลขที่ %s", billingRef)
+	case invoiceRef != "" && deliveryRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบแจ้งหนี้ เลขที่ %s (ใบส่งสินค้า %s)", invoiceRef, deliveryRef)
+	case invoiceRef != "":
+		return fmt.Sprintf("ชำระค่าสินค้าตามใบแจ้งหนี้ เลขที่ %s", invoiceRef)
 	case deliveryRef != "":
 		return fmt.Sprintf("ชำระค่าสินค้าตามใบส่งสินค้า %s", deliveryRef)
 	default:
