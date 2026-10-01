@@ -11,7 +11,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, product Product) (Product, error)
-	ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus, sortBy string) ([]Product, int64, error)
+	ListByStore(ctx context.Context, storeID string, page, limit int, all bool, stockStatus, sortBy string) ([]Product, int64, error)
 	GetByID(ctx context.Context, storeID, productID string) (Product, error)
 	Update(ctx context.Context, product Product) (Product, error)
 	UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error
@@ -143,7 +143,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	return r.GetByID(ctx, product.StoreID, product.ID)
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, stockStatus, sortBy string) ([]Product, int64, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, all bool, stockStatus, sortBy string) ([]Product, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -173,7 +173,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	}
 
 	var rows []productQueryRow
-	err := baseQuery.
+	listQuery := baseQuery.
 		Select(`
 			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
 			CASE
@@ -188,10 +188,11 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 				return "pv.updated_at DESC"
 			}
 			return "pv.created_at DESC"
-		}()).
-		Limit(limit).
-		Offset((page - 1) * limit).
-		Find(&rows).Error
+		}())
+	if !all {
+		listQuery = listQuery.Limit(limit).Offset((page - 1) * limit)
+	}
+	err := listQuery.Find(&rows).Error
 	if err != nil {
 		return nil, 0, err
 	}

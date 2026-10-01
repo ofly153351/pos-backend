@@ -103,6 +103,7 @@ type UpdateProductRequest struct {
 type ListProductsQuery struct {
 	Page        int
 	Limit       int
+	All         bool
 	StockStatus string
 	SortBy      string // "created_at" | "updated_at" — default: created_at
 }

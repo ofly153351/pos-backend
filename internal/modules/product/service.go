@@ -204,11 +204,14 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 		return ProductListResult{}, ErrInvalidStockStatus
 	}
 
-	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.StockStatus, query.SortBy)
+	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.All, query.StockStatus, query.SortBy)
 	if err != nil {
 		return ProductListResult{}, err
 	}
-	totalPages := int(math.Ceil(float64(total) / float64(query.Limit)))
+	totalPages := 1
+	if !query.All {
+		totalPages = int(math.Ceil(float64(total) / float64(query.Limit)))
+	}
 	if totalPages == 0 {
 		totalPages = 1
 	}

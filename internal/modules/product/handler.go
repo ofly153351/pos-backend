@@ -41,6 +41,7 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 	result, err := h.service.ListByStore(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), ListProductsQuery{
 		Page:        page,
 		Limit:       limit,
+		All:         strings.EqualFold(strings.TrimSpace(c.Query("all")), "true"),
 		StockStatus: strings.ToLower(strings.TrimSpace(c.Query("stock_status"))),
 		SortBy:      strings.ToLower(strings.TrimSpace(c.Query("sort_by"))),
 	})
@@ -368,7 +369,6 @@ func parsePriceWindow(startValue, endValue string) (*time.Time, *time.Time, erro
 func parsePaginationQuery(c *fiber.Ctx) (int, int, error) {
 	const defaultPage = 1
 	const defaultLimit = 50
-	const maxLimit = 200
 
 	page := defaultPage
 	limit := defaultLimit
@@ -388,9 +388,6 @@ func parsePaginationQuery(c *fiber.Ctx) (int, int, error) {
 	}
 	if page < 1 || limit < 1 {
 		return 0, 0, ErrInvalidPagination
-	}
-	if limit > maxLimit {
-		limit = maxLimit
 	}
 	return page, limit, nil
 }
