@@ -18,7 +18,7 @@ const (
 	defaultRecentLimit       = 10
 	maxRecentLimit           = 50
 	defaultLowStockLimit     = 10
-	maxLowStockLimit         = 50
+	maxLowStockLimit         = 200
 	defaultLowStockThreshold = 10
 )
 

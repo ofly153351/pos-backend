@@ -104,19 +104,16 @@ func (r PostgresRepository) GetTopProducts(ctx context.Context, storeID string, 
 	return items, err
 }
 
-// GetLowStockProducts returns active products whose operational on-hand (ready_stock —
-// the sale-point total) is at or below their effective minimum. The effective minimum is
-// the product's own min_stock when set (> 0), otherwise the supplied fallback threshold
-// (the dashboard passes 10). `quantity` is ready_stock so the caller can split the list:
-// out-of-stock = quantity <= 0, low-stock = quantity > 0. This replaces the previous
-// unconditional fixed threshold so the Global Dashboard matches the Inventory/Warehouse
-// pages (which already use min_stock).
+// GetLowStockProducts uses the same four-state rule as Inventory: out-of-stock is
+// ready_stock <= 0; low-stock is ready_stock > 0 and min_stock > 0 and ready_stock <=
+// min_stock. Products with no configured minimum are ready when they have positive stock.
+// `quantity` is ready_stock so the caller can split the list into out-of-stock and low-stock.
 func (r PostgresRepository) GetLowStockProducts(ctx context.Context, storeID string, threshold, limit int) ([]LowStockProduct, error) {
 	var items []LowStockProduct
 	err := r.db.WithContext(ctx).
 		Table("product_view pv").
 		Select("pv.id AS product_id, pv.name, COALESCE(pv.sku, '') AS sku, COALESCE(pv.product_unit_name, '') AS unit_type, pv.min_stock, pv.max_stock, COALESCE(pv.ready_stock, 0) AS quantity").
-		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.deleted_at IS NULL AND COALESCE(pv.ready_stock, 0) <= CASE WHEN COALESCE(pv.min_stock, 0) > 0 THEN pv.min_stock ELSE ? END", storeID, threshold).
+		Where("pv.store_id = ? AND pv.is_active = TRUE AND pv.deleted_at IS NULL AND (COALESCE(pv.ready_stock, 0) <= 0 OR (COALESCE(pv.min_stock, 0) > 0 AND COALESCE(pv.ready_stock, 0) <= pv.min_stock))", storeID).
 		Order("COALESCE(pv.ready_stock, 0) ASC, pv.updated_at DESC").
 		Limit(limit).
 		Find(&items).Error
