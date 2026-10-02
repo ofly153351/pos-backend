@@ -78,20 +78,18 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 	if err := r.db.WithContext(ctx).Raw(`
 		SELECT
 			COUNT(*) AS total_skus,
-			COALESCE(SUM(GREATEST(COALESCE(s_agg.qty, 0), 0)), 0) AS available_stock_qty,
+			COALESCE(SUM(GREATEST(COALESCE(pv.ready_stock, 0), 0)), 0) AS available_stock_qty,
 			COUNT(*) FILTER (
-				WHERE p.min_stock > 0 AND COALESCE(s_agg.qty, 0) <= p.min_stock
+				WHERE pv.ready_stock > 0
+				  AND pv.min_stock > 0
+				  AND pv.ready_stock <= pv.min_stock
 			) AS low_stock_count,
 			COUNT(*) FILTER (
-				WHERE COALESCE(s_agg.qty, 0) = 0
+				WHERE COALESCE(pv.ready_stock, 0) <= 0
 			) AS out_of_stock_count
-		FROM products p
-		LEFT JOIN (
-			SELECT product_id, SUM(quantity) AS qty
-			FROM stocks
-			GROUP BY product_id
-		) s_agg ON s_agg.product_id = p.id
-		WHERE p.store_id = ? AND p.is_active = TRUE AND p.deleted_at IS NULL
+		FROM product_view pv
+		JOIN products p ON p.id = pv.id
+		WHERE pv.store_id = ? AND pv.is_active = TRUE AND p.deleted_at IS NULL
 	`, storeID).Scan(&skuRow).Error; err != nil {
 		return kpi, err
 	}
