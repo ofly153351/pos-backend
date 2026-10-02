@@ -83,6 +83,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		defaultLocationID = resolved
 	}
 
+	defaultWarehouseLocationID, err := s.repo.GetStoreDefaultWarehouseLocationID(ctx, storeID)
+	if err != nil {
+		return Product{}, err
+	}
+	if defaultWarehouseLocationID == "" {
+		return Product{}, ErrNoStoreDefaultSaleLocation
+	}
+
 	imageURL, err := s.storage.SaveProductImage(input.ImageFile)
 	if err != nil {
 		return Product{}, err
@@ -149,8 +157,13 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		if err != nil {
 			return err
 		}
+		stockRepo := stock_movement.NewPostgresRepository(tx)
+		// Establish warehouse ownership at zero without creating a stock movement.
+		if err := stockRepo.UpsertStock(ctx, storeID, c.ID, defaultWarehouseLocationID, 0); err != nil {
+			return err
+		}
 		if input.InitialStock > 0 {
-			stockSvc := stock_movement.NewService(stock_movement.NewPostgresRepository(tx), tx)
+			stockSvc := stock_movement.NewService(stockRepo, tx)
 			if _, err := stockSvc.AddStock(ctx, actor, storeID, stock_movement.AddStockRequest{
 				Items: []stock_movement.AddStockItemRequest{{
 					ProductID:  c.ID,
@@ -204,7 +217,7 @@ func (s Service) ListByStore(ctx context.Context, actor auth.Claims, storeID str
 		return ProductListResult{}, ErrInvalidStockStatus
 	}
 
-	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.All, query.StockStatus, query.SortBy)
+	products, total, err := s.repo.ListByStore(ctx, storeID, query.Page, query.Limit, query.All, query.WarehouseID, query.StockStatus, query.SortBy)
 	if err != nil {
 		return ProductListResult{}, err
 	}

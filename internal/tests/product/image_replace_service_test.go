@@ -20,7 +20,7 @@ func (r *fakeProductRepo) Create(ctx context.Context, product productmodule.Prod
 	r.product = product
 	return product, nil
 }
-func (r *fakeProductRepo) ListByStore(ctx context.Context, storeID string, page, limit int, all bool, stockStatus, sortBy string) ([]productmodule.Product, int64, error) {
+func (r *fakeProductRepo) ListByStore(ctx context.Context, storeID string, page, limit int, all bool, warehouseID, stockStatus, sortBy string) ([]productmodule.Product, int64, error) {
 	return []productmodule.Product{r.product}, 1, nil
 }
 func (r *fakeProductRepo) GetByID(ctx context.Context, storeID, productID string) (productmodule.Product, error) {
@@ -71,7 +71,11 @@ func (r *fakeProductRepo) ValidateOperationalLocation(ctx context.Context, store
 	return true, nil
 }
 func (r *fakeProductRepo) GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error) {
-	return "loc-test", nil
+	return "loc-default", nil
+}
+
+func (r *fakeProductRepo) GetStoreDefaultWarehouseLocationID(ctx context.Context, storeID string) (string, error) {
+	return "loc-default-warehouse", nil
 }
 func (r *fakeProductRepo) UserCanManageStore(ctx context.Context, storeID, userID, role string) (bool, error) {
 	return true, nil

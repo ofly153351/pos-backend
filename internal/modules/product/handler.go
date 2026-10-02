@@ -42,6 +42,7 @@ func (h Handler) ListByStore(c *fiber.Ctx) error {
 		Page:        page,
 		Limit:       limit,
 		All:         strings.EqualFold(strings.TrimSpace(c.Query("all")), "true"),
+		WarehouseID: strings.TrimSpace(c.Query("warehouse_id")),
 		StockStatus: strings.ToLower(strings.TrimSpace(c.Query("stock_status"))),
 		SortBy:      strings.ToLower(strings.TrimSpace(c.Query("sort_by"))),
 	})

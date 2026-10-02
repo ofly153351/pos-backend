@@ -11,7 +11,7 @@ import (
 
 type Repository interface {
 	Create(ctx context.Context, product Product) (Product, error)
-	ListByStore(ctx context.Context, storeID string, page, limit int, all bool, stockStatus, sortBy string) ([]Product, int64, error)
+	ListByStore(ctx context.Context, storeID string, page, limit int, all bool, warehouseID, stockStatus, sortBy string) ([]Product, int64, error)
 	GetByID(ctx context.Context, storeID, productID string) (Product, error)
 	Update(ctx context.Context, product Product) (Product, error)
 	UpdateSKU(ctx context.Context, storeID, productID, sku string, updatedAt time.Time) error
@@ -28,6 +28,7 @@ type Repository interface {
 	LocationBelongsToStore(ctx context.Context, storeID, locationID string) (bool, error)
 	ValidateOperationalLocation(ctx context.Context, storeID, locationID string) (bool, error)
 	GetStoreDefaultSaleLocationID(ctx context.Context, storeID string) (string, error)
+	GetStoreDefaultWarehouseLocationID(ctx context.Context, storeID string) (string, error)
 }
 
 type PostgresRepository struct {
@@ -62,6 +63,7 @@ type productQueryRow struct {
 	WarehouseStock      int        `gorm:"column:warehouse_stock"`
 	ReadyStock          int        `gorm:"column:ready_stock"`
 	StorageStock        int        `gorm:"column:storage_stock"`
+	WarehouseNames      string     `gorm:"column:warehouse_names"`
 	StockStatus         string     `gorm:"column:stock_status"`
 	IsActive            bool       `gorm:"column:is_active"`
 	CreatedAt           time.Time  `gorm:"column:created_at"`
@@ -143,7 +145,7 @@ func (r PostgresRepository) Create(ctx context.Context, product Product) (Produc
 	return r.GetByID(ctx, product.StoreID, product.ID)
 }
 
-func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, all bool, stockStatus, sortBy string) ([]Product, int64, error) {
+func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, page, limit int, all bool, warehouseID, stockStatus, sortBy string) ([]Product, int64, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -166,6 +168,13 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	} else if stockStatus == "low_stock" {
 		baseQuery = baseQuery.Where("pv.total_stock > 0 AND pv.total_stock <= pv.min_stock")
 	}
+	if warehouseID != "" {
+		baseQuery = baseQuery.Where(`EXISTS (
+			SELECT 1 FROM stocks ws
+			JOIN locations wl ON wl.id = ws.location_id
+			WHERE ws.product_id = pv.id AND wl.warehouse_id = ?
+		)`, warehouseID)
+	}
 
 	var total int64
 	if err := baseQuery.Count(&total).Error; err != nil {
@@ -176,6 +185,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 	listQuery := baseQuery.
 		Select(`
 			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
+			COALESCE((SELECT STRING_AGG(DISTINCT w.name, ', ' ORDER BY w.name) FROM stocks ws JOIN locations wl ON wl.id = ws.location_id JOIN warehouses w ON w.id = wl.warehouse_id WHERE ws.product_id = pv.id), '') AS warehouse_names,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -216,6 +226,7 @@ func (r PostgresRepository) GetByID(ctx context.Context, storeID, productID stri
 		Joins("JOIN products pd ON pd.id = pv.id").
 		Select(`
 			pv.id, pv.store_id, pv.product_type_id, pv.product_type_name, pv.product_unit_id, pv.product_unit_name, pv.brand_id, pv.brand_name, pv.name, pv.sku, pv.barcode, pv.image_url, pv.min_stock, pv.max_stock, pv.base_price, pv.cost_price, pv.special_price, pv.special_price_start_at, pv.special_price_end_at, pv.total_stock, pv.warehouse_stock, pv.ready_stock, pv.storage_stock,
+			COALESCE((SELECT STRING_AGG(DISTINCT w.name, ', ' ORDER BY w.name) FROM stocks ws JOIN locations wl ON wl.id = ws.location_id JOIN warehouses w ON w.id = wl.warehouse_id WHERE ws.product_id = pv.id), '') AS warehouse_names,
 			CASE
 				WHEN pv.total_stock = 0 THEN 'out_of_stock'
 				WHEN pv.total_stock > 0 AND pv.total_stock <= pv.min_stock THEN 'low_stock'
@@ -541,6 +552,26 @@ func (r PostgresRepository) GetStoreDefaultSaleLocationID(ctx context.Context, s
 	return "", err
 }
 
+// GetStoreDefaultWarehouseLocationID returns an active storage location under the
+// store's default warehouse for zero-balance inventory ownership.
+func (r PostgresRepository) GetStoreDefaultWarehouseLocationID(ctx context.Context, storeID string) (string, error) {
+	var id string
+	err := r.db.WithContext(ctx).
+		Table("locations l").
+		Select("l.id").
+		Joins("JOIN warehouses w ON w.id = l.warehouse_id").
+		Where("l.store_id = ? AND w.store_id = ? AND w.is_default = TRUE AND w.is_active = TRUE AND l.is_active = TRUE", storeID, storeID).
+		Order("l.is_sale_point ASC, l.created_at ASC, l.id ASC").
+		Take(&id).Error
+	if err == nil {
+		return id, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	return "", err
+}
+
 func (row productQueryRow) toProduct() Product {
 	product := Product{
 		ID:                  row.ID,
@@ -560,6 +591,7 @@ func (row productQueryRow) toProduct() Product {
 		WarehouseStock:      row.WarehouseStock,
 		ReadyStock:          row.ReadyStock,
 		StorageStock:        row.StorageStock,
+		WarehouseNames:      row.WarehouseNames,
 		StockStatus:         row.StockStatus,
 	}
 	if row.BrandID != nil {

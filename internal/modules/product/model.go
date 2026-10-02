@@ -39,6 +39,7 @@ type Product struct {
 	WarehouseStock int       `json:"warehouse_stock" gorm:"column:warehouse_stock"` // DEPRECATED: grand total across all locations
 	ReadyStock     int       `json:"ready_stock" gorm:"column:ready_stock"`         // W5: SUM where is_sale_point (POS-sellable)
 	StorageStock   int       `json:"storage_stock" gorm:"column:storage_stock"`     // W5: SUM where NOT is_sale_point (storage)
+	WarehouseNames string    `json:"warehouse_names,omitempty" gorm:"column:warehouse_names"`
 	IsActive       bool      `json:"is_active" gorm:"column:is_active"`
 	CreatedAt      time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt      time.Time `json:"updated_at" gorm:"column:updated_at"`
@@ -104,6 +105,7 @@ type ListProductsQuery struct {
 	Page        int
 	Limit       int
 	All         bool
+	WarehouseID string
 	StockStatus string
 	SortBy      string // "created_at" | "updated_at" — default: created_at
 }
