@@ -211,19 +211,22 @@ func (r PostgresRepository) GetLowStockAlerts(ctx context.Context, storeID strin
 	var rows []rawRow
 	if err := r.db.WithContext(ctx).Raw(`
 		SELECT
-			p.id   AS product_id,
-			p.name,
-			COALESCE(p.sku, '')   AS sku,
+			pv.id AS product_id,
+			pv.name,
+			COALESCE(pv.sku, '') AS sku,
 			COALESCE(pu.name, '') AS unit,
-			p.min_stock,
-			COALESCE(SUM(s.quantity), 0) AS total_stock
-		FROM products p
-		LEFT JOIN stocks s         ON s.product_id  = p.id
-		LEFT JOIN product_units pu ON pu.id          = p.product_unit_id
-		WHERE p.store_id = ? AND p.is_active = TRUE AND p.min_stock > 0 AND p.deleted_at IS NULL
-		GROUP BY p.id, p.name, p.sku, pu.name, p.min_stock
-		HAVING COALESCE(SUM(s.quantity), 0) <= p.min_stock
-		ORDER BY (COALESCE(SUM(s.quantity), 0)::FLOAT / NULLIF(p.min_stock, 0)) ASC
+			pv.min_stock,
+			COALESCE(pv.ready_stock, 0) AS total_stock
+		FROM product_view pv
+		JOIN products p ON p.id = pv.id
+		LEFT JOIN product_units pu ON pu.id = pv.product_unit_id
+		WHERE pv.store_id = ?
+		  AND pv.is_active = TRUE
+		  AND pv.min_stock > 0
+		  AND COALESCE(pv.ready_stock, 0) > 0
+		  AND COALESCE(pv.ready_stock, 0) <= pv.min_stock
+		  AND p.deleted_at IS NULL
+		ORDER BY (COALESCE(pv.ready_stock, 0)::FLOAT / NULLIF(pv.min_stock, 0)) ASC
 		LIMIT ?
 	`, storeID, limit).Scan(&rows).Error; err != nil {
 		return nil, err
