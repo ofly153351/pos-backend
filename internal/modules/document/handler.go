@@ -77,6 +77,42 @@ func (h Handler) CreateFromSale(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "document created from sale", doc)
 }
 
+func (h Handler) UpdateDocument(c *fiber.Ctx) error {
+	storeID, id := c.Params("storeID"), c.Params("docID")
+	var req UpdateDocumentRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	doc, err := h.service.UpdateDocument(c.UserContext(), middleware.ClaimsFromContext(c), storeID, id, req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "document updated", doc)
+}
+
+func (h Handler) ListDocumentRevisions(c *fiber.Ctx) error {
+	rows, err := h.service.ListRevisions(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("docID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "document revisions fetched", rows)
+}
+
+func (h Handler) RestoreDocumentRevision(c *fiber.Ctx) error {
+	var req RestoreDocumentRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	if req.RevisionNo < 1 {
+		return httpx.Error(c, fiber.StatusBadRequest, "revision_no must be positive", nil)
+	}
+	doc, err := h.service.RestoreRevision(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("docID"), req.RevisionNo)
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "document revision restored", doc)
+}
+
 func (h Handler) UpdateDocumentStatus(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
@@ -328,6 +364,8 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusConflict, "document already exists", err.Error())
 	case errors.Is(err, ErrDocumentReferenced):
 		return httpx.Error(c, fiber.StatusConflict, "document cannot be deleted because it is referenced", err.Error())
+	case errors.Is(err, ErrDocumentNotEditable):
+		return httpx.Error(c, fiber.StatusConflict, "document cannot be edited in its current state", err.Error())
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrNoItems), errors.Is(err, ErrBadAction), errors.Is(err, ErrInvalidConversion):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	default:

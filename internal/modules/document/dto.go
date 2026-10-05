@@ -45,6 +45,19 @@ type CreateDocumentItemInput struct {
 	DiscountValue float64 `json:"discount_value"`
 }
 
+type UpdateDocumentRequest = CreateDocumentRequest
+
+type DocumentRevisionListItem struct {
+	RevisionNo int       `json:"revision_no"`
+	Action     string    `json:"action"`
+	ChangedBy  string    `json:"changed_by"`
+	ChangedAt  time.Time `json:"changed_at"`
+}
+
+type RestoreDocumentRequest struct {
+	RevisionNo int `json:"revision_no"`
+}
+
 type UpdateStatusRequest struct {
 	Status DocumentStatus `json:"status"`
 }

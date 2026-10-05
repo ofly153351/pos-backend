@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"pos-backend/internal/platform/htmlpdf"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -606,6 +608,281 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 	}
 
 	return s.assignNumberAndInsert(doc)
+}
+
+var ErrDocumentNotEditable = errors.New("document cannot be edited in its current state")
+
+func canEditDocument(doc *Document) bool {
+	return doc.Status != StatusCompleted && doc.Status != StatusCancelled && doc.PaymentStatus != PaymentPaid
+}
+
+type documentSnapshot struct {
+	Document Document       `json:"document"`
+	Items    []DocumentItem `json:"items"`
+}
+
+func makeDocumentSnapshot(doc *Document) ([]byte, error) {
+	return json.Marshal(documentSnapshot{Document: *doc, Items: doc.Items})
+}
+
+func (s Service) recordRevision(tx *gorm.DB, doc *Document, actor auth.Claims, action string) error {
+	snapshot, err := makeDocumentSnapshot(doc)
+	if err != nil {
+		return err
+	}
+	var last int
+	if err := tx.Model(&DocumentRevision{}).Where("document_id = ?", doc.ID).
+		Select("COALESCE(MAX(revision_no), 0)").Scan(&last).Error; err != nil {
+		return err
+	}
+	return tx.Create(&DocumentRevision{
+		ID: idgen.Generate("docrev"), DocumentID: doc.ID, RevisionNo: last + 1,
+		Action: action, Snapshot: snapshot, ChangedBy: actor.UserID, ChangedAt: time.Now(),
+	}).Error
+}
+
+func editableDocumentUpdates(req UpdateDocumentRequest, customerName, customerAddress, customerPhone string, docDate, dueDate, validUntil, deliveryDate, poReceivedDate, expectedDeliveryDate *time.Time, subtotal, vatAmount, total float64) map[string]any {
+	return map[string]any{
+		"customer_id": req.CustomerID, "customer_name": customerName, "customer_address": customerAddress, "customer_phone": customerPhone, "document_date": docDate, "due_date": dueDate,
+		"valid_until": validUntil, "price_validity_days": req.PriceValidityDays,
+		"delivery_date": deliveryDate, "delivery_lead_time_days": req.DeliveryLeadTimeDays,
+		"po_received_date": poReceivedDate, "expected_delivery_date": expectedDeliveryDate,
+		"delivery_address": req.DeliveryAddress, "delivery_contact": req.DeliveryContact,
+		"delivery_phone": req.DeliveryPhone, "sales_zone": req.SalesZone,
+		"salesperson_name": req.SalespersonName, "invoice_ref_no": req.InvoiceRefNo,
+		"bank_account_id": req.BankAccountID, "po_ref_no": req.PORefNo,
+		"shipping_fee": req.ShippingFee, "credit_term_days": req.CreditTermDays,
+		"vat_rate": req.VatRate, "subtotal": subtotal, "vat_amount": vatAmount,
+		"total_amount": total, "notes": req.Notes, "quotation_summary": req.QuotationSummary,
+		"updated_at": time.Now(),
+	}
+}
+
+func downstreamDocumentUpdates(src *Document) map[string]any {
+	return map[string]any{
+		"customer_id": src.CustomerID, "customer_name": src.CustomerName,
+		"customer_address": src.CustomerAddress, "customer_phone": src.CustomerPhone,
+		"document_date": src.DocumentDate, "due_date": src.DueDate, "valid_until": src.ValidUntil,
+		"price_validity_days": src.PriceValidityDays, "vat_rate": src.VatRate,
+		"subtotal": src.Subtotal, "vat_amount": src.VatAmount, "total_amount": src.TotalAmount,
+		"notes": src.Notes, "quotation_summary": src.QuotationSummary, "updated_at": time.Now(),
+	}
+}
+
+func copyDownstreamItems(tx *gorm.DB, source *Document, target *Document) error {
+	if err := tx.Where("document_id = ?", target.ID).Delete(&DocumentItem{}).Error; err != nil {
+		return err
+	}
+	items := make([]DocumentItem, len(source.Items))
+	for i, item := range source.Items {
+		item.ID = idgen.Generate(PrefixDocumentItem)
+		item.DocumentID = target.ID
+		items[i] = item
+	}
+	target.Items = items
+	return tx.Create(&items).Error
+}
+
+// propagateDownstream keeps the conversion chain consistent after an upstream edit.
+// It is all-or-nothing: a finalized descendant blocks the entire edit so an invoice,
+// delivery order, and receipt can never disagree with their source document.
+func (s Service) propagateDownstream(tx *gorm.DB, source *Document, actor auth.Claims) error {
+	var children []Document
+	if err := tx.Preload("Items").Where("store_id = ? AND source_document_id = ?", source.StoreID, source.ID).Find(&children).Error; err != nil {
+		return err
+	}
+	for i := range children {
+		child := &children[i]
+		if !canEditDocument(child) {
+			return ErrDocumentNotEditable
+		}
+		if err := s.recordRevision(tx, child, actor, "PROPAGATE"); err != nil {
+			return err
+		}
+		if err := tx.Model(&Document{}).Where("id = ?", child.ID).Updates(downstreamDocumentUpdates(source)).Error; err != nil {
+			return err
+		}
+		child.CustomerID, child.CustomerName, child.CustomerAddress, child.CustomerPhone = source.CustomerID, source.CustomerName, source.CustomerAddress, source.CustomerPhone
+		child.DocumentDate, child.DueDate, child.ValidUntil = source.DocumentDate, source.DueDate, source.ValidUntil
+		child.PriceValidityDays, child.VatRate = source.PriceValidityDays, source.VatRate
+		child.Subtotal, child.VatAmount, child.TotalAmount = source.Subtotal, source.VatAmount, source.TotalAmount
+		child.Notes, child.QuotationSummary, child.Items = source.Notes, source.QuotationSummary, source.Items
+		if err := copyDownstreamItems(tx, source, child); err != nil {
+			return err
+		}
+		if err := s.propagateDownstream(tx, child, actor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s Service) UpdateDocument(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateDocumentRequest) (*Document, error) {
+	current, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !canEditDocument(current) {
+		return nil, ErrDocumentNotEditable
+	}
+	if len(req.Items) == 0 {
+		return nil, ErrNoItems
+	}
+	if err := validateCreateLines(req); err != nil {
+		return nil, err
+	}
+	if req.CustomerID == "" {
+		return nil, fmt.Errorf("customer_id required: %w", ErrInvalidInput)
+	}
+	var customer struct {
+		Name    string
+		Address string
+		Phone   string
+	}
+	if err := s.db.WithContext(ctx).Raw("SELECT full_name AS name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?", req.CustomerID, storeID).Scan(&customer).Error; err != nil || customer.Name == "" {
+		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
+	}
+
+	parseOptionalDate := func(v *string) (*time.Time, error) {
+		if v == nil || *v == "" {
+			return nil, nil
+		}
+		t, e := time.Parse("2006-01-02", *v)
+		if e != nil {
+			return nil, fmt.Errorf("invalid date: %w", ErrInvalidInput)
+		}
+		return &t, nil
+	}
+	docDate, err := time.Parse("2006-01-02", req.DocumentDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid document_date: %w", ErrInvalidInput)
+	}
+	dueDate, err := parseOptionalDate(req.DueDate)
+	if err != nil {
+		return nil, err
+	}
+	validUntil, err := parseOptionalDate(req.ValidUntil)
+	if err != nil {
+		return nil, err
+	}
+	deliveryDate, err := parseOptionalDate(req.DeliveryDate)
+	if err != nil {
+		return nil, err
+	}
+	poReceivedDate, err := parseOptionalDate(req.POReceivedDate)
+	if err != nil {
+		return nil, err
+	}
+	expectedDeliveryDate, err := parseOptionalDate(req.ExpectedDeliveryDate)
+	if err != nil {
+		return nil, err
+	}
+
+	round2 := func(v float64) float64 { return math.Round(v*100) / 100 }
+	items := make([]DocumentItem, 0, len(req.Items))
+	var subtotal float64
+	for _, in := range req.Items {
+		amount := in.Quantity * in.UnitPrice
+		if in.DiscountType == "PERCENT" {
+			amount -= amount * in.DiscountValue / 100
+		}
+		if in.DiscountType == "AMOUNT" {
+			amount -= in.DiscountValue
+		}
+		amount = round2(math.Max(0, amount))
+		subtotal += amount
+		items = append(items, DocumentItem{ID: idgen.Generate(PrefixDocumentItem), DocumentID: id, ProductID: in.ProductID, Description: in.Description, Unit: in.Unit, Quantity: in.Quantity, UnitPrice: in.UnitPrice, DiscountType: in.DiscountType, DiscountValue: in.DiscountValue, Amount: amount})
+	}
+	subtotal = round2(subtotal)
+	vatAmount := round2(subtotal * req.VatRate / 100)
+	total := round2(subtotal + vatAmount)
+
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked Document
+		if err := tx.Preload("Items").Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ? AND store_id = ?", id, storeID).Error; err != nil {
+			return err
+		}
+		if !canEditDocument(&locked) {
+			return ErrDocumentNotEditable
+		}
+		if err := s.recordRevision(tx, &locked, actor, "EDIT"); err != nil {
+			return err
+		}
+		if err := tx.Model(&Document{}).Where("id = ? AND store_id = ?", id, storeID).Updates(editableDocumentUpdates(req, customer.Name, customer.Address, customer.Phone, &docDate, dueDate, validUntil, deliveryDate, poReceivedDate, expectedDeliveryDate, subtotal, vatAmount, total)).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("document_id = ?", id).Delete(&DocumentItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&items).Error; err != nil {
+			return err
+		}
+		locked.CustomerID, locked.CustomerName, locked.CustomerAddress, locked.CustomerPhone = req.CustomerID, customer.Name, customer.Address, customer.Phone
+		locked.DocumentDate, locked.DueDate, locked.ValidUntil = docDate, dueDate, validUntil
+		locked.PriceValidityDays, locked.VatRate = req.PriceValidityDays, req.VatRate
+		locked.Subtotal, locked.VatAmount, locked.TotalAmount = subtotal, vatAmount, total
+		locked.Notes, locked.QuotationSummary, locked.Items = req.Notes, req.QuotationSummary, items
+		return s.propagateDownstream(tx, &locked, actor)
+	}); err != nil {
+		return nil, err
+	}
+	return s.GetDocument(ctx, actor, storeID, id)
+}
+
+func (s Service) ListRevisions(ctx context.Context, actor auth.Claims, storeID, id string) ([]DocumentRevisionListItem, error) {
+	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
+		return nil, err
+	}
+	var rows []DocumentRevisionListItem
+	err := s.db.WithContext(ctx).Model(&DocumentRevision{}).Where("document_id = ?", id).Order("revision_no DESC").Find(&rows).Error
+	return rows, err
+}
+
+func (s Service) RestoreRevision(ctx context.Context, actor auth.Claims, storeID, id string, revisionNo int) (*Document, error) {
+	current, err := s.GetDocument(ctx, actor, storeID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !canEditDocument(current) {
+		return nil, ErrDocumentNotEditable
+	}
+	var rev DocumentRevision
+	if err := s.db.WithContext(ctx).Where("document_id = ? AND revision_no = ?", id, revisionNo).First(&rev).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var snap documentSnapshot
+	if err := json.Unmarshal(rev.Snapshot, &snap); err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked Document
+		if err := tx.Preload("Items").Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ? AND store_id = ?", id, storeID).Error; err != nil {
+			return err
+		}
+		if !canEditDocument(&locked) {
+			return ErrDocumentNotEditable
+		}
+		if err := s.recordRevision(tx, &locked, actor, "RESTORE"); err != nil {
+			return err
+		}
+		updates := map[string]any{"customer_id": snap.Document.CustomerID, "customer_name": snap.Document.CustomerName, "customer_address": snap.Document.CustomerAddress, "customer_phone": snap.Document.CustomerPhone, "document_date": snap.Document.DocumentDate, "due_date": snap.Document.DueDate, "valid_until": snap.Document.ValidUntil, "price_validity_days": snap.Document.PriceValidityDays, "delivery_date": snap.Document.DeliveryDate, "delivery_lead_time_days": snap.Document.DeliveryLeadTimeDays, "po_received_date": snap.Document.POReceivedDate, "expected_delivery_date": snap.Document.ExpectedDeliveryDate, "delivery_address": snap.Document.DeliveryAddress, "delivery_contact": snap.Document.DeliveryContact, "delivery_phone": snap.Document.DeliveryPhone, "sales_zone": snap.Document.SalesZone, "salesperson_name": snap.Document.SalespersonName, "invoice_ref_no": snap.Document.InvoiceRefNo, "bank_account_id": snap.Document.BankAccountID, "po_ref_no": snap.Document.PORefNo, "shipping_fee": snap.Document.ShippingFee, "credit_term_days": snap.Document.CreditTermDays, "vat_rate": snap.Document.VatRate, "subtotal": snap.Document.Subtotal, "vat_amount": snap.Document.VatAmount, "total_amount": snap.Document.TotalAmount, "notes": snap.Document.Notes, "quotation_summary": snap.Document.QuotationSummary, "updated_at": time.Now()}
+		if err := tx.Model(&Document{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("document_id = ?", id).Delete(&DocumentItem{}).Error; err != nil {
+			return err
+		}
+		for i := range snap.Items {
+			snap.Items[i].ID = idgen.Generate(PrefixDocumentItem)
+			snap.Items[i].DocumentID = id
+		}
+		return tx.Create(&snap.Items).Error
+	}); err != nil {
+		return nil, err
+	}
+	return s.GetDocument(ctx, actor, storeID, id)
 }
 
 func (s Service) UpdateDocumentStatus(ctx context.Context, actor auth.Claims, storeID, id string, req UpdateStatusRequest) error {

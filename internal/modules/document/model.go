@@ -106,6 +106,18 @@ type DocumentItem struct {
 	Amount        float64 `gorm:"not null;default:0" json:"amount"`
 }
 
+type DocumentRevision struct {
+	ID         string    `gorm:"primaryKey;type:varchar(30)" json:"id"`
+	DocumentID string    `gorm:"not null;index" json:"document_id"`
+	RevisionNo int       `gorm:"not null" json:"revision_no"`
+	Action     string    `gorm:"not null;type:varchar(20)" json:"action"`
+	Snapshot   []byte    `gorm:"not null;type:jsonb" json:"snapshot"`
+	ChangedBy  string    `gorm:"not null" json:"changed_by"`
+	ChangedAt  time.Time `json:"changed_at"`
+}
+
+func (DocumentRevision) TableName() string { return "document_revisions" }
+
 type ReceiptSettlement struct {
 	ID                string    `gorm:"primaryKey;type:varchar(30)" json:"id"`
 	ReceiptDocumentID string    `gorm:"not null;index" json:"receipt_document_id"`
