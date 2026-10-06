@@ -185,17 +185,20 @@ func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing
 		if strings.Contains(html, `class="paybox"`) {
 			t.Fatalf("%s must not render payment box", docType)
 		}
-		if !strings.Contains(html, `class="remarks remarks-inline"`) {
-			t.Fatalf("%s must render full-width remarks beside the summary", docType)
+		if !strings.Contains(html, `class="remarks remarks-under-table"`) {
+			t.Fatalf("%s must render remarks directly below the item table", docType)
 		}
-		if !strings.Contains(html, `class="foot-grid remarks-grid"`) {
-			t.Fatalf("%s footer must use the stretch layout for remarks and summary", docType)
+		if !strings.Contains(html, `class="remarks-summary-row"`) {
+			t.Fatalf("%s must place remarks and summary in one flex row", docType)
 		}
-		if !strings.Contains(html, `.remarks-inline{ flex:1; min-width:0; height:100%; align-self:stretch; margin-top:0; }`) {
-			t.Fatalf("%s remarks must keep full-height styling", docType)
+		if strings.Contains(html, `class="foot-grid remarks-grid"`) {
+			t.Fatalf("%s footer must not use the old side-by-side remarks layout", docType)
 		}
-		if !strings.Contains(html, `.foot-grid.remarks-grid{ align-items:stretch; }`) {
-			t.Fatalf("%s remarks must stretch to the summary height", docType)
+		if !strings.Contains(html, `.remarks-under-table{ margin-top:2mm; break-inside:avoid; page-break-inside:avoid; }`) {
+			t.Fatalf("%s remarks must keep below-table print-safe styling", docType)
+		}
+		if !strings.Contains(html, "เงื่อนไขและหมายเหตุ") {
+			t.Fatalf("%s remarks heading is missing", docType)
 		}
 	}
 }

@@ -271,12 +271,8 @@ func quotationTerms(d DocData) (priceTerms, deliveryTerms string) {
 	if d.DeliveryLeadTimeDays != nil && *d.DeliveryLeadTimeDays > 0 {
 		deliveryDays = strconv.Itoa(*d.DeliveryLeadTimeDays)
 	}
-	poDate := "_/_/_"
-	if d.POReceivedDate != nil && !d.POReceivedDate.IsZero() {
-		poDate = thaiDate(*d.POReceivedDate)
-	}
 	priceTerms = fmt.Sprintf("ราคานี้ยืนราคาเป็นระยะเวลา %s วัน นับจากวันที่ออกใบเสนอราคา", validDays)
-	deliveryTerms = fmt.Sprintf("กำหนดส่งสินค้าภายใน %s วัน หลังจากได้รับใบสั่งซื้อวันที่ %s", deliveryDays, poDate)
+	deliveryTerms = fmt.Sprintf("กำหนดส่งสินค้าภายใน %s วัน นับจากวันที่ได้รับใบสั่งซื้อ", deliveryDays)
 	return priceTerms, deliveryTerms
 }
 
@@ -642,9 +638,14 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .c-lbl{ white-space:nowrap; flex-shrink:0; color:var(--muted); }
 .c-line{ flex:1; border-bottom:1px solid var(--line); position:relative; top:-2px; }
 .summary{ width:78mm; margin-left:auto; }
+.remarks-summary-row{ display:flex; gap:4mm; align-items:flex-start; margin-top:2mm; }
+.remarks-summary-row .remarks-under-table{ flex:1 1 auto; min-width:0; margin-top:0; }
+.remarks-summary-row .foot-grid{ flex:0 0 auto; }
 .sum-row{ display:flex; justify-content:space-between; padding:1mm 0; border-bottom:1px dashed var(--line); }
 .sum-total{ border-top:2px solid var(--ink); border-bottom:none; font-size:16px; font-weight:700; margin-top:1mm; padding-top:2mm; }
 .remarks{ margin-top:2mm; border:1px solid var(--line); padding:1.5mm 3mm; font-size:10px; min-height:9mm; }
+.remarks-under-table{ margin-top:2mm; break-inside:avoid; page-break-inside:avoid; }
+.remarks-under-table .terms-line{ margin-top:0.5mm; }
 .remarks-inline{ flex:1; min-width:0; height:100%; align-self:stretch; margin-top:0; }
 .remarks .rh{ color:var(--muted); }
 /* center the whole signature GROUP, and center the content INSIDE each column
@@ -783,13 +784,35 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </div>
   {{end}}
 
+  {{if and $pg.IsLast (not $root.ShowPayBox)}}
+  <div class="remarks-summary-row">
+    <div class="remarks remarks-under-table">
+      <div class="rh">เงื่อนไขและหมายเหตุ (Terms & Remarks):</div>
+      {{if $root.Notes}}<div class="terms-line">{{$root.Notes}}</div>{{end}}
+      {{if $root.PriceTerms}}
+      <div class="terms-line">1. {{$root.PriceTerms}}</div>
+      <div class="terms-line">2. เงื่อนไขการชำระเงิน ชำระภายใน {{$root.PaymentTerms}} นับถัดจากวันที่มอบสินค้าและตรวจรับเรียบร้อยแล้ว</div>
+      <div class="terms-line">3. {{$root.DeliveryTerms}}</div>
+      {{end}}
+    </div>
+    <div class="foot-grid">
+      <div class="summary">
+        {{range $root.Summary}}
+        <div class="sum-row{{if .Strong}} sum-total{{end}}"><span>{{.Label}}</span><span>{{.Value}}</span></div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+  {{end}}
+
   {{if and $pg.IsLast $root.BahtText}}<div class="baht-text-row"><span>จำนวนเงินตัวอักษร / Text:</span><span>({{$root.BahtText}})</span></div>{{end}}
 
   <div class="doc-spacer"></div>
 
   {{if $pg.IsLast}}
   <footer class="doc-footer">
-    <div class="foot-grid{{if not $root.ShowPayBox}} remarks-grid{{end}}">
+  {{if $root.ShowPayBox}}
+  <div class="foot-grid">
       {{if $root.ShowPayBox}}
       <div class="paybox">
         <div class="pay-row"><span class="pay-chk">{{if $root.PayCash}}&#9745;{{else}}&#9744;{{end}}</span><span class="pay-lbl">เงินสด (Cash)</span><span class="pay-dot"></span><span class="pay-baht">บาท</span></div>
@@ -813,8 +836,6 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
           </div>
         </div>
       </div>
-      {{else}}
-      <div class="remarks remarks-inline"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>
       {{end}}
       <div class="summary">
         {{range $root.Summary}}
@@ -822,10 +843,9 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
         {{end}}
       </div>
     </div>
+  {{end}}
 
     {{if $root.ShowPayBox}}<div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>{{end}}
-    {{if $root.PriceTerms}}<section class="termsrow"><div class="terms-title">เงื่อนไข (Terms)</div><div>1. {{$root.PriceTerms}}</div><div>2. {{$root.DeliveryTerms}}</div></section>{{end}}
-
     {{if $root.ShowSignature}}
     <div class="signatures">
       <div class="sig">
