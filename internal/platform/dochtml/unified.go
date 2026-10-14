@@ -1,16 +1,14 @@
 package dochtml
 
 // =============================================================================
-//  ระบบเอกสารรวม (Unified Document Renderer) — drop-in สำหรับ render.go
+//  ระบบเอกสารรวม (Unified Document Renderer)
 // -----------------------------------------------------------------------------
 //  แทนที่ 5 template แยก ด้วย template กลางตัวเดียว + paginator ตัวเดียว
 //  ทุกชนิด (INVOICE/RECEIPT/TAX_INVOICE/QUOTATION/BILL/CREDIT_NOTE/DELIVERY_ORDER)
 //  route ผ่าน RenderUnifiedDocumentHTML() → ความต่างตามชนิดอยู่ใน docProfile
 //
-//  แนวทาง: A (server arithmetic + fixed row height) — ไม่ใช่ client DOM measure
-//    • backend รู้ TotalPages ก่อน render  → "หน้า X / Y" ฟรี
-//    • ทุกแถวสูงเท่ากัน (CSS clamp 2 บรรทัด) → นับแถวแม่น
-//    • footer ไม่ลอย = flexbox spacer + conditional class (ไม่ใช้ JS, ไม่มี race)
+//  Pagination is delegated to the Paged.js runtime in htmlpdf. This layer only
+//  maps business data into one natural HTML document flow.
 //
 //  ─── ASSUMPTIONS (map ให้ตรง struct จริงของคุณก่อนใช้) ──────────────────────
 //    • มี helper ระดับ package อยู่แล้ว:  money(float64) string, thaiDate(time.Time) string
@@ -39,10 +37,6 @@ import (
 	"pos-backend/internal/platform/doccopy"
 )
 
-// NOTE: GEOMETRY (§1) + PAGINATOR (§2) ย้ายไปไฟล์ pagination.go แล้ว
-// (geometry/rowsPerPage/buildGeometry/pageSlice/paginate/packRows + consts)
-// อยู่ package เดียวกัน — BuildDocumentView ด้านล่างเรียกใช้ได้ตามปกติ
-
 // =============================================================================
 //  3) DOC PROFILE — ความต่างตามชนิดเอกสาร (ตาราง §10.1)
 // =============================================================================
@@ -58,47 +52,6 @@ type docProfile struct {
 	SpecialLabel                                 string // ป้ายฟิลด์พิเศษหัวขวา ("" = ไม่มี)
 	ShowTerms                                    bool   // quotation terms block below the footer grid
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
-}
-
-// footerBlockH = ความสูงรวมของก้อนท้าย (summary + paybox + remarks + sig) ตาม profile/data
-func (p docProfile) footerBlockH(hasNotes bool) float64 {
-	rows := 3.0 // subtotal, VAT, grand total
-	if p.ShowDiscount {
-		rows++
-	}
-	if p.IsDelivery {
-		rows += 2 // ค่าจัดส่ง + ยอดก่อน VAT
-	}
-	summaryH := rows*hSumRow + hSumExtra
-
-	// .foot-grid lays the pay box and the summary SIDE BY SIDE (flexbox row), so the
-	// grid's height is the taller of the two — not their sum. Reserving the sum here
-	// double-counts the pay box and starves every page of rows.
-	gridH := summaryH
-	if p.ShowPayBox && hPayBox > gridH {
-		gridH = hPayBox
-	}
-	if !p.ShowPayBox && hRemarks > gridH {
-		// Non-payment documents place remarks beside the summary inside foot-grid.
-		// It must not be reserved again as a stacked block below the grid.
-		gridH = hRemarks
-	}
-
-	h := gridH
-	// กล่องหมายเหตุขึ้นเสมอ (เป็น form field สำหรับเขียน ไม่ผูกกับว่ามี Notes ไหม)
-	// เอกสารที่มี paybox วาง remarks เป็นกล่องแยกด้านล่าง; เอกสารอื่นวางไว้ใน grid แล้ว
-	_ = hasNotes
-	if p.ShowPayBox {
-		h += hRemarks
-	}
-	if p.IsDelivery {
-		h += 8 // baht-text row below the item table
-	}
-	if p.ShowTerms {
-		h += hTerms
-	}
-	h += hSigBlock // signatures stacked below remarks
-	return h
 }
 
 func profileFor(docType string) docProfile {
@@ -165,11 +118,8 @@ type itemView struct {
 }
 
 type pageView struct {
-	Items              []itemView
-	FillerRows         []struct{} // empty rows padding the grid to the page's row capacity
-	PageNo, TotalPages int
-	IsFirst, IsLast    bool
-	FooterOnly         bool // หน้าสุดท้ายที่มีแต่ footer/สรุปยอด (ไม่มีตารางสินค้า)
+	Items   []itemView
+	IsFirst bool
 }
 
 type summaryLine struct {
@@ -216,8 +166,7 @@ type renderView struct {
 	BillRows                                     []billRowView
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 	// pages
-	Pages        []pageView
-	IsSinglePage bool
+	Pages []pageView
 }
 
 // ---- helpers (เฉพาะไฟล์นี้) -------------------------------------------------
@@ -302,60 +251,33 @@ func buildSummary(d DocData, p docProfile) []summaryLine {
 // BuildDocumentView = mapping layer: DocData/StoreInfo → renderView (paginated)
 func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	p := profileFor(d.Type)
-	hasNotes := derefStr(d.Notes) != ""
-	g := buildGeometry(p, hasNotes)
 
-	slices := paginate(g, len(d.Items))
-	totalPages := len(slices)
-
-	// ความจุเชิงกายภาพต่อชนิดหน้า — ใช้ pad แถวเปล่า (ledger) ให้ตารางเต็มถึงล่าง/footer
-	// ทุกหน้าที่มีตาราง (รวมหน้าต่อเนื่อง) เพื่อไม่ให้เหลือ "ช่องว่างดิบ" ท้ายหน้า
-	capFL := g.rowsPerPage(g.headerFull, true)
-
-	pages := make([]pageView, 0, totalPages)
-	for idx, sl := range slices {
-		items := make([]itemView, 0, sl.End-sl.Start)
-		for j := sl.Start; j < sl.End; j++ {
-			it := d.Items[j]
-			hasDisc := p.ShowDiscount && it.DiscountValue > 0
-			disc := ""
-			if hasDisc {
-				disc = money(it.DiscountValue)
-			}
-			items = append(items, itemView{
-				No:          j + 1,
-				SKU:         it.SKU,
-				Desc:        it.Description,
-				DescEn:      it.DescriptionEn,
-				Unit:        it.Unit,
-				Qty:         fmtQty(it.Quantity),
-				UnitPrice:   money(it.UnitPrice),
-				Discount:    disc,
-				Amount:      money(it.Amount),
-				HasDiscount: hasDisc,
-			})
+	items := make([]itemView, 0, len(d.Items))
+	for j, it := range d.Items {
+		hasDisc := p.ShowDiscount && it.DiscountValue > 0
+		disc := ""
+		if hasDisc {
+			disc = money(it.DiscountValue)
 		}
-
-		// หน้าสุดท้ายที่ไม่มีสินค้า = footer-only (สินค้าเต็มอยู่หน้าก่อนหน้าแล้ว)
-		footerOnly := sl.IsLast && !sl.IsFirst && len(items) == 0
-
-		// เติม filler เฉพาะเอกสารหน้าเดียวเท่านั้น
-		// หน้าสุดท้ายของเอกสารหลายหน้าต้องเก็บพื้นที่ไว้สำหรับ footer/signature
-		// หากเติม filler จะดัน footer ไปหน้าใหม่และสร้างหน้าว่าง/หน้าล้นใน PDF.
-		fillerN := 0
-		if sl.IsLast && sl.IsFirst {
-			pageCap := capFL
-			if fillerN = pageCap - len(items); fillerN < 0 {
-				fillerN = 0
-			}
-		}
-
-		pages = append(pages, pageView{
-			Items: items, FillerRows: make([]struct{}, fillerN),
-			PageNo: idx + 1, TotalPages: totalPages,
-			IsFirst: sl.IsFirst, IsLast: sl.IsLast, FooterOnly: footerOnly,
+		items = append(items, itemView{
+			No:          j + 1,
+			SKU:         it.SKU,
+			Desc:        it.Description,
+			DescEn:      it.DescriptionEn,
+			Unit:        it.Unit,
+			Qty:         fmtQty(it.Quantity),
+			UnitPrice:   money(it.UnitPrice),
+			Discount:    disc,
+			Amount:      money(it.Amount),
+			HasDiscount: hasDisc,
 		})
 	}
+
+	// Paged.js owns physical pagination. The view model contains one natural
+	// document flow; CSS decides where rows and footer blocks fragment.
+	pages := []pageView{{
+		Items: items, IsFirst: true,
+	}}
 
 	banks := make([]bankView, 0, 1)
 	if p.ShowPayBox && len(store.BankAccounts) > 0 {
@@ -442,7 +364,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
 
-		Pages: pages, IsSinglePage: totalPages == 1,
+		Pages: pages,
 	}
 }
 
@@ -528,26 +450,30 @@ const unifiedDocHTML = `{{$root := .}}<!DOCTYPE html>
 <style>
 :root{ --row-h:7.5mm; --ink:#1a1a1a; --line:#bdbdbd; --muted:#666; }
 *{ margin:0; padding:0; box-sizing:border-box; }
-@page{ size:A4; margin:0; }
-body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11px; background:#eee; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+@page{
+  size:A4;
+  margin:20mm 12mm 16mm;
+}
+@page:first{
+  margin-top:12mm;
+}
+body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11px; background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 
-.page{ position:relative; width:210mm; min-height:297mm; padding:12mm 12mm 16mm; margin:0 auto 6mm; background:#fff; display:flex; flex-direction:column; page-break-after:always; }
-.page:last-child{ page-break-after:auto; margin-bottom:0; }
-/* copy-set: แต่ละ copy ใช้ .page เป็นตัวควบคุม page break เพียงจุดเดียว */
-.copy-break{ page-break-after:auto; }
-.copy-break:last-child{ page-break-after:auto; }
+/* One natural document flow. Paged.js fragments this flow into A4 pages. */
+.page{ width:auto; min-height:0; padding:0; margin:1rem; background:#fff; display:block; }
+.copy-break{ break-after:page; page-break-after:always; }
+.copy-break:last-child{ break-after:auto; page-break-after:auto; }
 @media screen{ .copy-break:not(:last-child){ margin-bottom:16mm; border-bottom:2px dashed #94a3b8; } }
-@media print{ body{background:#fff;} .page{ margin:0; box-shadow:none; } .copy-break{ display:contents; page-break-after:auto !important; } }
+@media print{ body{background:#fff;} .page{ margin:0; } .copy-break{ margin:0; } }
 
-/* ---- footer-pin: spacer พองเฉพาะ "หน้าเดียว" → ลายเซ็นติดล่าง A4 ---- */
-.doc-body{ flex:0 0 auto; }
-.doc-spacer{ flex:0 0 auto; }
-/* หน้าเดียว: spacer พอง → footer/ลายเซ็นถูกดันชิดล่าง A4.
-   หน้า footer-only: ไม่ดันลง — ให้ footer อยู่ "ด้านบน" ต่อจากหัวย่อเลย (ช่องว่างไปอยู่ล่าง) */
-.page.single .doc-spacer{ flex:1 1 auto; }
-.doc-footer{ flex:0 0 auto; }
+/* Compact header repeated by Paged.js on continuation pages. */
+/* ---- footer flow: no flex spacer or manual page reservation ---- */
+.doc-body{ flex:none; }
+.doc-spacer{ display:none; }
+.doc-footer{ margin-top:3mm; break-inside:avoid; page-break-inside:avoid; }
 
 /* ---- header เต็ม ---- */
+.hdr,.doc-info-row,.quotation-intro{ break-inside:avoid; page-break-inside:avoid; }
 .hdr{ display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:4mm; border-bottom:2px solid var(--ink); }
 .hdr-left{ display:flex; gap:3mm; align-items:flex-start; }
 .logo{ width:18mm; height:18mm; object-fit:contain; }
@@ -579,7 +505,7 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .party{ flex:1 1 auto; min-width:0; border:0; padding:0 3mm 2mm; line-height:1.5; }
 .combined-parties .section-body{ gap:.75mm; }
 .combined-parties .info-row{ line-height:1.35; }
-.header-section-title{ font-size:10px; font-weight:700; color:var(--ink); background:#f6f6f6; margin:0 -3mm 2mm; padding:1mm 3mm; line-height:1.5; border-bottom:1px solid var(--line); }
+.header-section-title{ font-size:10px; font-weight:700; color:var(--ink); background:#fff; margin:0 -3mm 2mm; padding:1mm 3mm; line-height:1.5; border-bottom:1px solid var(--line); }
 .section-body{ display:flex; flex-direction:column; gap:1mm; }
 .info-row{ display:flex; align-items:flex-start; gap:2mm; min-width:0; line-height:1.5; }
 .info-label{ flex:0 0 30mm; color:var(--muted); }
@@ -591,27 +517,37 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .delivery-section .info-row{ gap:1.5mm; line-height:1.2; }
 .delivery-section .info-label{ flex-basis:25mm; }
 .delivery-section .info-value{ line-height:1.2; }
-.termsrow{ font-size:10px; margin:2mm 0 0; padding:0; border:0; background:transparent; line-height:1.5; }
+.termsrow{ font-size:10px; margin:2mm 0 0; padding:0; border:0; background:#fff; line-height:1.5; }
 .terms-title{ font-weight:700; margin-bottom:0.5mm; }
-.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:0; background:#f6f6f6; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }
+.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:0; background:#fff; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }
 .baht-text-row span:first-child{ color:var(--muted); }
 .baht-text-row span:last-child{ margin-left:auto; text-align:right; font-size:13px; }
 
 /* ---- ตารางสินค้า: full grid + คอลัมน์กึ่งกลาง (desc ชิดซ้าย) ---- */
 .items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
-.items th{ background:var(--ink); color:#fff; border:1px solid #444; padding:1.6mm 2mm; font-size:10px; text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-.items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; overflow:hidden; }
-.items .desc{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.2; }
+.items th{ background:#fff; color:var(--ink); border:1px solid var(--line); padding:1.6mm 2mm; font-size:10px; text-align:center; }
+.items td{ border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:top; text-align:center; overflow-wrap:anywhere; }
+.items .desc{ display:block; overflow-wrap:anywhere; white-space:normal; line-height:1.2; }
 .items .desc .en{ color:var(--muted); font-size:10px; }
 .items .left{ text-align:left; } .items .num{ text-align:right; }
-.items tr.filler td{ height:var(--row-h); }
-.col-no{ width:9mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
+.items tr{ break-inside:avoid; page-break-inside:avoid; }
+.col-no{ width:11mm; } .col-qty{ width:16mm; } .col-unit{ width:14mm; } .col-price,.col-disc,.col-amt{ width:22mm; }
+.items[data-split-from]{ width:100% !important; table-layout:fixed !important; }
+.items[data-split-from] .col-no{ width:11mm !important; }
+.items[data-split-from] .col-qty{ width:16mm !important; }
+.items[data-split-from] .col-unit{ width:14mm !important; }
+.items[data-split-from] .col-price,.items[data-split-from] .col-disc,.items[data-split-from] .col-amt{ width:22mm !important; }
 .bill-items{ width:100%; border-collapse:collapse; table-layout:fixed; border:1.2px solid var(--ink); }
-.bill-items th{ background:var(--ink); color:#fff; border:1px solid #444; padding:2.2mm 2mm; font-size:10px; text-align:center; }
+.bill-items th{ background:#fff; color:var(--ink); border:1px solid var(--line); padding:2.2mm 2mm; font-size:10px; text-align:center; }
 .bill-items td{ height:var(--row-h); border:1px solid var(--line); padding:0.8mm 2mm; vertical-align:middle; text-align:center; }
 .bill-items .left{ text-align:left; } .bill-items .num{ text-align:right; }
 .bill-col-no{ width:14mm; } .bill-col-date{ width:38mm; } .bill-col-due{ width:38mm; } .bill-col-amount{ width:42mm; }
 tr{ break-inside:avoid; } thead{ display:table-header-group; }
+/* Paged.js 0.4.x hides cloned table headers by default; continuation tables
+   must expose the clone so the column legend remains visible on every page. */
+table[data-split-from] thead{ display:table-header-group; visibility:visible !important; opacity:1 !important; }
+table[data-split-from] thead tr{ display:table-row; visibility:visible !important; opacity:1 !important; }
+table[data-split-from] thead th{ display:table-cell; visibility:visible !important; opacity:1 !important; }
 
 /* ---- footer: summary + paybox + remarks + signatures ---- */
 .doc-footer{ margin-top:3mm; }
@@ -660,14 +596,13 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
 .sig-date-row{ display:flex; justify-content:center; align-items:baseline; gap:.8mm; font-size:8px; color:var(--muted); }
 .sig-date-seg{ width:8mm; border-bottom:1px solid var(--ink); position:relative; top:-1px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
+.pagedjs_page{ position:relative; }
+.pos-page-number{ position:absolute; right:12mm; bottom:8mm; color:var(--muted); font-size:9px; white-space:nowrap; }
 
-/* ---- page number: absolute ไม่กินพื้นที่ layout และไม่ล้นไปหน้าใหม่ ---- */
-.page-no{ position:absolute; top:6mm; right:12mm; bottom:auto; font-size:9px; color:var(--muted); white-space:nowrap; }
 </style></head>
 <body>
 {{range $pg := .Pages}}
-<div class="page{{if $root.IsSinglePage}} single{{end}}{{if $pg.FooterOnly}} footer-only{{end}}">
-
+<div class="page" data-copy-purpose="{{$root.Purpose}}">
   {{if $pg.IsFirst}}
   <header class="hdr">
     <div class="hdr-left">
@@ -730,7 +665,6 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </header>
   {{end}}
 
-  {{if not $pg.FooterOnly}}
   <div class="doc-body">
     {{if eq $root.TitleTH "ใบวางบิล"}}
     <table class="bill-items">
@@ -744,9 +678,6 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <tbody>
       {{range $row := $root.BillRows}}
         <tr><td>{{$row.No}}</td><td class="left">ใบส่งสินค้าเลขที่ {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td></tr>
-      {{end}}
-      {{range $pg.FillerRows}}
-        <tr class="filler"><td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td></tr>
       {{end}}
       </tbody>
     </table>
@@ -764,27 +695,21 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
       <tbody>
       {{range $it := $pg.Items}}
         <tr>
-          <td>{{$it.No}}</td>
-          <td class="left"><div class="desc">{{$it.Desc}}{{if $it.DescEn}}<br><span class="en">({{$it.DescEn}})</span>{{end}}</div></td>
-          <td>{{$it.Qty}}</td>
-          <td>{{$it.Unit}}</td>
-          <td class="num">{{$it.UnitPrice}}</td>
-          {{if $root.ShowDiscount}}<td class="num">{{if $it.HasDiscount}}{{$it.Discount}}{{else}}-{{end}}</td>{{end}}
-          <td class="num">{{$it.Amount}}</td>
-        </tr>
-      {{end}}
-      {{range $pg.FillerRows}}
-        <tr class="filler">
-          <td>&nbsp;</td><td class="left"></td><td></td><td></td><td class="num"></td>{{if $root.ShowDiscount}}<td class="num"></td>{{end}}<td class="num"></td>
+          <td class="col-no">{{$it.No}}</td>
+          <td class="col-desc left"><div class="desc">{{$it.Desc}}{{if $it.DescEn}}<br><span class="en">({{$it.DescEn}})</span>{{end}}</div></td>
+          <td class="col-qty">{{$it.Qty}}</td>
+          <td class="col-unit">{{$it.Unit}}</td>
+          <td class="col-price num">{{$it.UnitPrice}}</td>
+          {{if $root.ShowDiscount}}<td class="col-disc num">{{if $it.HasDiscount}}{{$it.Discount}}{{else}}-{{end}}</td>{{end}}
+          <td class="col-amt num">{{$it.Amount}}</td>
         </tr>
       {{end}}
       </tbody>
     </table>
     {{end}}
   </div>
-  {{end}}
 
-  {{if and $pg.IsLast (not $root.ShowPayBox)}}
+  {{if not $root.ShowPayBox}}
   <div class="remarks-summary-row">
     <div class="remarks remarks-under-table">
       <div class="rh">เงื่อนไขและหมายเหตุ (Terms & Remarks):</div>
@@ -805,11 +730,10 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
   </div>
   {{end}}
 
-  {{if and $pg.IsLast $root.BahtText}}<div class="baht-text-row"><span>จำนวนเงินตัวอักษร / Text:</span><span>({{$root.BahtText}})</span></div>{{end}}
+  {{if $root.BahtText}}<div class="baht-text-row"><span>จำนวนเงินตัวอักษร / Text:</span><span>({{$root.BahtText}})</span></div>{{end}}
 
   <div class="doc-spacer"></div>
 
-  {{if $pg.IsLast}}
   <footer class="doc-footer">
   {{if $root.ShowPayBox}}
   <div class="foot-grid">
@@ -861,9 +785,7 @@ tr{ break-inside:avoid; } thead{ display:table-header-group; }
     </div>
     {{end}}
   </footer>
-  {{end}}
 
-  <div class="page-no">หน้า {{$pg.PageNo}} / {{$pg.TotalPages}} · Page {{$pg.PageNo}} of {{$pg.TotalPages}}</div>
 </div>
 {{end}}
 </body></html>`

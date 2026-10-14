@@ -10,15 +10,64 @@ package htmlpdf
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"os"
 	goruntime "runtime"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
+
+// Paged.js 0.4.3 is vendored so PDF generation is deterministic and does not
+// depend on a CDN or network access at render time.
+//
+//go:embed assets/paged.polyfill.min.js
+var pagedPolyfill []byte
+
+func withPagedJS(html string) string {
+	config := `<script>window.PagedConfig={auto:false};</script>`
+	script := `<script>` + string(pagedPolyfill) + `</script>`
+	repeatHeaders := `<script>
+class PosRepeatTableHeaders extends Paged.Handler {
+  afterPageLayout(pageElement) {
+    pageElement.querySelectorAll("table[data-split-from]").forEach((table) => {
+      if (table.firstElementChild?.tagName === "THEAD") return;
+      const ref = table.dataset.ref;
+      const source = ref && this.chunker?.source?.querySelector("[data-ref='" + ref + "']");
+      const header = source?.querySelector("thead");
+      if (header) table.insertBefore(header.cloneNode(true), table.firstChild);
+    });
+  }
+}
+Paged.registerHandlers(PosRepeatTableHeaders);
+let posActiveCopy = "";
+let posCopyPage = 0;
+class PosCopyPageNumbers extends Paged.Handler {
+  afterPageLayout(pageElement) {
+    const marker = pageElement.querySelector("[data-copy-purpose]");
+    const copy = marker?.getAttribute("data-copy-purpose") || "";
+    if (copy && copy !== posActiveCopy) {
+      posActiveCopy = copy;
+      posCopyPage = 0;
+    }
+    posCopyPage += 1;
+    const label = document.createElement("div");
+    label.className = "pos-page-number";
+    label.textContent = "หน้า " + posCopyPage;
+    pageElement.appendChild(label);
+  }
+}
+Paged.registerHandlers(PosCopyPageNumbers);
+</script>`
+	if strings.Contains(html, "</head>") {
+		return strings.Replace(html, "</head>", config+script+repeatHeaders+"</head>", 1)
+	}
+	return config + script + repeatHeaders + html
+}
 
 func resolveExecPath() string {
 	if p := os.Getenv("CHROME_PATH"); p != "" {
@@ -59,7 +108,7 @@ func Render(parent context.Context, html string) ([]byte, error) {
 	ctx, cancelCtx := chromedp.NewContext(allocCtx)
 	defer cancelCtx()
 
-	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
 
 	var pdf []byte
@@ -71,7 +120,7 @@ func Render(parent context.Context, html string) ([]byte, error) {
 			if err != nil {
 				return err
 			}
-			return page.SetDocumentContent(tree.Frame.ID, html).Do(ctx)
+			return page.SetDocumentContent(tree.Frame.ID, withPagedJS(html)).Do(ctx)
 		}),
 		// Wait for all images (store logo, PromptPay QR) to finish loading. They are
 		// fetched over the network (e.g. MinIO), so printing immediately would drop
@@ -90,7 +139,19 @@ func Render(parent context.Context, html string) ([]byte, error) {
 				return p.WithAwaitPromise(true)
 			}).Do(ctx)
 		}),
-		// Give web fonts / layout a moment to settle before printing.
+		// Paged.js owns fragmentation. It repeats table headers, honors break-* rules,
+		// and creates physical pages from the natural content height.
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			var ready bool
+			return chromedp.Evaluate(`(async () => {
+				if (!window.PagedPolyfill) throw new Error("Paged.js failed to load");
+				await window.PagedPolyfill.preview();
+				return true;
+			})()`, &ready, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+				return p.WithAwaitPromise(true)
+			}).Do(ctx)
+		}),
+		// Give Paged.js and web fonts a moment to settle before printing.
 		chromedp.Sleep(250*time.Millisecond),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			buf, _, err := page.PrintToPDF().
