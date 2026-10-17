@@ -1275,6 +1275,9 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 		Where("source_document_id = ? AND type = ?", id, TypeDeliveryOrder).
 		Count(&doCount)
 	if doCount > 0 {
+		if err := s.markRelatedDocumentsPaid(ctx, storeID, id); err != nil {
+			return nil, err
+		}
 		src.Status = StatusCompleted
 		src.PaymentStatus = PaymentPaid
 		return src, nil
@@ -1289,7 +1292,35 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	}
 	taxDoc.Status = StatusCompleted
 	taxDoc.PaymentStatus = PaymentPaid
+	if err := s.markRelatedDocumentsPaid(ctx, storeID, id); err != nil {
+		return nil, err
+	}
 	return taxDoc, nil
+}
+
+// markRelatedDocumentsPaid keeps the entire document lineage consistent after
+// an invoice is settled. Payment is a family-level business event: an invoice
+// paid through a related delivery order must not leave the other linked
+// documents showing an unpaid or open state.
+func (s Service) markRelatedDocumentsPaid(ctx context.Context, storeID, id string) error {
+	related, err := s.RelatedDocuments(ctx, auth.Claims{}, storeID, id)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(related))
+	for _, doc := range related {
+		ids = append(ids, doc.ID)
+	}
+	if len(ids) == 0 {
+		ids = append(ids, id)
+	}
+	return s.db.WithContext(ctx).Model(&Document{}).
+		Where("store_id = ? AND id IN ?", storeID, ids).
+		Updates(map[string]any{
+			"status":         StatusCompleted,
+			"payment_status": PaymentPaid,
+			"updated_at":     time.Now(),
+		}).Error
 }
 
 // Convert creates a new document of targetType from an existing one, copying its

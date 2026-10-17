@@ -166,7 +166,8 @@ type renderView struct {
 	BillRows                                     []billRowView
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 	// pages
-	Pages []pageView
+	Pages     []pageView
+	ItemCount int
 }
 
 // ---- helpers (เฉพาะไฟล์นี้) -------------------------------------------------
@@ -364,7 +365,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
 
-		Pages: pages,
+		Pages: pages, ItemCount: len(items),
 	}
 }
 
@@ -467,10 +468,13 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 @media print{ body{background:#fff;} .page{ margin:0; } .copy-break{ margin:0; } }
 
 /* Compact header repeated by Paged.js on continuation pages. */
-/* ---- footer flow: no flex spacer or manual page reservation ---- */
+/* ---- footer flow: pin the complete ending block on short documents only ---- */
 .doc-body{ flex:none; }
 .doc-spacer{ display:none; }
+.doc-end{ margin-top:0; }
 .doc-footer{ margin-top:3mm; break-inside:avoid; page-break-inside:avoid; }
+.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"],.page[data-item-count="5"],.page[data-item-count="6"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }
+.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end,.page[data-item-count="5"] .doc-end,.page[data-item-count="6"] .doc-end{ margin-top:auto; }
 
 /* ---- header เต็ม ---- */
 .hdr,.doc-info-row,.quotation-intro{ break-inside:avoid; page-break-inside:avoid; }
@@ -602,7 +606,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 </style></head>
 <body>
 {{range $pg := .Pages}}
-<div class="page" data-copy-purpose="{{$root.Purpose}}">
+<div class="page" data-copy-purpose="{{$root.Purpose}}" data-item-count="{{$root.ItemCount}}">
   {{if $pg.IsFirst}}
   <header class="hdr">
     <div class="hdr-left">
@@ -709,6 +713,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
     {{end}}
   </div>
 
+  <div class="doc-end">
   {{if not $root.ShowPayBox}}
   <div class="remarks-summary-row">
     <div class="remarks remarks-under-table">
@@ -785,6 +790,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
     </div>
     {{end}}
   </footer>
+  </div>
 
 </div>
 {{end}}

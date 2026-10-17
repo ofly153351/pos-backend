@@ -183,6 +183,23 @@ func TestUnifiedRender_NonPaymentFooterUsesNaturalFlow(t *testing.T) {
 	}
 }
 
+func TestUnifiedRender_ShortDocumentsPinEndingBlockToBottom(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("RECEIPT", 3), StoreInfo{Name: "ร้าน"})
+	if err != nil {
+		t.Fatalf("render receipt: %v", err)
+	}
+	for _, marker := range []string{
+		`data-item-count="3"`,
+		`.doc-end{ margin-top:0; }`,
+		`.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"],.page[data-item-count="5"],.page[data-item-count="6"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }`,
+		`.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end,.page[data-item-count="5"] .doc-end,.page[data-item-count="6"] .doc-end{ margin-top:auto; }`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Fatalf("short-document footer pinning rule missing %q", marker)
+		}
+	}
+}
+
 func TestUnifiedRender_NonPaymentDocumentsUseRemarksWithoutPaymentBox(t *testing.T) {
 	for _, docType := range []string{"QUOTATION", "DELIVERY_ORDER", "RECEIPT", "TAX_INVOICE", "CREDIT_NOTE"} {
 		html, err := RenderUnifiedDocumentHTML(makeDoc(docType, 1), StoreInfo{Name: "ร้าน"})
