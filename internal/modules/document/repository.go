@@ -242,7 +242,7 @@ func typePrefix(t DocumentType) string {
 	case TypeTaxInvoice:
 		return "TAX"
 	case TypeQuotation:
-		return "QUO"
+		return "QT"
 	case TypeBill:
 		return "BILL"
 	case TypeCreditNote:
