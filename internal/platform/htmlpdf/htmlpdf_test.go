@@ -39,15 +39,15 @@ func TestWithPagedJSAddsPageNumbersAfterRendering(t *testing.T) {
 		"afterRendered(pages)",
 		"page.element || page",
 		"label.className = \"pos-page-number\"",
-		"label.textContent = \"หน้า \" + posCopyPage",
+		"label.textContent = posCopyPage + \"/\" + copyPages.length",
 	} {
 		if !strings.Contains(html, marker) {
 			t.Fatalf("page-number handler is missing %q", marker)
 		}
 	}
-	handlerStart := strings.Index(html, "class PosCopyPageNumbers")
-	if handlerStart < 0 || strings.Contains(html[handlerStart:], "afterPageLayout(pageElement)") {
-		t.Fatal("page numbers must be added after Paged.js finishes rendering")
+	preview := PreparePreview("<!doctype html><html><head></head><body></body></html>")
+	if !strings.Contains(preview, "window.__posPagedReady=") || !strings.Contains(preview, "return window.PagedPolyfill.preview();") {
+		t.Fatal("preview HTML must start Paged.js pagination")
 	}
 }
 

@@ -28,6 +28,15 @@ import (
 //go:embed assets/paged.polyfill.min.js
 var pagedPolyfill []byte
 
+func PreparePreview(html string) string {
+	prepared := withPagedJS(html)
+	previewScript := `<script>window.__posPagedReady=(async()=>{const imgs=Array.from(document.images);await Promise.all(imgs.map((img)=>img.complete?Promise.resolve():new Promise((resolve)=>{img.addEventListener("load",resolve,{once:true});img.addEventListener("error",resolve,{once:true});})));if(document.fonts?.ready)await document.fonts.ready;return window.PagedPolyfill.preview();})();</script>`
+	if strings.Contains(prepared, "</body>") {
+		return strings.Replace(prepared, "</body>", previewScript+"</body>", 1)
+	}
+	return prepared + previewScript
+}
+
 func withPagedJS(html string) string {
 	config := `<script>window.PagedConfig={auto:false};</script>`
 	script := `<script>` + string(pagedPolyfill) + `</script>`
@@ -48,6 +57,7 @@ let posActiveCopy = "";
 let posCopyPage = 0;
 class PosCopyPageNumbers extends Paged.Handler {
   afterRendered(pages) {
+    document.querySelectorAll(".screen-page-number").forEach((node) => node.remove());
     pages.forEach((page) => {
       const pageElement = page.element || page;
       if (pageElement.querySelector(".pos-page-number")) return;
@@ -58,9 +68,14 @@ class PosCopyPageNumbers extends Paged.Handler {
         posCopyPage = 0;
       }
       posCopyPage += 1;
+      const copyPages = pages.filter((candidate) => {
+        const candidateElement = candidate.element || candidate;
+        const candidateMarker = candidateElement.querySelector("[data-copy-purpose]");
+        return (candidateMarker?.getAttribute("data-copy-purpose") || "") === copy;
+      });
       const label = document.createElement("div");
       label.className = "pos-page-number";
-      label.textContent = "หน้า " + posCopyPage;
+      label.textContent = posCopyPage + "/" + copyPages.length;
       pageElement.appendChild(label);
     });
   }

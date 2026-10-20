@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"pos-backend/internal/middleware"
+	"pos-backend/internal/platform/htmlpdf"
 	"pos-backend/internal/platform/httpx"
 )
 
@@ -156,6 +157,7 @@ func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	if err != nil {
 		return writeError(c, err)
 	}
+	html = htmlpdf.PreparePreview(html)
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	c.Set("Cache-Control", "no-store")
 	return c.SendString(html)

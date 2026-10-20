@@ -461,7 +461,7 @@ const unifiedDocHTML = `{{$root := .}}<!DOCTYPE html>
 body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11px; background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 
 /* One natural document flow. Paged.js fragments this flow into A4 pages. */
-.page{ width:auto; min-height:0; padding:0; margin:1rem; background:#fff; display:block; }
+.page{ width:auto; min-height:0; padding:0; margin:1rem; background:#fff; display:block; position:relative; }
 .copy-break{ break-after:page; page-break-after:always; }
 .copy-break:last-child{ break-after:auto; page-break-after:auto; }
 @media screen{ .copy-break:not(:last-child){ margin-bottom:16mm; border-bottom:2px dashed #94a3b8; } }
@@ -523,7 +523,7 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .delivery-section .info-value{ line-height:1.2; }
 .termsrow{ font-size:10px; margin:2mm 0 0; padding:0; border:0; background:#fff; line-height:1.5; }
 .terms-title{ font-weight:700; margin-bottom:0.5mm; }
-.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:0; background:#fff; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }
+.baht-text-row{ display:flex; gap:2mm; margin:0; padding:1.5mm 3mm; border:1px solid var(--line); border-top:1px solid var(--line); background:#fff; font-size:13px; line-height:1.5; break-before:avoid; page-break-before:avoid; }
 .baht-text-row span:first-child{ color:var(--muted); }
 .baht-text-row span:last-child{ margin-left:auto; text-align:right; font-size:13px; }
 
@@ -601,12 +601,35 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 .sig-date-seg{ width:8mm; border-bottom:1px solid var(--ink); position:relative; top:-1px; }
 .summary,.signatures,.remarks,.paybox{ break-inside:avoid; }
 .pagedjs_page{ position:relative; }
-.pos-page-number{ position:absolute; right:12mm; bottom:8mm; color:var(--muted); font-size:9px; white-space:nowrap; }
+@media screen{
+  body{ background:#e2e8f0; }
+  .pagedjs_pages{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:16mm;
+    padding:8mm;
+    background:#e2e8f0;
+  }
+  .pagedjs_margin-bottom{ display:none !important; }
+  .pagedjs_page + .pagedjs_page .pagedjs_bleed-top{
+    display:block;
+    min-height:2mm;
+    background:#e2e8f0;
+    border-top:2px dashed #94a3b8;
+  }
+  .pagedjs_page{ flex:0 0 auto; background:#fff; box-shadow:0 2px 8px rgba(15,23,42,.16); }
+  .pagedjs_page:not(:last-child){ margin-bottom:16mm; }
+}
+.pos-page-number{ position:absolute; top:8mm; right:12mm; color:var(--muted); font-size:9px; white-space:nowrap; }
+.screen-page-number{ position:absolute; top:8mm; right:12mm; z-index:2; color:var(--muted); font-size:9px; white-space:nowrap; }
+@media print{ .screen-page-number{ display:none; } }
 
 </style></head>
 <body>
 {{range $pg := .Pages}}
 <div class="page" data-copy-purpose="{{$root.Purpose}}" data-item-count="{{$root.ItemCount}}">
+  <div class="screen-page-number">หน้า 1</div>
   {{if $pg.IsFirst}}
   <header class="hdr">
     <div class="hdr-left">
