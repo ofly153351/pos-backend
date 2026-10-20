@@ -3,6 +3,7 @@ package htmlpdf
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,25 @@ func TestRender_MultiPage(t *testing.T) {
 	}
 	if len(pdf) < 1000 {
 		t.Fatalf("PDF suspiciously small: %d bytes", len(pdf))
+	}
+}
+
+func TestWithPagedJSAddsPageNumbersAfterRendering(t *testing.T) {
+	html := withPagedJS("<!doctype html><html><head></head><body></body></html>")
+	for _, marker := range []string{
+		"class PosCopyPageNumbers extends Paged.Handler",
+		"afterRendered(pages)",
+		"page.element || page",
+		"label.className = \"pos-page-number\"",
+		"label.textContent = \"หน้า \" + posCopyPage",
+	} {
+		if !strings.Contains(html, marker) {
+			t.Fatalf("page-number handler is missing %q", marker)
+		}
+	}
+	handlerStart := strings.Index(html, "class PosCopyPageNumbers")
+	if handlerStart < 0 || strings.Contains(html[handlerStart:], "afterPageLayout(pageElement)") {
+		t.Fatal("page numbers must be added after Paged.js finishes rendering")
 	}
 }
 

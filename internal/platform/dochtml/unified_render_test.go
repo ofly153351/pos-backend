@@ -191,12 +191,15 @@ func TestUnifiedRender_ShortDocumentsPinEndingBlockToBottom(t *testing.T) {
 	for _, marker := range []string{
 		`data-item-count="3"`,
 		`.doc-end{ margin-top:0; }`,
-		`.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"],.page[data-item-count="5"],.page[data-item-count="6"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }`,
-		`.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end,.page[data-item-count="5"] .doc-end,.page[data-item-count="6"] .doc-end{ margin-top:auto; }`,
+		`.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }`,
+		`.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end{ margin-top:auto; }`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Fatalf("short-document footer pinning rule missing %q", marker)
 		}
+	}
+	if strings.Contains(html, `.page[data-item-count="5"]`) {
+		t.Fatal("five-row documents must keep the footer in natural flow")
 	}
 }
 

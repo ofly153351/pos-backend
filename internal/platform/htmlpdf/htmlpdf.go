@@ -47,18 +47,22 @@ Paged.registerHandlers(PosRepeatTableHeaders);
 let posActiveCopy = "";
 let posCopyPage = 0;
 class PosCopyPageNumbers extends Paged.Handler {
-  afterPageLayout(pageElement) {
-    const marker = pageElement.querySelector("[data-copy-purpose]");
-    const copy = marker?.getAttribute("data-copy-purpose") || "";
-    if (copy && copy !== posActiveCopy) {
-      posActiveCopy = copy;
-      posCopyPage = 0;
-    }
-    posCopyPage += 1;
-    const label = document.createElement("div");
-    label.className = "pos-page-number";
-    label.textContent = "หน้า " + posCopyPage;
-    pageElement.appendChild(label);
+  afterRendered(pages) {
+    pages.forEach((page) => {
+      const pageElement = page.element || page;
+      if (pageElement.querySelector(".pos-page-number")) return;
+      const marker = pageElement.querySelector("[data-copy-purpose]");
+      const copy = marker?.getAttribute("data-copy-purpose") || "";
+      if (copy && copy !== posActiveCopy) {
+        posActiveCopy = copy;
+        posCopyPage = 0;
+      }
+      posCopyPage += 1;
+      const label = document.createElement("div");
+      label.className = "pos-page-number";
+      label.textContent = "หน้า " + posCopyPage;
+      pageElement.appendChild(label);
+    });
   }
 }
 Paged.registerHandlers(PosCopyPageNumbers);
