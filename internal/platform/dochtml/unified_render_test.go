@@ -183,23 +183,21 @@ func TestUnifiedRender_NonPaymentFooterUsesNaturalFlow(t *testing.T) {
 	}
 }
 
-func TestUnifiedRender_ShortDocumentsPinEndingBlockToBottom(t *testing.T) {
+func TestUnifiedRender_EndingBlockStaysInNaturalFlow(t *testing.T) {
 	html, err := RenderUnifiedDocumentHTML(makeDoc("RECEIPT", 3), StoreInfo{Name: "ร้าน"})
 	if err != nil {
 		t.Fatalf("render receipt: %v", err)
 	}
-	for _, marker := range []string{
-		`data-item-count="3"`,
-		`.doc-end{ margin-top:0; }`,
+	if !strings.Contains(html, `data-item-count="3"`) || !strings.Contains(html, `.doc-end{ margin-top:0; }`) {
+		t.Fatal("document ending block must remain in normal flow")
+	}
+	for _, removed := range []string{
 		`.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }`,
 		`.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end{ margin-top:auto; }`,
 	} {
-		if !strings.Contains(html, marker) {
-			t.Fatalf("short-document footer pinning rule missing %q", marker)
+		if strings.Contains(html, removed) {
+			t.Fatalf("removed footer pinning rule still rendered: %q", removed)
 		}
-	}
-	if strings.Contains(html, `.page[data-item-count="5"]`) {
-		t.Fatal("five-row documents must keep the footer in natural flow")
 	}
 }
 

@@ -468,13 +468,11 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 @media print{ body{background:#fff;} .page{ margin:0; } .copy-break{ margin:0; } }
 
 /* Compact header repeated by Paged.js on continuation pages. */
-/* ---- footer flow: pin the complete ending block on short documents only ---- */
+/* ---- footer flow: keep the ending block in normal document flow ---- */
 .doc-body{ flex:none; }
 .doc-spacer{ display:none; }
 .doc-end{ margin-top:0; }
 .doc-footer{ margin-top:3mm; break-inside:avoid; page-break-inside:avoid; }
-.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }
-.page[data-item-count="1"] .doc-end,.page[data-item-count="2"] .doc-end,.page[data-item-count="3"] .doc-end,.page[data-item-count="4"] .doc-end{ margin-top:auto; }
 
 /* ---- header เต็ม ---- */
 .hdr,.doc-info-row,.quotation-intro{ break-inside:avoid; page-break-inside:avoid; }
