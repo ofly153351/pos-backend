@@ -370,7 +370,65 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CreatedBy:            actor.UserID,
 	}
 
-	return s.assignNumberAndInsert(doc)
+	created, err := s.assignNumberAndInsert(doc)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.linkBillDeliveryOrders(ctx, storeID, created, req.SourceDocumentIDs); err != nil {
+		_ = s.repo.Delete(created.ID)
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s Service) linkBillDeliveryOrders(ctx context.Context, storeID string, bill *Document, sourceIDs []string) error {
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+	if bill.Type != TypeBill {
+		return fmt.Errorf("source_document_ids are only valid for BILL: %w", ErrInvalidInput)
+	}
+
+	unique := make(map[string]struct{}, len(sourceIDs))
+	ids := make([]string, 0, len(sourceIDs))
+	for _, id := range sourceIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return fmt.Errorf("source_document_ids contains an empty id: %w", ErrInvalidInput)
+		}
+		if _, exists := unique[id]; exists {
+			continue
+		}
+		unique[id] = struct{}{}
+		ids = append(ids, id)
+	}
+
+	var deliveryOrders []Document
+	if err := s.db.WithContext(ctx).
+		Where("store_id = ? AND type = ? AND id IN ?", storeID, TypeDeliveryOrder, ids).
+		Find(&deliveryOrders).Error; err != nil {
+		return err
+	}
+	if len(deliveryOrders) != len(ids) {
+		return fmt.Errorf("one or more delivery orders were not found: %w", ErrInvalidInput)
+	}
+	for _, deliveryOrder := range deliveryOrders {
+		if deliveryOrder.CustomerID != bill.CustomerID {
+			return fmt.Errorf("delivery order customer does not match BILL customer: %w", ErrInvalidInput)
+		}
+	}
+
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, deliveryOrderID := range ids {
+			if err := tx.Create(&BillDeliveryOrderLink{
+				BillDocumentID:  bill.ID,
+				DeliveryOrderID: deliveryOrderID,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // assignNumberAndInsert stamps doc with the next per-store/per-type document number
@@ -1138,9 +1196,12 @@ func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeI
 	frontier := []string{root}
 	for len(frontier) > 0 && len(family) < 200 {
 		var kids []string
-		s.db.WithContext(ctx).Model(&Document{}).
-			Where("store_id = ? AND source_document_id IN ?", storeID, frontier).
-			Pluck("id", &kids)
+		var linked []string
+		s.db.WithContext(ctx).Table("bill_delivery_order_links").
+			Select("CASE WHEN bill_document_id IN ? THEN delivery_order_id ELSE bill_document_id END AS id", frontier).
+			Where("bill_document_id IN ? OR delivery_order_id IN ?", frontier, frontier).
+			Pluck("id", &linked)
+		kids = append(kids, linked...)
 		next := kids[:0:0]
 		for _, k := range kids {
 			if !inFamily[k] {

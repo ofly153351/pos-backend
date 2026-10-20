@@ -118,6 +118,14 @@ type DocumentRevision struct {
 
 func (DocumentRevision) TableName() string { return "document_revisions" }
 
+type BillDeliveryOrderLink struct {
+	BillDocumentID  string    `gorm:"primaryKey;type:varchar(30)" json:"bill_document_id"`
+	DeliveryOrderID string    `gorm:"primaryKey;type:varchar(30)" json:"delivery_order_id"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+func (BillDeliveryOrderLink) TableName() string { return "bill_delivery_order_links" }
+
 type ReceiptSettlement struct {
 	ID                string    `gorm:"primaryKey;type:varchar(30)" json:"id"`
 	ReceiptDocumentID string    `gorm:"not null;index" json:"receipt_document_id"`

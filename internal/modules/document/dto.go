@@ -25,6 +25,7 @@ type CreateDocumentRequest struct {
 	SalespersonName         string                    `json:"salesperson_name"`
 	InvoiceRefNo            string                    `json:"invoice_ref_no"`
 	SourceDocumentID        *string                   `json:"source_document_id,omitempty"`
+	SourceDocumentIDs       []string                  `json:"source_document_ids,omitempty"`
 	BankAccountID           *string                   `json:"bank_account_id,omitempty"`
 	PORefNo                 string                    `json:"po_ref_no"`
 	ShippingFee             float64                   `json:"shipping_fee"`
