@@ -102,51 +102,51 @@ step "หยุด process เดิม (ถ้ามี)"
 pm2 stop all 2>/dev/null && pm2 delete all 2>/dev/null || true
 ok "ล้าง PM2 แล้ว"
 
-# ── 2. Docker — PostgreSQL + MinIO ──────────────────────────────────────────
-step "Docker (PostgreSQL + MinIO)"
+# ── 2. Docker — PostgreSQL + RustFS ──────────────────────────────────────────
+step "Docker (PostgreSQL + RustFS)"
 cd "$BACKEND_DIR"
 
 docker_failure() {
   local message="$1"
   echo ""
   warn "$message"
-  info "docker compose ps postgres minio"
-  docker compose ps postgres minio
-  info "docker compose logs --tail=100 postgres minio"
-  docker compose logs --tail=100 postgres minio
+  info "docker compose ps postgres rustfs"
+  docker compose ps postgres rustfs
+  info "docker compose logs --tail=100 postgres rustfs"
+  docker compose logs --tail=100 postgres rustfs
   die "$message"
 }
 
-info "Pulling PostgreSQL and MinIO images..."
-if ! docker compose pull postgres minio; then
-  warn "ไม่สามารถ pull image ใหม่ของ PostgreSQL หรือ MinIO ได้"
+info "Pulling PostgreSQL and RustFS images..."
+if ! docker compose pull postgres rustfs; then
+  warn "ไม่สามารถ pull image ใหม่ของ PostgreSQL หรือ RustFS ได้"
   warn "ตรวจสอบว่ามี container เดิมที่ healthy และใช้ image ในเครื่องได้หรือไม่"
 
   postgres_running="$(docker compose ps --status running -q postgres 2>/dev/null || true)"
-  minio_running="$(docker compose ps --status running -q minio 2>/dev/null || true)"
+  rustfs_running="$(docker compose ps --status running -q rustfs 2>/dev/null || true)"
   postgres_ready=false
-  minio_ready=false
+  rustfs_ready=false
   if [[ -n "$postgres_running" ]] && docker compose exec -T postgres \
       pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" &>/dev/null; then
     postgres_ready=true
   fi
-  if [[ -n "$minio_running" ]] && curl -sf "http://localhost:${MINIO_API_PORT:-9000}/minio/health/live" &>/dev/null; then
-    minio_ready=true
+  if [[ -n "$rustfs_running" ]] && curl -sf "http://localhost:${RUSTFS_API_PORT:-9000}/health" &>/dev/null; then
+    rustfs_ready=true
   fi
 
-  if [[ "$postgres_ready" != true || "$minio_ready" != true ]]; then
-    docker_failure "pull ล้มเหลวและไม่มี PostgreSQL/MinIO เดิมที่พร้อมใช้งาน"
+  if [[ "$postgres_ready" != true || "$rustfs_ready" != true ]]; then
+    docker_failure "pull ล้มเหลวและไม่มี PostgreSQL/RustFS เดิมที่พร้อมใช้งาน"
   fi
-  warn "ใช้ PostgreSQL และ MinIO container เดิมต่อ เพราะ services ยัง healthy"
+  warn "ใช้ PostgreSQL และ RustFS container เดิมต่อ เพราะ services ยัง healthy"
 fi
 
-info "Starting PostgreSQL and MinIO..."
-if ! docker compose up -d postgres minio; then
-  docker_failure "ไม่สามารถ start PostgreSQL หรือ MinIO ได้"
+info "Starting PostgreSQL and RustFS..."
+if ! docker compose up -d postgres rustfs; then
+  docker_failure "ไม่สามารถ start PostgreSQL หรือ RustFS ได้"
 fi
 
 info "ตรวจสถานะ containers หลัง startup..."
-docker compose ps postgres minio
+docker compose ps postgres rustfs
 
 info "รอ PostgreSQL ready..."
 local_attempts=0
@@ -160,34 +160,20 @@ until docker compose exec -T postgres \
 done
 ok "PostgreSQL ready"
 
-info "รอ MinIO healthy..."
+info "รอ RustFS healthy..."
 local_attempts=0
-until curl -sf "http://localhost:${MINIO_API_PORT:-9000}/minio/health/live" &>/dev/null; do
+until curl -sf "http://localhost:${RUSTFS_API_PORT:-9000}/health" &>/dev/null; do
   local_attempts=$((local_attempts + 1))
   if [[ $local_attempts -gt 30 ]]; then
-    docker_failure "MinIO ไม่ตอบสนองหรือยังไม่ healthy"
+    docker_failure "RustFS ไม่ตอบสนองหรือยังไม่ healthy"
   fi
   sleep 1
 done
-ok "MinIO ready"
+ok "RustFS ready"
 
-docker compose ps postgres minio
+docker compose ps postgres rustfs
 
-# minio-client only initializes the bucket; it is not a runtime dependency.
-# Do not let an unavailable/broken mc image take down PostgreSQL or MinIO.
-MC_IMAGE=$(docker compose config --images | awk '/\/mc:/ { print; exit }')
-if [[ -n "$MC_IMAGE" ]] && docker compose pull minio-client; then
-  info "Starting optional MinIO bucket initializer (mc)..."
-  if docker compose up -d minio-client; then
-    ok "MinIO bucket initializer started"
-  else
-    warn "ข้าม MinIO bucket initializer (mc) — PostgreSQL และ MinIO ยังทำงานต่อ"
-    warn "ตรวจสอบภายหลังด้วย: docker compose logs --tail=100 minio-client"
-  fi
-else
-  warn "ไม่สามารถ pull image ${MC_IMAGE:-minio/mc} — ข้าม bucket initializer (mc)"
-  warn "PostgreSQL และ MinIO ยังทำงานต่อ; ตรวจสอบ bucket initialization ตาม deployment policy"
-fi
+# RustFS creates the bucket and applies its public-read policy on first upload.
 
 # ── 2.5 Restored-DB guard: empty schema_migrations ledger ─────────────────
 # A DB restored from a dump has an EMPTY schema_migrations ledger, so the
@@ -354,11 +340,11 @@ else
   warn "Frontend ยังไม่ตอบ — ดู: pm2 logs pos-frontend"
 fi
 
-# minio
-if curl -sf "http://localhost:9000/minio/health/live" &>/dev/null; then
-  ok "MinIO    http://localhost:9000"
+# rustfs
+if curl -sf "http://localhost:9000/health" &>/dev/null; then
+  ok "RustFS    http://localhost:9000"
 else
-  warn "MinIO ยังไม่ตอบ"
+  warn "RustFS ยังไม่ตอบ"
 fi
 
 sleep 2
@@ -374,10 +360,10 @@ else
   warn "Public backend ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
 fi
 
-if curl -sf "https://${MEDIA_HOST}/minio/health/live" &>/dev/null; then
-  ok "Public MinIO    https://${MEDIA_HOST}"
+if curl -sf "https://${MEDIA_HOST}/health" &>/dev/null; then
+  ok "Public RustFS    https://${MEDIA_HOST}"
 else
-  warn "Public MinIO ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
+  warn "Public RustFS ยังไม่ตอบ (tunnel อาจยังกำลัง connect)"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
@@ -389,7 +375,7 @@ echo ""
 echo "  Public URLs:"
 echo "    Frontend  →  https://${FE_HOST}"
 echo "    Backend   →  https://${BE_HOST}"
-echo "    MinIO     →  https://${MEDIA_HOST}"
+echo "    RustFS     →  https://${MEDIA_HOST}"
 echo ""
 echo "  Default login:"
 echo "    owner@pos.dev   / Owner1234!"

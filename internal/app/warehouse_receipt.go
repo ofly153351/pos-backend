@@ -10,13 +10,13 @@ import (
 
 func newWarehouseReceiptHandler(cfg config.Config, db *gorm.DB) warehouse_receipt.Handler {
 	repo := warehouse_receipt.NewPostgresRepository(db)
-	storage := warehouse_receipt.NewMinIOAttachmentStorage(
-		cfg.MinIOEndpoint,
-		cfg.MinIOAccessKey,
-		cfg.MinIOSecretKey,
-		cfg.MinIOBucketName,
-		cfg.MinIOUseSSL,
-		cfg.MinIOPublicURL,
+	storage := warehouse_receipt.NewRustFSAttachmentStorage(
+		cfg.RustFSEndpoint,
+		cfg.RustFSAccessKey,
+		cfg.RustFSSecretKey,
+		cfg.RustFSBucketName,
+		cfg.RustFSUseSSL,
+		cfg.RustFSPublicURL,
 	)
 	service := warehouse_receipt.NewService(repo, db, storage)
 	return warehouse_receipt.NewHandler(service)

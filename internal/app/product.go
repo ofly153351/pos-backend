@@ -10,13 +10,13 @@ import (
 
 func newProductHandler(cfg config.Config, db *gorm.DB) product.Handler {
 	repo := product.NewPostgresRepository(db)
-	storage := product.NewMinIOImageStorage(
-		cfg.MinIOEndpoint,
-		cfg.MinIOAccessKey,
-		cfg.MinIOSecretKey,
-		cfg.MinIOBucketName,
-		cfg.MinIOUseSSL,
-		cfg.MinIOPublicURL,
+	storage := product.NewRustFSImageStorage(
+		cfg.RustFSEndpoint,
+		cfg.RustFSAccessKey,
+		cfg.RustFSSecretKey,
+		cfg.RustFSBucketName,
+		cfg.RustFSUseSSL,
+		cfg.RustFSPublicURL,
 	)
 	service := product.NewService(repo, storage, db)
 	return product.NewHandler(service)

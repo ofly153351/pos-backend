@@ -10,8 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/minio/minio-go/v7"
+	s3client "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"pos-backend/internal/platform/rustfs"
 )
 
 type AttachmentStorage interface {
@@ -32,26 +33,26 @@ func (NoopAttachmentStorage) SaveAttachmentBytes(fileName, mimeType string, data
 
 func (NoopAttachmentStorage) DeleteByURL(url string) error { return nil }
 
-type MinIOAttachmentStorage struct {
-	client    *minio.Client
+type RustFSAttachmentStorage struct {
+	client    *s3client.Client
 	bucket    string
 	publicURL string
 	once      sync.Once
 	onceErr   error
 }
 
-func NewMinIOAttachmentStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *MinIOAttachmentStorage {
-	client, err := minio.New(endpoint, &minio.Options{
+func NewRustFSAttachmentStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *RustFSAttachmentStorage {
+	client, err := s3client.New(endpoint, &s3client.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
 	if err != nil {
 		panic(err)
 	}
-	return &MinIOAttachmentStorage{client: client, bucket: bucket, publicURL: strings.TrimRight(publicURL, "/")}
+	return &RustFSAttachmentStorage{client: client, bucket: bucket, publicURL: strings.TrimRight(publicURL, "/")}
 }
 
-func (s *MinIOAttachmentStorage) SaveAttachment(file *multipart.FileHeader) (string, string, string, int64, error) {
+func (s *RustFSAttachmentStorage) SaveAttachment(file *multipart.FileHeader) (string, string, string, int64, error) {
 	meta, err := validateAttachmentFile(file)
 	if err != nil {
 		return "", "", "", 0, err
@@ -72,7 +73,7 @@ func (s *MinIOAttachmentStorage) SaveAttachment(file *multipart.FileHeader) (str
 	return url, meta.MimeType, meta.Name, meta.Size, nil
 }
 
-func (s *MinIOAttachmentStorage) SaveAttachmentBytes(fileName, mimeType string, data []byte) (string, error) {
+func (s *RustFSAttachmentStorage) SaveAttachmentBytes(fileName, mimeType string, data []byte) (string, error) {
 	meta, err := validateAttachmentPayload(fileName, mimeType, int64(len(data)))
 	if err != nil {
 		return "", err
@@ -81,13 +82,13 @@ func (s *MinIOAttachmentStorage) SaveAttachmentBytes(fileName, mimeType string, 
 		return "", err
 	}
 	objectName := fmt.Sprintf("warehouse-receipts/%s%s", newAttachmentToken(), meta.Ext)
-	if _, err := s.client.PutObject(context.Background(), s.bucket, objectName, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: meta.MimeType}); err != nil {
+	if _, err := s.client.PutObject(context.Background(), s.bucket, objectName, bytes.NewReader(data), int64(len(data)), s3client.PutObjectOptions{ContentType: meta.MimeType}); err != nil {
 		return "", err
 	}
 	return s.publicURL + "/" + s.bucket + "/" + objectName, nil
 }
 
-func (s *MinIOAttachmentStorage) DeleteByURL(url string) error {
+func (s *RustFSAttachmentStorage) DeleteByURL(url string) error {
 	prefix := s.publicURL + "/" + s.bucket + "/"
 	if !strings.HasPrefix(url, prefix) {
 		return nil
@@ -96,7 +97,7 @@ func (s *MinIOAttachmentStorage) DeleteByURL(url string) error {
 	if strings.TrimSpace(objectName) == "" {
 		return nil
 	}
-	return s.client.RemoveObject(context.Background(), s.bucket, objectName, minio.RemoveObjectOptions{})
+	return s.client.RemoveObject(context.Background(), s.bucket, objectName, s3client.RemoveObjectOptions{})
 }
 
 type attachmentMeta struct {
@@ -150,17 +151,9 @@ func validateAttachmentPayload(fileName, mimeType string, size int64) (attachmen
 	return attachmentMeta{Name: name, MimeType: contentType, Size: size, Ext: ext}, nil
 }
 
-func (s *MinIOAttachmentStorage) ensureBucket(ctx context.Context) error {
+func (s *RustFSAttachmentStorage) ensureBucket(ctx context.Context) error {
 	s.once.Do(func() {
-		exists, err := s.client.BucketExists(ctx, s.bucket)
-		if err != nil {
-			s.onceErr = err
-			return
-		}
-		if exists {
-			return
-		}
-		s.onceErr = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{})
+		s.onceErr = rustfs.EnsurePublicBucket(ctx, s.client, s.bucket)
 	})
 	return s.onceErr
 }

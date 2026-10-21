@@ -142,7 +142,7 @@ func Render(parent context.Context, html string) ([]byte, error) {
 			return page.SetDocumentContent(tree.Frame.ID, withPagedJS(html)).Do(ctx)
 		}),
 		// Wait for all images (store logo, PromptPay QR) to finish loading. They are
-		// fetched over the network (e.g. MinIO), so printing immediately would drop
+		// fetched over the network (e.g. RustFS), so printing immediately would drop
 		// them — the logo/QR would be missing from the PDF. Resolves on load OR error,
 		// with a 5s safety cap so an unreachable asset can never hang the render.
 		chromedp.ActionFunc(func(ctx context.Context) error {

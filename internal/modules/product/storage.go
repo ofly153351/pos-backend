@@ -13,8 +13,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/minio/minio-go/v7"
+	s3client "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"pos-backend/internal/platform/rustfs"
 )
 
 type ImageStorage interface {
@@ -27,8 +28,8 @@ type LocalImageStorage struct {
 	publicBasePath string
 }
 
-type MinIOImageStorage struct {
-	client    *minio.Client
+type RustFSImageStorage struct {
+	client    *s3client.Client
 	bucket    string
 	publicURL string
 	once      sync.Once
@@ -42,8 +43,8 @@ func NewLocalImageStorage(baseDir, publicBasePath string) LocalImageStorage {
 	}
 }
 
-func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *MinIOImageStorage {
-	client, err := minio.New(endpoint, &minio.Options{
+func NewRustFSImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *RustFSImageStorage {
+	client, err := s3client.New(endpoint, &s3client.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
@@ -51,7 +52,7 @@ func NewMinIOImageStorage(endpoint, accessKey, secretKey, bucket string, useSSL 
 		panic(err)
 	}
 
-	return &MinIOImageStorage{
+	return &RustFSImageStorage{
 		client:    client,
 		bucket:    bucket,
 		publicURL: strings.TrimRight(publicURL, "/"),
@@ -95,7 +96,7 @@ func (s LocalImageStorage) SaveProductImage(file *multipart.FileHeader) (string,
 	return strings.TrimRight(s.publicBasePath, "/") + "/products/" + filename, nil
 }
 
-func (s *MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string, error) {
+func (s *RustFSImageStorage) SaveProductImage(file *multipart.FileHeader) (string, error) {
 	if file == nil {
 		return "", nil
 	}
@@ -127,7 +128,7 @@ func (s *MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string
 		filename,
 		src,
 		file.Size,
-		minio.PutObjectOptions{ContentType: contentType},
+		s3client.PutObjectOptions{ContentType: contentType},
 	)
 	if err != nil {
 		return "", err
@@ -136,17 +137,9 @@ func (s *MinIOImageStorage) SaveProductImage(file *multipart.FileHeader) (string
 	return s.publicURL + "/" + s.bucket + "/" + filename, nil
 }
 
-func (s *MinIOImageStorage) ensureBucket(ctx context.Context) error {
+func (s *RustFSImageStorage) ensureBucket(ctx context.Context) error {
 	s.once.Do(func() {
-		exists, err := s.client.BucketExists(ctx, s.bucket)
-		if err != nil {
-			s.onceErr = err
-			return
-		}
-		if exists {
-			return
-		}
-		s.onceErr = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{})
+		s.onceErr = rustfs.EnsurePublicBucket(ctx, s.client, s.bucket)
 	})
 	return s.onceErr
 }
@@ -168,12 +161,12 @@ func (s LocalImageStorage) DeleteProductImage(imageURL string) error {
 	return nil
 }
 
-func (s *MinIOImageStorage) DeleteProductImage(imageURL string) error {
+func (s *RustFSImageStorage) DeleteProductImage(imageURL string) error {
 	objectPath, ok := safeAssetPath(imageURL, s.publicURL+"/"+s.bucket, "products")
 	if !ok {
 		return nil
 	}
-	return s.client.RemoveObject(context.Background(), s.bucket, objectPath, minio.RemoveObjectOptions{})
+	return s.client.RemoveObject(context.Background(), s.bucket, objectPath, s3client.RemoveObjectOptions{})
 }
 
 func safeAssetPath(rawURL, publicBasePath, assetDir string) (string, bool) {

@@ -27,12 +27,12 @@ type Config struct {
 	AutoMigrate      bool
 	MigrationsDir    string
 	UploadDir        string
-	MinIOEndpoint    string
-	MinIOAccessKey   string
-	MinIOSecretKey   string
-	MinIOBucketName  string
-	MinIOUseSSL      bool
-	MinIOPublicURL   string
+	RustFSEndpoint   string
+	RustFSAccessKey  string
+	RustFSSecretKey  string
+	RustFSBucketName string
+	RustFSUseSSL     bool
+	RustFSPublicURL  string
 }
 
 var dotenvOnce sync.Once
@@ -62,12 +62,12 @@ func Load() Config {
 		AutoMigrate:      getEnvBool("APP_AUTO_MIGRATE", true),
 		MigrationsDir:    getEnv("APP_MIGRATIONS_DIR", "init-db"),
 		UploadDir:        getEnv("APP_UPLOAD_DIR", "storage"),
-		MinIOEndpoint:    getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
-		MinIOAccessKey:   firstEnv("MINIO_ACCESS_KEY", "MINIO_ROOT_USER", "minioadmin"),
-		MinIOSecretKey:   firstEnv("MINIO_SECRET_KEY", "MINIO_ROOT_PASSWORD", "change-me"),
-		MinIOBucketName:  getEnv("MINIO_BUCKET_NAME", "pos-assets"),
-		MinIOUseSSL:      getEnvBool("MINIO_USE_SSL", false),
-		MinIOPublicURL:   getEnv("MINIO_PUBLIC_URL", "http://127.0.0.1:9000"),
+		RustFSEndpoint:   getEnv("RUSTFS_ENDPOINT", "127.0.0.1:9000"),
+		RustFSAccessKey:  firstEnv("RUSTFS_ACCESS_KEY", "RUSTFS_ROOT_USER", "rustfsadmin"),
+		RustFSSecretKey:  firstEnv("RUSTFS_SECRET_KEY", "RUSTFS_ROOT_PASSWORD", "change-me"),
+		RustFSBucketName: getEnv("RUSTFS_BUCKET_NAME", "pos-assets"),
+		RustFSUseSSL:     getEnvBool("RUSTFS_USE_SSL", false),
+		RustFSPublicURL:  getEnv("RUSTFS_PUBLIC_URL", "http://127.0.0.1:9000"),
 	}
 }
 

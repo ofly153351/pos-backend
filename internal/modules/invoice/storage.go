@@ -8,8 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/minio/minio-go/v7"
+	s3client "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"pos-backend/internal/platform/rustfs"
 )
 
 const maxProofFileSize = 10 * 1024 * 1024 // 10MB
@@ -24,16 +25,16 @@ func (NoopPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) (str
 	return "", "", "", nil
 }
 
-type MinIOPaymentProofStorage struct {
-	client    *minio.Client
+type RustFSPaymentProofStorage struct {
+	client    *s3client.Client
 	bucket    string
 	publicURL string
 	once      sync.Once
 	onceErr   error
 }
 
-func NewMinIOPaymentProofStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *MinIOPaymentProofStorage {
-	client, err := minio.New(endpoint, &minio.Options{
+func NewRustFSPaymentProofStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) *RustFSPaymentProofStorage {
+	client, err := s3client.New(endpoint, &s3client.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
@@ -41,14 +42,14 @@ func NewMinIOPaymentProofStorage(endpoint, accessKey, secretKey, bucket string, 
 		panic(err)
 	}
 
-	return &MinIOPaymentProofStorage{
+	return &RustFSPaymentProofStorage{
 		client:    client,
 		bucket:    bucket,
 		publicURL: strings.TrimRight(publicURL, "/"),
 	}
 }
 
-func (s *MinIOPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) (string, string, string, error) {
+func (s *RustFSPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) (string, string, string, error) {
 	if file == nil {
 		return "", "", "", nil
 	}
@@ -85,7 +86,7 @@ func (s *MinIOPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) 
 		objectName,
 		src,
 		file.Size,
-		minio.PutObjectOptions{ContentType: contentType},
+		s3client.PutObjectOptions{ContentType: contentType},
 	)
 	if err != nil {
 		return "", "", "", err
@@ -94,17 +95,9 @@ func (s *MinIOPaymentProofStorage) SavePaymentProof(file *multipart.FileHeader) 
 	return s.publicURL + "/" + s.bucket + "/" + objectName, contentType, strings.TrimSpace(file.Filename), nil
 }
 
-func (s *MinIOPaymentProofStorage) ensureBucket(ctx context.Context) error {
+func (s *RustFSPaymentProofStorage) ensureBucket(ctx context.Context) error {
 	s.once.Do(func() {
-		exists, err := s.client.BucketExists(ctx, s.bucket)
-		if err != nil {
-			s.onceErr = err
-			return
-		}
-		if exists {
-			return
-		}
-		s.onceErr = s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{})
+		s.onceErr = rustfs.EnsurePublicBucket(ctx, s.client, s.bucket)
 	})
 	return s.onceErr
 }

@@ -10,13 +10,13 @@ import (
 
 func newPurchasingHandler(cfg config.Config, db *gorm.DB) purchasing.Handler {
 	repo := purchasing.NewPostgresRepository(db)
-	storage := purchasing.NewMinIOSupplierLogoStorage(
-		cfg.MinIOEndpoint,
-		cfg.MinIOAccessKey,
-		cfg.MinIOSecretKey,
-		cfg.MinIOBucketName,
-		cfg.MinIOUseSSL,
-		cfg.MinIOPublicURL,
+	storage := purchasing.NewRustFSSupplierLogoStorage(
+		cfg.RustFSEndpoint,
+		cfg.RustFSAccessKey,
+		cfg.RustFSSecretKey,
+		cfg.RustFSBucketName,
+		cfg.RustFSUseSSL,
+		cfg.RustFSPublicURL,
 	)
 	service := purchasing.NewService(repo, db, storage)
 	return purchasing.NewHandler(service)

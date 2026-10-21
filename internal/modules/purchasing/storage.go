@@ -27,6 +27,6 @@ func NewLocalSupplierLogoStorage(baseDir, publicBasePath string) SupplierLogoSto
 	return supplierLogoAdapter{inner: pkgstorage.NewLocalLogoStorage(baseDir, publicBasePath, "supplier-logos")}
 }
 
-func NewMinIOSupplierLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) SupplierLogoStorage {
-	return supplierLogoAdapter{inner: pkgstorage.NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket, useSSL, publicURL, "supplier-logos")}
+func NewRustFSSupplierLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) SupplierLogoStorage {
+	return supplierLogoAdapter{inner: pkgstorage.NewRustFSLogoStorage(endpoint, accessKey, secretKey, bucket, useSSL, publicURL, "supplier-logos")}
 }

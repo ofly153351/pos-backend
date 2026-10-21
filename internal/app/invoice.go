@@ -12,13 +12,13 @@ import (
 func newInvoiceHandler(cfg config.Config, db *gorm.DB) invoice.Handler {
 	repo := invoice.NewPostgresRepository(db)
 	customerRepo := customer.NewPostgresRepository(db)
-	storage := invoice.NewMinIOPaymentProofStorage(
-		cfg.MinIOEndpoint,
-		cfg.MinIOAccessKey,
-		cfg.MinIOSecretKey,
-		cfg.MinIOBucketName,
-		cfg.MinIOUseSSL,
-		cfg.MinIOPublicURL,
+	storage := invoice.NewRustFSPaymentProofStorage(
+		cfg.RustFSEndpoint,
+		cfg.RustFSAccessKey,
+		cfg.RustFSSecretKey,
+		cfg.RustFSBucketName,
+		cfg.RustFSUseSSL,
+		cfg.RustFSPublicURL,
 	)
 	service := invoice.NewService(repo, customer.NewSaleBenefitResolver(customerRepo), storage)
 	return invoice.NewHandler(service)

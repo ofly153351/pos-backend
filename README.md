@@ -170,7 +170,7 @@ PATCH /api/v1/admin/stores/:storeID/subscription/status
 - Product Unit API guide: `docs/product-units.md`
 - Product structure guide (types & units): `docs/product-structure.md`
 - Admin subscription API guide: `docs/admin-subscription.md`
-- Uploaded store logos are stored in MinIO
-- Uploaded product images are stored in MinIO
+- Uploaded store logos are stored in RustFS
+- Uploaded product images are stored in RustFS
 - Store creation also creates the first active subscription row
 - API routes support both `/api/v1/*` and compatibility path `/api/*`

@@ -13,8 +13,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/minio/minio-go/v7"
+	s3client "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"pos-backend/internal/platform/rustfs"
 
 	"pos-backend/internal/idgen"
 )
@@ -86,29 +87,29 @@ func (s LocalLogoStorage) DeleteLogo(logoURL string) error {
 	return nil
 }
 
-// ── MinIO ────────────────────────────────────────────────────────────────────
+// ── RustFS ────────────────────────────────────────────────────────────────────
 
-type MinIOLogoStorage struct {
-	client    *minio.Client
+type RustFSLogoStorage struct {
+	client    *s3client.Client
 	bucket    string
 	publicURL string
 	subDir    string
 
 	// ensureBucket bookkeeping. Only a successful bucket check is cached; a
-	// failure (e.g. MinIO down when the API started) is retried on every call.
+	// failure (e.g. RustFS down when the API started) is retried on every call.
 	mu       sync.Mutex
 	verified bool
 }
 
-func NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL, subDir string) *MinIOLogoStorage {
-	client, err := minio.New(endpoint, &minio.Options{
+func NewRustFSLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL, subDir string) *RustFSLogoStorage {
+	client, err := s3client.New(endpoint, &s3client.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
 	if err != nil {
 		panic(err)
 	}
-	return &MinIOLogoStorage{
+	return &RustFSLogoStorage{
 		client:    client,
 		bucket:    bucket,
 		publicURL: strings.TrimRight(publicURL, "/"),
@@ -116,7 +117,7 @@ func NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL b
 	}
 }
 
-func (s *MinIOLogoStorage) SaveLogo(file *multipart.FileHeader) (string, error) {
+func (s *RustFSLogoStorage) SaveLogo(file *multipart.FileHeader) (string, error) {
 	if file == nil {
 		return "", nil
 	}
@@ -139,7 +140,7 @@ func (s *MinIOLogoStorage) SaveLogo(file *multipart.FileHeader) (string, error) 
 	}
 	_, err = s.client.PutObject(
 		context.Background(), s.bucket, objectName, src, file.Size,
-		minio.PutObjectOptions{ContentType: contentType},
+		s3client.PutObjectOptions{ContentType: contentType},
 	)
 	if err != nil {
 		return "", err
@@ -147,37 +148,31 @@ func (s *MinIOLogoStorage) SaveLogo(file *multipart.FileHeader) (string, error) 
 	return s.publicURL + "/" + s.bucket + "/" + objectName, nil
 }
 
-func (s *MinIOLogoStorage) DeleteLogo(logoURL string) error {
+func (s *RustFSLogoStorage) DeleteLogo(logoURL string) error {
 	objectPath, ok := safeAssetPath(logoURL, s.publicURL+"/"+s.bucket, s.subDir)
 	if !ok {
 		return nil
 	}
-	return s.client.RemoveObject(context.Background(), s.bucket, objectPath, minio.RemoveObjectOptions{})
+	return s.client.RemoveObject(context.Background(), s.bucket, objectPath, s3client.RemoveObjectOptions{})
 }
 
 // ensureBucket lazily creates the bucket on first use. A failure is NOT cached:
-// MinIO may come up after the API server starts (docker compose up order), so a
+// RustFS may come up after the API server starts (docker compose up order), so a
 // once-failed attempt must retry on the next call. Only success is remembered.
-func (s *MinIOLogoStorage) ensureBucket(ctx context.Context) error {
+func (s *RustFSLogoStorage) ensureBucket(ctx context.Context) error {
 	s.mu.Lock()
 	verified := s.verified
 	s.mu.Unlock()
 	if verified {
 		return nil
 	}
-	exists, err := s.client.BucketExists(ctx, s.bucket)
-	if err != nil {
-		return err // transient (MinIO down?) — retry on next call
+	err := rustfs.EnsurePublicBucket(ctx, s.client, s.bucket)
+	if err == nil {
+		s.mu.Lock()
+		s.verified = true
+		s.mu.Unlock()
 	}
-	if !exists {
-		if err := s.client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
-			return err // transient — retry on next call
-		}
-	}
-	s.mu.Lock()
-	s.verified = true
-	s.mu.Unlock()
-	return nil
+	return err
 }
 
 // ── safeAssetPath ─────────────────────────────────────────────────────────────

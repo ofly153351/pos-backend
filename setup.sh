@@ -388,7 +388,7 @@ setup_backend_env() {
 
   read -rp "  DB password        [change-me]      : " db_pass;    db_pass="${db_pass:-change-me}"
   read -rp "  JWT secret key     [change-this-secret]: " jwt_key; jwt_key="${jwt_key:-change-this-secret}"
-  read -rp "  MinIO password     [change-me]      : " minio_pass; minio_pass="${minio_pass:-change-me}"
+  read -rp "  RustFS password     [change-me]      : " rustfs_pass; rustfs_pass="${rustfs_pass:-change-me}"
   read -rp "  Backend port       [8080]            : " be_port;   be_port="${be_port:-8080}"
   read -rp "  CORS origin (frontend URL) [http://localhost:3000]: " cors; cors="${cors:-http://localhost:3000}"
 
@@ -409,19 +409,19 @@ POSTGRES_PASSWORD=${db_pass}
 POSTGRES_PORT=5432
 POSTGRES_SSLMODE=disable
 
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=${minio_pass}
-MINIO_ACCESS_KEY=
-MINIO_SECRET_KEY=
-MINIO_BUCKET_NAME=pos-assets
-MINIO_API_PORT=9000
-MINIO_CONSOLE_PORT=9001
-MINIO_BROWSER_REDIRECT_URL=
-MINIO_SERVER_URL=
-MINIO_ENDPOINT=127.0.0.1:9000
-MINIO_USE_SSL=false
+RUSTFS_ROOT_USER=rustfsadmin
+RUSTFS_ROOT_PASSWORD=${rustfs_pass}
+RUSTFS_ACCESS_KEY=rustfsadmin
+RUSTFS_SECRET_KEY=${rustfs_pass}
+RUSTFS_BUCKET_NAME=pos-assets
+RUSTFS_API_PORT=9000
+RUSTFS_CONSOLE_PORT=9001
+RUSTFS_BROWSER_REDIRECT_URL=
+RUSTFS_SERVER_URL=
+RUSTFS_ENDPOINT=127.0.0.1:9000
+RUSTFS_USE_SSL=false
 # ต้อง set เป็น public URL (https://media.<zone>) ใน production — browser เข้าถึง 127.0.0.1 ไม่ได้
-MINIO_PUBLIC_URL=
+RUSTFS_PUBLIC_URL=
 
 PDF_TTF_PATH=""
 EOF
@@ -457,17 +457,17 @@ EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# start Docker services (postgres + minio)
+# start Docker services (postgres + rustfs)
 # ─────────────────────────────────────────────────────────────────────────────
 start_docker_services() {
-  step "Docker services (PostgreSQL + MinIO)"
+  step "Docker services (PostgreSQL + RustFS)"
   cd "$BACKEND_DIR"
 
   # export vars so Docker Compose can read them
   set -a; source .env; set +a
 
   info "Starting containers..."
-  compose_cmd up -d postgres minio minio-client >> "$LOG_FILE" 2>&1
+  compose_cmd up -d postgres rustfs >> "$LOG_FILE" 2>&1
 
   info "Waiting for PostgreSQL to be healthy..."
   local attempts=0
@@ -480,7 +480,7 @@ start_docker_services() {
   done
 
   ok "PostgreSQL ready"
-  ok "MinIO ready"
+  ok "RustFS ready"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -645,7 +645,7 @@ print_summary() {
   echo "  Local URLs:"
   echo "    Frontend  →  http://localhost:${fe_port}"
   echo "    Backend   →  http://localhost:${be_port}"
-  echo "    MinIO     →  http://localhost:9001"
+  echo "    RustFS     →  http://localhost:9001"
   echo ""
   if [[ "$WITH_TUNNEL" == true && -f "$SCRIPT_DIR/.tunnel_config" ]]; then
     local fe_url be_url

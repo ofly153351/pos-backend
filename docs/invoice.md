@@ -75,7 +75,7 @@ curl -X POST http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/
 `proof` file requirements:
 - Accepted types: `image/jpeg`, `image/png`, `image/webp`, `application/pdf`
 - Maximum file size: `10MB`
-- Stored in MinIO; URL is returned in the payment record as `proof_url`
+- Stored in RustFS; URL is returned in the payment record as `proof_url`
 
 Example fields added to `payments[]`:
 
@@ -95,7 +95,7 @@ Status transitions:
 
 ## GET /api/v1/stores/:storeID/invoices/:invoiceID/payments/:paymentID/proof
 
-Opens the proof of payment for a specific payment record (redirects to the file in MinIO).
+Opens the proof of payment for a specific payment record (redirects to the file in RustFS).
 
 ```bash
 curl -L http://localhost:8080/api/v1/stores/{storeID}/invoices/{invoiceID}/payments/{paymentID}/proof \

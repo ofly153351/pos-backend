@@ -11,7 +11,7 @@ The main structure of each feature lives in `internal/modules/<feature>/`:
 - `repository.go`: database queries (GORM/SQL), no business logic
 - `service.go`: business rules, validation, permission checks, transaction orchestration
 - `handler.go`: handles HTTP request/response, parses input, maps errors to status codes
-- `storage.go` (optional): file upload or external storage such as MinIO
+- `storage.go` (optional): file upload or external storage such as RustFS
 - `util.go` (optional): feature-specific helper functions
 
 ## 2) Recommended API Creation Order

@@ -1116,7 +1116,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 
 // inlineImageDataURI fetches an image URL and returns it as a base64 data: URI so
 // it embeds directly in the HTML. The store logo lives on an internal asset host
-// (MinIO, e.g. http://127.0.0.1:9000) that headless Chrome can't reliably reach
+// (RustFS, e.g. http://127.0.0.1:9000) that headless Chrome can't reliably reach
 // when generating the PDF — embedding it guarantees the logo shows in both the
 // preview and the downloaded PDF. On any failure it returns the URL unchanged.
 func inlineImageDataURI(ctx context.Context, rawURL string) string {
@@ -1196,12 +1196,17 @@ func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeI
 	frontier := []string{root}
 	for len(frontier) > 0 && len(family) < 200 {
 		var kids []string
+		s.db.WithContext(ctx).Model(&Document{}).
+			Where("store_id = ? AND source_document_id IN ?", storeID, frontier).
+			Pluck("id", &kids)
+
 		var linked []string
 		s.db.WithContext(ctx).Table("bill_delivery_order_links").
 			Select("CASE WHEN bill_document_id IN ? THEN delivery_order_id ELSE bill_document_id END AS id", frontier).
 			Where("bill_document_id IN ? OR delivery_order_id IN ?", frontier, frontier).
 			Pluck("id", &linked)
 		kids = append(kids, linked...)
+
 		next := kids[:0:0]
 		for _, k := range kids {
 			if !inFamily[k] {

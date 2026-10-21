@@ -37,14 +37,18 @@ echo "  POS System — starting (PM2)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── 1. Docker services ──────────────────────────────────────────────
-echo "→  Docker (PostgreSQL + MinIO)..."
+echo "→  Docker (PostgreSQL + RustFS)..."
 cd "$BACKEND_DIR"
-docker compose up -d postgres minio minio-client
+docker compose up -d postgres rustfs
 until docker compose exec -T postgres \
   pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-pos_db}" &>/dev/null; do
   sleep 1
 done
 echo "✔  PostgreSQL ready"
+until curl -sf "http://localhost:${RUSTFS_API_PORT:-9000}/health" &>/dev/null; do
+  sleep 1
+done
+echo "✔  RustFS ready"
 
 # ── 2. Build Go binary ──────────────────────────────────────────────
 echo "→  Building Go backend..."
@@ -127,7 +131,7 @@ echo ""
 echo "  Local:"
 echo "    Frontend : http://localhost:$FE_PORT"
 echo "    Backend  : http://localhost:$BE_PORT"
-echo "    MinIO    : http://localhost:9001"
+echo "    RustFS    : http://localhost:9001"
 if [[ -n "$TS_IP" ]]; then
   echo ""
   echo "  Tailscale:"

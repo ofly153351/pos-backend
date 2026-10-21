@@ -226,7 +226,7 @@ Success Response (`200 OK`)
 - Each product response includes `quantity` as the current stock on hand
 - Each product response includes `brand_id` and `brand_name` (empty if not set)
 - The list endpoint always uses pagination to reduce payload (`page/limit`)
-- Product images are uploaded to MinIO at path `products/<generated-filename>` and the URL is returned in `image_url`
+- Product images are uploaded to RustFS at path `products/<generated-filename>` and the URL is returned in `image_url`
 - If `image` is not sent during `PATCH`, the existing image is preserved
 - If `image_url` is empty it is not included in the JSON response (due to `omitempty`)
 - If `sku` is not provided when creating a product, an EAN-13 barcode is auto-generated

@@ -30,6 +30,6 @@ func NewLocalLogoStorage(baseDir, publicBasePath string) LogoStorage {
 	return logoStorageAdapter{inner: pkgstorage.NewLocalLogoStorage(baseDir, publicBasePath, "logos")}
 }
 
-func NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) LogoStorage {
-	return logoStorageAdapter{inner: pkgstorage.NewMinIOLogoStorage(endpoint, accessKey, secretKey, bucket, useSSL, publicURL, "logos")}
+func NewRustFSLogoStorage(endpoint, accessKey, secretKey, bucket string, useSSL bool, publicURL string) LogoStorage {
+	return logoStorageAdapter{inner: pkgstorage.NewRustFSLogoStorage(endpoint, accessKey, secretKey, bucket, useSSL, publicURL, "logos")}
 }
