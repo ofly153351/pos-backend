@@ -195,7 +195,7 @@ func (r PostgresRepository) ListByStore(ctx context.Context, storeID string, pag
 		`).
 		Order(func() string {
 			if sortBy == "updated_at" {
-				return "pv.updated_at DESC"
+				return "pv.updated_at DESC, pv.created_at DESC"
 			}
 			return "pv.created_at DESC"
 		}())

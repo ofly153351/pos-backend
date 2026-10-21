@@ -101,6 +101,7 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		isActive = *input.IsActive
 	}
 
+	now := time.Now().UTC()
 	product := Product{
 		ID:                  newID(),
 		StoreID:             storeID,
@@ -120,7 +121,8 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 		SpecialPriceStartAt: input.SpecialPriceStartAt,
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
 		IsActive:            isActive,
-		CreatedAt:           time.Now().UTC(),
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if defaultLocationID != "" {
 		product.DefaultLocationID = &defaultLocationID
