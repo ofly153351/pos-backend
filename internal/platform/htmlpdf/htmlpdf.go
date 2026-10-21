@@ -53,6 +53,27 @@ class PosRepeatTableHeaders extends Paged.Handler {
   }
 }
 Paged.registerHandlers(PosRepeatTableHeaders);
+class PosContinuationHeaders extends Paged.Handler {
+  afterRendered(pages) {
+    const source = document.querySelector(".hdr-mini");
+    if (!source) return;
+    const firstPageByCopy = new Set();
+    pages.forEach((page) => {
+      const pageElement = page.element || page;
+      const marker = pageElement.querySelector("[data-copy-purpose]");
+      const copy = marker?.getAttribute("data-copy-purpose") || "";
+      if (!firstPageByCopy.has(copy)) {
+        firstPageByCopy.add(copy);
+        return;
+      }
+      if (pageElement.querySelector(".pos-continuation-header")) return;
+      const header = source.cloneNode(true);
+      header.className = "pos-continuation-header";
+      pageElement.appendChild(header);
+    });
+  }
+}
+Paged.registerHandlers(PosContinuationHeaders);
 let posActiveCopy = "";
 let posCopyPage = 0;
 class PosCopyPageNumbers extends Paged.Handler {

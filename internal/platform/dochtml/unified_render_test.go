@@ -416,3 +416,20 @@ func TestUnifiedRender_CopySeparation(t *testing.T) {
 		t.Fatalf("copy flow must force a page break between copies")
 	}
 }
+
+func TestUnifiedRender_ContinuationPagesHaveMinimalRunningHeader(t *testing.T) {
+	html, err := RenderUnifiedDocumentHTML(makeDoc("INVOICE", 40), StoreInfo{Name: "ร้านทดสอบ"})
+	if err != nil {
+		t.Fatalf("render invoice: %v", err)
+	}
+	for _, want := range []string{
+		`.hdr-mini{ display:none; }`,
+		`.pos-continuation-header{ position:absolute; top:14mm; left:12mm; right:12mm;`,
+		`<span class="m-store">ร้านทดสอบ</span>`,
+		`<span class="m-title">ใบแจ้งหนี้ · INV256909-0001 (ต่อ / cont.)</span>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("continuation header markup missing %q", want)
+		}
+	}
+}

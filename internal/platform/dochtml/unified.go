@@ -497,10 +497,14 @@ body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11p
 .doc-meta-value{ flex:1 1 auto; min-width:0; overflow-wrap:anywhere; font-weight:700; }
 .doc-meta .b{ font-weight:700; margin-left:0; }
 
-/* ---- header ย่อ (หน้าต่อ) ---- */
-.hdr-mini{ display:flex; justify-content:space-between; align-items:baseline; padding-bottom:2mm; border-bottom:1px solid var(--ink); }
-.m-store{ font-weight:700; }
-.m-title{ font-size:10px; color:var(--muted); }
+/* ---- minimal header source for continuation pages ----
+   htmlpdf clones this marker into every physical page after Paged.js finishes
+   layout. Keeping it out of the document flow makes the result deterministic
+   in Preview, browser Print, and Download PDF. */
+.hdr-mini{ display:none; }
+.pos-continuation-header{ position:absolute; top:14mm; left:12mm; right:12mm; display:flex; justify-content:space-between; align-items:baseline; padding:0 0 2mm; border-bottom:1px solid var(--line); color:var(--muted); }
+.pos-continuation-header .m-store{ font-size:10px; font-weight:700; color:var(--ink); }
+.pos-continuation-header .m-title{ font-size:9px; color:var(--muted); }
 
 /* ---- กล่องลูกค้า/จัดส่ง ---- */
 .parties{ display:flex; flex-direction:column; gap:0; margin:0; border:1px solid var(--line); border-right:0; min-width:0; }
@@ -628,6 +632,10 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 {{range $pg := .Pages}}
 <div class="page" data-copy-purpose="{{$root.Purpose}}" data-item-count="{{$root.ItemCount}}">
   <div class="screen-page-number">หน้า 1</div>
+  <div class="hdr-mini">
+    <span class="m-store">{{$root.StoreName}}</span>
+    <span class="m-title">{{$root.TitleTH}} · {{$root.DocNo}} (ต่อ / cont.)</span>
+  </div>
   {{if $pg.IsFirst}}
   <header class="hdr">
     <div class="hdr-left">
@@ -684,10 +692,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
   {{end}}
 
   {{else}}
-  <header class="hdr-mini">
-    <span class="m-store">{{$root.StoreName}}</span>
-    <span class="m-title">{{$root.TitleTH}} · {{$root.DocNo}} (ต่อ / cont.)</span>
-  </header>
+  <!-- The continuation header is supplied by the running page-margin element. -->
   {{end}}
 
   <div class="doc-body">

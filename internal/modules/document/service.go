@@ -1553,6 +1553,17 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 	}
 
 	primary := bills[0]
+	familyIDs := make(map[string]struct{}, len(bills)+1)
+	for _, bill := range bills {
+		related, err := s.RelatedDocuments(ctx, actor, storeID, bill.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, doc := range related {
+			familyIDs[doc.ID] = struct{}{}
+		}
+		familyIDs[bill.ID] = struct{}{}
+	}
 	var subtotal, billDiscount, vatAmount, totalAmount float64
 	items := make([]DocumentItem, 0)
 	for _, bill := range bills {
@@ -1668,13 +1679,17 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 				return err
 			}
 		}
-		for _, bill := range bills {
-			if err := tx.Model(&Document{}).Where("id = ?", bill.ID).Updates(map[string]any{
-				"payment_status": PaymentPaid,
-				"updated_at":     time.Now(),
-			}).Error; err != nil {
-				return err
-			}
+		familyIDs[receipt.ID] = struct{}{}
+		ids := make([]string, 0, len(familyIDs))
+		for id := range familyIDs {
+			ids = append(ids, id)
+		}
+		if err := tx.Model(&Document{}).Where("store_id = ? AND id IN ?", storeID, ids).Updates(map[string]any{
+			"status":         StatusCompleted,
+			"payment_status": PaymentPaid,
+			"updated_at":     time.Now(),
+		}).Error; err != nil {
+			return err
 		}
 		return nil
 	}); err != nil {
