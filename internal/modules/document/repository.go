@@ -195,6 +195,26 @@ func (r *repository) BulkDelete(storeID string, ids []string) error {
 			return ErrDocumentReferenced
 		}
 
+		var blockedDeliveryLinks int64
+		if err := tx.Table("bill_delivery_order_links").
+			Where("delivery_order_id IN ? AND bill_document_id NOT IN ?", ids, ids).
+			Count(&blockedDeliveryLinks).Error; err != nil {
+			return err
+		}
+		if blockedDeliveryLinks > 0 {
+			return ErrDocumentReferenced
+		}
+
+		// Remove direct BILL↔DO links before deleting documents. A selected DO
+		// must not leave a surviving BILL pointing at a deleted delivery order;
+		// the check above rejects that case before this cleanup.
+		if err := tx.Exec(
+			"DELETE FROM bill_delivery_order_links WHERE bill_document_id IN ? OR delivery_order_id IN ?",
+			ids, ids,
+		).Error; err != nil {
+			return err
+		}
+
 		// Remove settlement rows in the same transaction before deleting their
 		// documents. This satisfies the RESTRICT foreign keys while preserving
 		// all-or-nothing behavior for bulk deletion.

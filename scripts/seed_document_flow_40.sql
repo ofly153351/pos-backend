@@ -115,7 +115,7 @@ INSERT INTO documents (
 )
 SELECT
     'seed-flow-qt-9001', c.store_id, 'QT256910-9001', 'QT256910-9001',
-    'QUOTATION', 'COMPLETED', 'UNPAID', c.customer_id, c.customer_name, NULL,
+    'QUOTATION', 'COMPLETED', 'PAID', c.customer_id, c.customer_name, NULL,
     c.staff_id, c.staff_name, '2026-10-21 09:00:00+07', '2026-11-20 23:59:59+07',
     t.subtotal, 7, t.vat_amount, t.total_amount,
     'SQL seed: quotation with 40 products', c.staff_id
@@ -130,7 +130,7 @@ INSERT INTO documents (
 )
 SELECT
     'seed-flow-inv-9001', c.store_id, 'INV256910-9001', 'INV256910-9001',
-    'INVOICE', 'COMPLETED', 'UNPAID', c.customer_id, c.customer_name, NULL,
+    'INVOICE', 'COMPLETED', 'PAID', c.customer_id, c.customer_name, NULL,
     c.staff_id, c.staff_name, '2026-10-21 09:05:00+07', '2026-11-20 23:59:59+07',
     t.subtotal, 7, t.vat_amount, t.total_amount,
     'seed-flow-qt-9001', 'SQL seed: invoice from quotation', c.staff_id
@@ -145,7 +145,7 @@ INSERT INTO documents (
 )
 SELECT
     'seed-flow-do-9001', c.store_id, 'DO256910-9001', 'DO256910-9001',
-    'DELIVERY_ORDER', 'COMPLETED', 'UNPAID', c.customer_id, c.customer_name, NULL,
+    'DELIVERY_ORDER', 'COMPLETED', 'PAID', c.customer_id, c.customer_name, NULL,
     c.staff_id, c.staff_name, '2026-10-21 09:10:00+07', '2026-11-20 23:59:59+07',
     t.subtotal, 7, t.vat_amount, t.total_amount,
     'seed-flow-inv-9001', 'SQL seed: delivery order from invoice', c.staff_id
@@ -160,7 +160,7 @@ INSERT INTO documents (
 )
 SELECT
     'seed-flow-bill-9001', c.store_id, 'BILL256910-9001', 'BILL256910-9001',
-    'BILL', 'COMPLETED', 'UNPAID', c.customer_id, c.customer_name, NULL,
+    'BILL', 'COMPLETED', 'PAID', c.customer_id, c.customer_name, NULL,
     c.staff_id, c.staff_name, '2026-10-21 09:15:00+07', '2026-11-20 23:59:59+07',
     t.subtotal, 7, t.vat_amount, t.total_amount,
     'SQL seed: bill related directly to delivery order', c.staff_id
