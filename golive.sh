@@ -274,11 +274,17 @@ step "Build Next.js frontend"
 cd "$FRONTEND_DIR"
 info "npm install..."
 npm install --prefer-offline 2>/dev/null || npm install
-info "npm audit..."
+info "npm audit fix..."
+if npm audit fix; then
+  ok "npm audit fix เสร็จแล้ว"
+else
+  warn "npm audit fix ยังเหลือช่องโหว่หรือแก้ไม่ได้อัตโนมัติ — deployment ทำงานต่อ"
+fi
+info "npm audit ตรวจซ้ำ..."
 if npm audit --audit-level=high; then
   ok "npm audit ผ่านระดับ high"
 else
-  warn "npm audit พบช่องโหว่ระดับ high/critical — deployment ทำงานต่อ แต่ควร review ก่อนแก้ด้วย npm audit fix"
+  warn "npm audit ยังพบช่องโหว่ระดับ high/critical — deployment ทำงานต่อ"
 fi
 info "ล้าง .next cache เก่า..."
 rm -rf "$FRONTEND_DIR/.next"
