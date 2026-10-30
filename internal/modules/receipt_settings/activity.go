@@ -6,6 +6,8 @@ package receipt_settings
 func activitySnapshot(s ReceiptSettings) map[string]any {
 	return map[string]any{
 		"template_key":          s.TemplateKey,
+		"document_template_key": s.DocumentTemplateKey,
+		"document_design":       s.DocumentDesign,
 		"paper_size":            s.PaperSize,
 		"paper_length":          s.PaperLength,
 		"tax_mode":              s.TaxMode,

@@ -156,6 +156,12 @@ type renderView struct {
 	PriceTerms, DeliveryTerms                    string
 	DeliveryAddr, DeliveryContact, DeliveryPhone string
 	BahtText                                     string
+	ReferenceBahtText                            string
+	ShowReferenceTerms                           bool
+	ShowReferenceDiscount                        bool
+	ReferenceItemMinHeight                       string
+	ReferenceCompact                             bool
+	ReferenceDense                               bool
 	// flags
 	ShowDiscount, ShowDeliveryBox, ShowPayBox, PayCash bool
 	// footer
@@ -254,7 +260,11 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	p := profileFor(d.Type)
 
 	items := make([]itemView, 0, len(d.Items))
+	showReferenceDiscount := false
 	for j, it := range d.Items {
+		if p.ShowDiscount && it.DiscountValue > 0 {
+			showReferenceDiscount = true
+		}
 		hasDisc := p.ShowDiscount && it.DiscountValue > 0
 		disc := ""
 		if hasDisc {
@@ -291,6 +301,25 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	}
 
 	priceTerms, deliveryTerms := quotationTerms(d)
+	summary := buildSummary(d, p)
+	// Reserve the smallest item area only when multiple populated sections
+	// actually compete for A4 space. One short note still leaves room for a
+	// substantially taller table.
+	occupiedSections := 0
+	for _, occupied := range []bool{
+		len(summary) > 3,
+		strings.TrimSpace(d.DeliveryAddress) != "",
+		strings.TrimSpace(derefStr(d.Notes)) != "",
+		len(banks) > 0,
+		len([]rune(store.Name)) > 32,
+		len([]rune(d.CustomerAddress)) > 50,
+	} {
+		if occupied {
+			occupiedSections++
+		}
+	}
+	refCompact := occupiedSections > 0
+	refDense := occupiedSections > 2
 	priceValidity := "_"
 	if d.PriceValidityDays != nil && *d.PriceValidityDays > 0 {
 		priceValidity = strconv.Itoa(*d.PriceValidityDays) + " วัน"
@@ -356,11 +385,17 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 			}
 			return ""
 		}(),
+		ReferenceBahtText:      formatThaiBahtText(d.TotalAmount),
+		ShowReferenceTerms:     d.Type == "QUOTATION",
+		ShowReferenceDiscount:  showReferenceDiscount,
+		ReferenceItemMinHeight: fmt.Sprintf("%.1fmm", 139.7-float64(len(summary)+1)*8.2),
+		ReferenceCompact:       refCompact,
+		ReferenceDense:         refDense,
 
 		ShowDiscount: p.ShowDiscount, ShowDeliveryBox: p.ShowDeliveryBox,
 		ShowPayBox: p.ShowPayBox, PayCash: p.PayCash,
 
-		Summary: buildSummary(d, p), Notes: derefStr(d.Notes),
+		Summary: summary, Notes: derefStr(d.Notes),
 		Banks: banks, QRURL: d.QRPaymentURL, BillRows: billRows,
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
@@ -389,12 +424,16 @@ func RenderUnifiedDocumentHTML(d DocData, store StoreInfo) (string, error) {
 // renderOneCopy renders the document with a specific copy variant applied
 // (Original/Copy badge + purpose tag + conditional signature block).
 func renderOneCopy(d DocData, store StoreInfo, v doccopy.CopyVariant) (string, error) {
+	return renderCopyWithTemplate(d, store, v, unifiedTmpl)
+}
+
+func renderCopyWithTemplate(d DocData, store StoreInfo, v doccopy.CopyVariant, tmpl *template.Template) (string, error) {
 	vm := BuildDocumentView(d, store)
 	vm.Badge = v.BadgeLabel()
 	vm.Purpose = v.Purpose
 	vm.ShowSignature = v.ShowSignature
 	var buf bytes.Buffer
-	if err := unifiedTmpl.Execute(&buf, vm); err != nil {
+	if err := tmpl.Execute(&buf, vm); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
@@ -410,19 +449,27 @@ var (
 // every sheet carrying its own "ต้นฉบับ (Original)" / "สำเนา (Copy)" badge.
 // A single browser print job therefore yields the whole legal copy set.
 func RenderUnifiedDocumentCopies(d DocData, store StoreInfo, copyIdx int) (string, error) {
+	return renderDocumentCopiesWithTemplate(d, store, copyIdx, unifiedTmpl)
+}
+
+func renderDocumentCopiesWithTemplate(d DocData, store StoreInfo, copyIdx int, tmpl *template.Template) (string, error) {
 	specs := doccopy.SpecFor(d.Type)
 	// copyIdx >= 0 selects a single copy (0-based); -1 (or out of range) = whole set.
 	if copyIdx >= 0 && copyIdx < len(specs) {
-		return renderOneCopy(d, store, specs[copyIdx])
+		return renderCopyWithTemplate(d, store, specs[copyIdx], tmpl)
 	}
 	if len(specs) == 0 {
-		return RenderUnifiedDocumentHTML(d, store)
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, BuildDocumentView(d, store)); err != nil {
+			return "", err
+		}
+		return buf.String(), nil
 	}
 
 	head := ""
 	var sheets []string
 	for _, v := range specs {
-		html, err := renderOneCopy(d, store, v)
+		html, err := renderCopyWithTemplate(d, store, v, tmpl)
 		if err != nil {
 			return "", err
 		}
@@ -458,10 +505,13 @@ const unifiedDocHTML = `{{$root := .}}<!DOCTYPE html>
 @page:first{
   margin-top:12mm;
 }
+@page signed-document{size:A4;margin:20mm 12mm 47mm;}
+@page signed-document:first{margin-top:12mm;}
 body{ font-family:'Sarabun','Tahoma',sans-serif; color:var(--ink); font-size:11px; background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 
 /* One natural document flow. Paged.js fragments this flow into A4 pages. */
 .page{ width:auto; min-height:0; padding:0; margin:1rem; background:#fff; display:block; position:relative; }
+.page[data-show-signature="true"]{ page:signed-document; }
 .copy-break{ break-after:page; page-break-after:always; }
 .copy-break:last-child{ break-after:auto; page-break-after:auto; }
 @media screen{ .copy-break:not(:last-child){ margin-bottom:16mm; border-bottom:2px dashed #94a3b8; } }
@@ -594,6 +644,8 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
    (otherwise the fixed-width underlines left-pack inside 56mm boxes and the
    visible ink drifts left of the page centerline despite justify-content:center) */
 .signatures{ display:flex; justify-content:center; gap:14mm; margin-top:4mm; break-inside:avoid; }
+.signature-source{ display:none !important; }
+.pos-page-signatures{ position:absolute; left:12mm; right:12mm; bottom:16mm; z-index:1; margin:0; }
 .sig{ width:52mm; flex-shrink:0; }
 .sig-t{ font-size:9px; font-weight:700; margin-bottom:2mm; text-align:center; border-bottom:1px solid var(--line); padding-bottom:.5mm; }
 .sig-write{ display:flex; justify-content:center; align-items:baseline; gap:1mm; margin-top:4mm; margin-bottom:2mm; }
@@ -630,7 +682,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 </style></head>
 <body>
 {{range $pg := .Pages}}
-<div class="page" data-copy-purpose="{{$root.Purpose}}" data-item-count="{{$root.ItemCount}}">
+<div class="page" data-copy-purpose="{{$root.Purpose}}" data-item-count="{{$root.ItemCount}}" data-show-signature="{{if $root.ShowSignature}}true{{else}}false{{end}}">
   <div class="screen-page-number">หน้า 1</div>
   <div class="hdr-mini">
     <span class="m-store">{{$root.StoreName}}</span>
@@ -802,7 +854,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 
     {{if $root.ShowPayBox}}<div class="remarks"><span class="rh">หมายเหตุ (Remarks):</span> {{$root.Notes}}</div>{{end}}
     {{if $root.ShowSignature}}
-    <div class="signatures">
+    <div class="signatures signature-source" data-copy-purpose="{{$root.Purpose}}">
       <div class="sig">
         <div class="sig-t">{{$root.SigLeftTH}} / {{$root.SigLeftEN}}</div>
         <div class="sig-write"><span class="sig-write-lbl">ลงชื่อ</span><span class="sig-ln"></span></div>

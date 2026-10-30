@@ -10,6 +10,7 @@ import (
 	"pos-backend/internal/modules/auth"
 	"pos-backend/internal/modules/store"
 	"pos-backend/internal/platform/activitycapture"
+	"pos-backend/internal/platform/dochtml"
 	"pos-backend/internal/platform/receipthtml"
 )
 
@@ -28,11 +29,33 @@ func (s Service) Get(ctx context.Context, actor auth.Claims, storeID string) (Re
 	if err == ErrNotFound {
 		return s.createDefaults(ctx, storeID)
 	}
-	return settings, err
+	if err != nil {
+		return ReceiptSettings{}, err
+	}
+	normalizeDocumentDesign(&settings.DocumentDesign)
+	return settings, nil
+}
+
+func normalizeDocumentDesign(design *DocumentDesign) {
+	if design.FontFamily == "" {
+		design.FontFamily = "Sarabun"
+	}
+	if design.Spacing == "" {
+		design.Spacing = "standard"
+	}
 }
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) (ReceiptSettings, error) {
 
+	if input.DocumentTemplateKey != nil && *input.DocumentTemplateKey != "standard" && *input.DocumentTemplateKey != "classic" {
+		return ReceiptSettings{}, ErrInvalidInput
+	}
+	if input.DocumentDesign != nil {
+		d := *input.DocumentDesign
+		if d.FontSize < 8 || d.FontSize > 16 || d.MarginMM < 5 || d.MarginMM > 30 || (d.Spacing != "compact" && d.Spacing != "standard" && d.Spacing != "comfortable") || (d.FontFamily != "Sarabun" && d.FontFamily != "Tahoma" && d.FontFamily != "Arial") || (d.Alignment != "left" && d.Alignment != "center" && d.Alignment != "right") || !validHexColor(d.PrimaryColor) {
+			return ReceiptSettings{}, ErrInvalidInput
+		}
+	}
 	current, err := s.repo.GetByStoreID(ctx, storeID)
 	if err == ErrNotFound {
 		current, err = s.createDefaults(ctx, storeID)
@@ -58,6 +81,8 @@ func (s Service) createDefaults(ctx context.Context, storeID string) (ReceiptSet
 	defaults := ReceiptSettings{
 		ID:                  newID(),
 		StoreID:             storeID,
+		DocumentTemplateKey: "standard",
+		DocumentDesign:      DocumentDesign{PrimaryColor: "#1a1a1a", FontSize: 11, Alignment: "left", MarginMM: 12, ShowLogo: true, ShowStoreInfo: true, Spacing: "standard", FontFamily: "Sarabun"},
 		TemplateKey:         "modern_classic",
 		PaperSize:           "80mm",
 		PaperLength:         "auto",
@@ -106,6 +131,43 @@ func defaultChannels() PaymentChannels {
 		{Key: "truemoney", Enabled: false},
 		{Key: "shopeepay", Enabled: false},
 	}
+}
+
+func (s Service) PreviewDocumentHTML(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) ([]byte, error) {
+	settings, err := s.Get(ctx, actor, storeID)
+	if err != nil {
+		return nil, err
+	}
+	applyUpdate(&settings, input)
+	if (settings.DocumentTemplateKey != "standard" && settings.DocumentTemplateKey != "classic") || !validHexColor(settings.DocumentDesign.PrimaryColor) || settings.DocumentDesign.FontSize < 8 || settings.DocumentDesign.FontSize > 16 || (settings.DocumentDesign.Spacing != "compact" && settings.DocumentDesign.Spacing != "standard" && settings.DocumentDesign.Spacing != "comfortable") || (settings.DocumentDesign.FontFamily != "Sarabun" && settings.DocumentDesign.FontFamily != "Tahoma" && settings.DocumentDesign.FontFamily != "Arial") || (settings.DocumentDesign.Alignment != "left" && settings.DocumentDesign.Alignment != "center" && settings.DocumentDesign.Alignment != "right") || settings.DocumentDesign.MarginMM < 5 || settings.DocumentDesign.MarginMM > 30 {
+		return nil, ErrInvalidInput
+	}
+	storeRecord, err := s.storeRepo.GetByID(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	customerTaxID := "1234567890123"
+	doc := dochtml.DocData{
+		Type: "QUOTATION", DocumentNo: "QUO-PREVIEW", DocumentNoFull: "QUO-PREVIEW", DocumentDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
+		CustomerName: "ตัวอย่างลูกค้า", CustomerAddress: "กรุงเทพมหานคร", CustomerPhone: "02-000-0000", CustomerTaxID: &customerTaxID,
+		StaffName: "พนักงานตัวอย่าง", Items: []dochtml.DocItem{{Description: "สินค้าตัวอย่าง A", SKU: "SAMPLE-01", Unit: "ชิ้น", Quantity: 2, UnitPrice: 500, Amount: 1000}, {Description: "สินค้าตัวอย่าง B", SKU: "SAMPLE-02", Unit: "ชิ้น", Quantity: 1, UnitPrice: 1000, Amount: 1000}},
+		Subtotal: 2000, VatRate: 7, VatAmount: 140, TotalAmount: 2140,
+	}
+	storeInfo := dochtml.StoreInfo{Name: storeRecord.Name, Address: storeRecord.Address, Phone: storeRecord.Phone, TaxID: storeRecord.TaxID, LogoURL: storeRecord.LogoURL}
+	var html string
+	if settings.DocumentTemplateKey == "classic" {
+		html, err = dochtml.RenderReferenceDocumentHTML(doc, storeInfo)
+	} else {
+		html, err = dochtml.RenderUnifiedDocumentHTML(doc, storeInfo)
+	}
+	if err != nil {
+		return nil, err
+	}
+	html, err = dochtml.ApplyDocumentTemplateDesign(html, settings.DocumentTemplateKey, dochtml.DocumentDesign(settings.DocumentDesign))
+	if err != nil {
+		return nil, err
+	}
+	return []byte(html), nil
 }
 
 // PreviewHTML renders a preview receipt using the provided settings override + real store info.
@@ -214,7 +276,25 @@ func buildMockSale(store receipthtml.StoreInfo, s ReceiptSettings) receipthtml.S
 	}
 }
 
+func validHexColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
 func applyUpdate(s *ReceiptSettings, in UpdateReceiptSettingsRequest) {
+	if in.DocumentTemplateKey != nil {
+		s.DocumentTemplateKey = *in.DocumentTemplateKey
+	}
+	if in.DocumentDesign != nil {
+		s.DocumentDesign = *in.DocumentDesign
+	}
 	if in.TemplateKey != nil {
 		s.TemplateKey = *in.TemplateKey
 	}

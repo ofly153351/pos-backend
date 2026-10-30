@@ -21,4 +21,5 @@ func registerReceiptSettingsRoutes(protected fiber.Router, deps appDependencies)
 	protected.Get("/stores/:storeID/receipt-settings", g.manage, handler.Get)
 	protected.Put("/stores/:storeID/receipt-settings", g.manage, handler.Update)
 	protected.Post("/stores/:storeID/receipt-settings/preview", g.manage, handler.PreviewHTML)
+	protected.Post("/stores/:storeID/receipt-settings/document-preview", g.manage, handler.DocumentPreviewHTML)
 }

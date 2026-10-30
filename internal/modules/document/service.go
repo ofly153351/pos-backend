@@ -1111,7 +1111,37 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		docData.VatAmount = 0
 		docData.TotalAmount = docData.PaymentAmount
 	}
-	return dochtml.RenderUnifiedDocumentCopies(docData, storeInfo, copyIdx)
+	var settings struct {
+		TemplateKey string `gorm:"column:document_template_key"`
+		Design      []byte `gorm:"column:document_design"`
+	}
+	settingsErr := s.db.WithContext(ctx).Table("store_receipt_settings").Select("document_template_key, document_design").Where("store_id = ?", storeID).Take(&settings).Error
+	if settingsErr != nil && !errors.Is(settingsErr, gorm.ErrRecordNotFound) {
+		return "", settingsErr
+	}
+	html := ""
+	if settingsErr == nil && settings.TemplateKey == "classic" {
+		html, err = dochtml.RenderReferenceDocumentCopies(docData, storeInfo, copyIdx)
+	} else {
+		html, err = dochtml.RenderUnifiedDocumentCopies(docData, storeInfo, copyIdx)
+	}
+	if err != nil {
+		return "", err
+	}
+	if settingsErr == nil {
+		var design dochtml.DocumentDesign
+		if err := json.Unmarshal(settings.Design, &design); err != nil {
+			return "", fmt.Errorf("decode store document design: %w", err)
+		}
+		if err := normalizeDocumentDesignForPrint(settings.Design, &design); err != nil {
+			return "", fmt.Errorf("normalize store document design: %w", err)
+		}
+		html, err = dochtml.ApplyDocumentTemplateDesign(html, settings.TemplateKey, design)
+		if err != nil {
+			return "", err
+		}
+	}
+	return html, nil
 }
 
 // inlineImageDataURI fetches an image URL and returns it as a base64 data: URI so

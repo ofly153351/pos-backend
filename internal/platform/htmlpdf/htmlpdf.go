@@ -74,6 +74,30 @@ class PosContinuationHeaders extends Paged.Handler {
   }
 }
 Paged.registerHandlers(PosContinuationHeaders);
+class PosBottomSignatures extends Paged.Handler {
+  afterRendered(pages) {
+    const lastPageByCopy = new Map();
+    pages.forEach((page) => {
+      const pageElement = page.element || page;
+      const marker = pageElement.querySelector("[data-copy-purpose]");
+      const copy = marker?.getAttribute("data-copy-purpose") || "";
+      lastPageByCopy.set(copy, pageElement);
+    });
+    document.querySelectorAll(".signature-source[data-copy-purpose]").forEach((source) => {
+      const copy = source.getAttribute("data-copy-purpose") || "";
+      const pageElement = lastPageByCopy.get(copy);
+      if (!pageElement) return;
+      const alreadyPlaced = Array.from(pageElement.querySelectorAll(".pos-page-signatures"))
+        .some((node) => (node.getAttribute("data-copy-purpose") || "") === copy);
+      if (alreadyPlaced) return;
+      const clone = source.cloneNode(true);
+      clone.classList.remove("signature-source");
+      clone.classList.add("pos-page-signatures");
+      pageElement.appendChild(clone);
+    });
+  }
+}
+Paged.registerHandlers(PosBottomSignatures);
 let posActiveCopy = "";
 let posCopyPage = 0;
 class PosCopyPageNumbers extends Paged.Handler {

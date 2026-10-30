@@ -28,11 +28,38 @@ func (p *PaymentChannels) Scan(value any) error {
 	return json.Unmarshal(b, p)
 }
 
+type DocumentDesign struct {
+	PrimaryColor  string `json:"primary_color"`
+	FontSize      int    `json:"font_size"`
+	Alignment     string `json:"alignment"`
+	MarginMM      int    `json:"margin_mm"`
+	ShowLogo      bool   `json:"show_logo"`
+	ShowStoreInfo bool   `json:"show_store_info"`
+	Spacing       string `json:"spacing"`
+	FontFamily    string `json:"font_family"`
+}
+
+func (d DocumentDesign) Value() (driver.Value, error) { return json.Marshal(d) }
+func (d *DocumentDesign) Scan(value any) error {
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("receipt_settings: cannot scan %T into DocumentDesign", value)
+	}
+	return json.Unmarshal(b, d)
+}
+
 // ReceiptSettings maps to store_receipt_settings table.
 type ReceiptSettings struct {
 	ID                  string          `json:"id"                   gorm:"column:id;primaryKey"`
 	StoreID             string          `json:"store_id"             gorm:"column:store_id"`
 	TemplateKey         string          `json:"template_key"         gorm:"column:template_key"`
+	DocumentTemplateKey string          `json:"document_template_key" gorm:"column:document_template_key"`
+	DocumentDesign      DocumentDesign  `json:"document_design"      gorm:"column:document_design;type:jsonb"`
 	PaperSize           string          `json:"paper_size"           gorm:"column:paper_size"`
 	PaperLength         string          `json:"paper_length"         gorm:"column:paper_length"`
 	TaxMode             string          `json:"tax_mode"             gorm:"column:tax_mode"`
@@ -66,6 +93,8 @@ func (ReceiptSettings) TableName() string { return "store_receipt_settings" }
 
 // UpdateReceiptSettingsRequest is the PUT body.
 type UpdateReceiptSettingsRequest struct {
+	DocumentTemplateKey *string                 `json:"document_template_key"`
+	DocumentDesign      *DocumentDesign         `json:"document_design"`
 	TemplateKey         *string                 `json:"template_key"`
 	PaperSize           *string                 `json:"paper_size"`
 	PaperLength         *string                 `json:"paper_length"`

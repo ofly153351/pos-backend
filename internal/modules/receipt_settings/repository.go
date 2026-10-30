@@ -51,6 +51,8 @@ func (r PostgresRepository) Upsert(ctx context.Context, settings ReceiptSettings
 		Where("store_id = ?", settings.StoreID).
 		Updates(map[string]any{
 			"template_key":          settings.TemplateKey,
+			"document_template_key": settings.DocumentTemplateKey,
+			"document_design":       settings.DocumentDesign,
 			"paper_size":            settings.PaperSize,
 			"paper_length":          settings.PaperLength,
 			"tax_mode":              settings.TaxMode,

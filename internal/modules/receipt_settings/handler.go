@@ -48,6 +48,23 @@ func (h Handler) Update(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "receipt settings updated", result)
 }
 
+func (h Handler) DocumentPreviewHTML(c *fiber.Ctx) error {
+	storeID := c.Params("storeID")
+	if storeID == "" {
+		return httpx.Error(c, fiber.StatusBadRequest, "storeID is required", nil)
+	}
+	var req UpdateReceiptSettingsRequest
+	if err := httpx.DecodeJSON(c, &req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	html, err := h.service.PreviewDocumentHTML(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	return c.Send(html)
+}
+
 func (h Handler) PreviewHTML(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	if storeID == "" {
@@ -72,6 +89,9 @@ func writeError(c *fiber.Ctx, err error) error {
 	}
 	if errors.Is(err, ErrNotFound) {
 		return httpx.Error(c, fiber.StatusNotFound, err.Error(), nil)
+	}
+	if errors.Is(err, ErrInvalidInput) {
+		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
 	}
 	return httpx.Error(c, fiber.StatusInternalServerError, "internal server error", nil)
 }

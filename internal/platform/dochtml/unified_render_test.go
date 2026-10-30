@@ -188,8 +188,18 @@ func TestUnifiedRender_EndingBlockStaysInNaturalFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render receipt: %v", err)
 	}
-	if !strings.Contains(html, `data-item-count="3"`) || !strings.Contains(html, `.doc-end{ margin-top:0; }`) {
-		t.Fatal("document ending block must remain in normal flow")
+	if !strings.Contains(html, `data-item-count="3"`) || !strings.Contains(html, `data-show-signature="true"`) || !strings.Contains(html, `.doc-end{ margin-top:0; }`) {
+		t.Fatal("document ending must stay in natural flow and identify signature-bearing pages")
+	}
+	for _, want := range []string{
+		`@page signed-document{size:A4;margin:20mm 12mm 47mm;}`,
+		`.page[data-show-signature="true"]{ page:signed-document; }`,
+		`.pos-page-signatures{ position:absolute; left:12mm; right:12mm; bottom:16mm; z-index:1; margin:0; }`,
+		`class="signatures signature-source" data-copy-purpose=""`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("signature must be anchored to the bottom safely: missing %q", want)
+		}
 	}
 	for _, removed := range []string{
 		`.page[data-item-count="1"],.page[data-item-count="2"],.page[data-item-count="3"],.page[data-item-count="4"]{ display:flex; flex-direction:column; min-height:calc(297mm - 12mm - 16mm); }`,
