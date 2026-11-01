@@ -21,6 +21,19 @@ func TestValidHexColor(t *testing.T) {
 	}
 }
 
+func TestDocumentTemplateKeyValidation(t *testing.T) {
+	for _, key := range []string{"standard", "classic", "template3"} {
+		if !validDocumentTemplateKey(key) {
+			t.Errorf("valid document template %q rejected", key)
+		}
+	}
+	for _, key := range []string{"", "unknown", "../template3"} {
+		if validDocumentTemplateKey(key) {
+			t.Errorf("invalid document template %q accepted", key)
+		}
+	}
+}
+
 func TestApplyUpdateDocumentTemplateAndDesign(t *testing.T) {
 	settings := ReceiptSettings{DocumentTemplateKey: "standard"}
 	key := "classic"

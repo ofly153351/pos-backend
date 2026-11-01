@@ -47,7 +47,7 @@ func normalizeDocumentDesign(design *DocumentDesign) {
 
 func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) (ReceiptSettings, error) {
 
-	if input.DocumentTemplateKey != nil && *input.DocumentTemplateKey != "standard" && *input.DocumentTemplateKey != "classic" {
+	if input.DocumentTemplateKey != nil && !validDocumentTemplateKey(*input.DocumentTemplateKey) {
 		return ReceiptSettings{}, ErrInvalidInput
 	}
 	if input.DocumentDesign != nil {
@@ -133,13 +133,17 @@ func defaultChannels() PaymentChannels {
 	}
 }
 
+func validDocumentTemplateKey(key string) bool {
+	return key == "standard" || key == "classic" || key == "template3"
+}
+
 func (s Service) PreviewDocumentHTML(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) ([]byte, error) {
 	settings, err := s.Get(ctx, actor, storeID)
 	if err != nil {
 		return nil, err
 	}
 	applyUpdate(&settings, input)
-	if (settings.DocumentTemplateKey != "standard" && settings.DocumentTemplateKey != "classic") || !validHexColor(settings.DocumentDesign.PrimaryColor) || settings.DocumentDesign.FontSize < 8 || settings.DocumentDesign.FontSize > 16 || (settings.DocumentDesign.Spacing != "compact" && settings.DocumentDesign.Spacing != "standard" && settings.DocumentDesign.Spacing != "comfortable") || (settings.DocumentDesign.FontFamily != "Sarabun" && settings.DocumentDesign.FontFamily != "Tahoma" && settings.DocumentDesign.FontFamily != "Arial") || (settings.DocumentDesign.Alignment != "left" && settings.DocumentDesign.Alignment != "center" && settings.DocumentDesign.Alignment != "right") || settings.DocumentDesign.MarginMM < 5 || settings.DocumentDesign.MarginMM > 30 {
+	if !validDocumentTemplateKey(settings.DocumentTemplateKey) || !validHexColor(settings.DocumentDesign.PrimaryColor) || settings.DocumentDesign.FontSize < 8 || settings.DocumentDesign.FontSize > 16 || (settings.DocumentDesign.Spacing != "compact" && settings.DocumentDesign.Spacing != "standard" && settings.DocumentDesign.Spacing != "comfortable") || (settings.DocumentDesign.FontFamily != "Sarabun" && settings.DocumentDesign.FontFamily != "Tahoma" && settings.DocumentDesign.FontFamily != "Arial") || (settings.DocumentDesign.Alignment != "left" && settings.DocumentDesign.Alignment != "center" && settings.DocumentDesign.Alignment != "right") || settings.DocumentDesign.MarginMM < 5 || settings.DocumentDesign.MarginMM > 30 {
 		return nil, ErrInvalidInput
 	}
 	storeRecord, err := s.storeRepo.GetByID(ctx, storeID)
@@ -157,6 +161,8 @@ func (s Service) PreviewDocumentHTML(ctx context.Context, actor auth.Claims, sto
 	var html string
 	if settings.DocumentTemplateKey == "classic" {
 		html, err = dochtml.RenderReferenceDocumentHTML(doc, storeInfo)
+	} else if settings.DocumentTemplateKey == "template3" {
+		html, err = dochtml.RenderTemplate3DocumentHTML(doc, storeInfo)
 	} else {
 		html, err = dochtml.RenderUnifiedDocumentHTML(doc, storeInfo)
 	}

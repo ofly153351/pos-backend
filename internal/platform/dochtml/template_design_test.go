@@ -6,6 +6,20 @@ import (
 	"time"
 )
 
+func TestTemplate3DesignKeepsDistinctRenderer(t *testing.T) {
+	html, err := RenderTemplate3DocumentHTML(DocData{Type: "QUOTATION", DocumentNoFull: "T3-REAL"}, StoreInfo{Name: "STORE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ApplyDocumentTemplateDesign(html, "template3", DocumentDesign{PrimaryColor: "#1a1a1a", FontSize: 11, Alignment: "left", MarginMM: 12, Spacing: "standard", FontFamily: "Sarabun"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `class="page template-template3"`) || !strings.Contains(got, `class="t3-title"`) || strings.Contains(got, `class="page template-classic"`) {
+		t.Fatal("template 3 style changed or applied template 2 skin")
+	}
+}
+
 func TestApplyDocumentTemplateDesignRejectsInvalidConfig(t *testing.T) {
 	if _, err := ApplyDocumentTemplateDesign("<html></html>", "unexpected", DocumentDesign{}); err == nil {
 		t.Fatal("expected invalid template configuration to return an error")

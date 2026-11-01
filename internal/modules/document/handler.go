@@ -149,6 +149,21 @@ func (h Handler) DeleteDocument(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusOK, "document deleted", nil)
 }
 
+// PreviewDocumentTemplate displays one copy of a real document with an
+// unsaved template choice; it does not trigger print or persist a setting.
+func (h Handler) PreviewDocumentTemplate(c *fiber.Ctx) error {
+	html, err := h.service.RenderDocumentTemplatePreview(
+		c.UserContext(), middleware.ClaimsFromContext(c),
+		c.Params("storeID"), c.Params("docID"), c.Query("template_key"),
+	)
+	if err != nil {
+		return writeError(c, err)
+	}
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	c.Set("Cache-Control", "no-store")
+	return c.SendString(html)
+}
+
 func (h Handler) PrintDocument(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")

@@ -982,6 +982,19 @@ func (s Service) SetReceiptTemplate(ctx context.Context, actor auth.Claims, stor
 }
 
 func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int) (string, error) {
+	return s.renderDocumentPrint(ctx, actor, storeID, id, copyIdx, receiptTemplate, "")
+}
+
+// RenderDocumentTemplatePreview renders an existing store document under a
+// temporary template choice. It never updates the store's saved selection.
+func (s Service) RenderDocumentTemplatePreview(ctx context.Context, actor auth.Claims, storeID, id, templateKey string) (string, error) {
+	if templateKey != "standard" && templateKey != "classic" && templateKey != "template3" {
+		return "", ErrInvalidInput
+	}
+	return s.renderDocumentPrint(ctx, actor, storeID, id, 0, 0, templateKey)
+}
+
+func (s Service) renderDocumentPrint(ctx context.Context, actor auth.Claims, storeID, id string, copyIdx int, receiptTemplate int, templateOverride string) (string, error) {
 	doc, err := s.GetDocument(ctx, actor, storeID, id)
 	if err != nil {
 		return "", err
@@ -1119,9 +1132,15 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 	if settingsErr != nil && !errors.Is(settingsErr, gorm.ErrRecordNotFound) {
 		return "", settingsErr
 	}
+	templateKey, err := resolveDocumentTemplate(settings.TemplateKey, templateOverride)
+	if err != nil {
+		return "", err
+	}
 	html := ""
-	if settingsErr == nil && settings.TemplateKey == "classic" {
+	if templateKey == "classic" {
 		html, err = dochtml.RenderReferenceDocumentCopies(docData, storeInfo, copyIdx)
+	} else if templateKey == "template3" {
+		html, err = dochtml.RenderTemplate3DocumentCopies(docData, storeInfo, copyIdx)
 	} else {
 		html, err = dochtml.RenderUnifiedDocumentCopies(docData, storeInfo, copyIdx)
 	}
@@ -1136,7 +1155,7 @@ func (s Service) RenderDocumentPrint(ctx context.Context, actor auth.Claims, sto
 		if err := normalizeDocumentDesignForPrint(settings.Design, &design); err != nil {
 			return "", fmt.Errorf("normalize store document design: %w", err)
 		}
-		html, err = dochtml.ApplyDocumentTemplateDesign(html, settings.TemplateKey, design)
+		html, err = dochtml.ApplyDocumentTemplateDesign(html, templateKey, design)
 		if err != nil {
 			return "", err
 		}

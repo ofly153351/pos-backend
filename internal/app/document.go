@@ -24,6 +24,7 @@ func registerDocumentRoutes(protected fiber.Router, deps appDependencies) {
 	protected.Post("/stores/:storeID/sales/:saleID/documents", g.operate, h.CreateFromSale)
 	protected.Get("/stores/:storeID/documents/statement", g.operate, h.GetStatementPDF)
 	protected.Get("/stores/:storeID/documents/:docID", g.operate, h.GetDocument)
+	protected.Get("/stores/:storeID/documents/:docID/template-preview", g.manage, h.PreviewDocumentTemplate)
 	protected.Get("/stores/:storeID/documents/:docID/print", g.operate, h.PrintDocument)
 	protected.Get("/stores/:storeID/documents/:docID/related", g.operate, h.RelatedDocuments)
 	protected.Get("/stores/:storeID/documents/:docID/wht-cert", g.operate, h.PrintWHTCert)

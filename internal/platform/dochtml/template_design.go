@@ -22,7 +22,7 @@ var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // ApplyDocumentTemplateDesign applies validated store-level presentation options
 // to the shared A4 renderer output. Invalid persisted values fail loudly.
 func ApplyDocumentTemplateDesign(html, templateKey string, design DocumentDesign) (string, error) {
-	if templateKey != "standard" && templateKey != "classic" {
+	if templateKey != "standard" && templateKey != "classic" && templateKey != "template3" {
 		return "", fmt.Errorf("unsupported document template %q", templateKey)
 	}
 	if !hexColorPattern.MatchString(design.PrimaryColor) || design.FontSize < 8 || design.FontSize > 16 || design.MarginMM < 5 || design.MarginMM > 30 || (design.Spacing != "compact" && design.Spacing != "standard" && design.Spacing != "comfortable") || (design.FontFamily != "Sarabun" && design.FontFamily != "Tahoma" && design.FontFamily != "Arial") || (design.Alignment != "left" && design.Alignment != "center" && design.Alignment != "right") {
@@ -45,9 +45,12 @@ func ApplyDocumentTemplateDesign(html, templateKey string, design DocumentDesign
 	} else if design.Spacing == "comfortable" {
 		html = strings.Replace(html, "--row-h:7.5mm;", "--row-h:10mm;", 1)
 	}
-	// Store identity is mandatory in the A4 document header for both templates.
+	// Store identity is mandatory in every A4 document template header.
 	// Older settings may explicitly contain false; keep the fields for backward
 	// compatibility, but do not turn them into CSS that erases the header.
+	if templateKey == "template3" {
+		html = strings.ReplaceAll(html, `class="page"`, `class="page template-template3"`)
+	}
 	if templateKey == "classic" {
 		html = strings.ReplaceAll(html, `class="page"`, `class="page template-classic"`)
 		// Legacy classic skin is for the unified DOM; the reference renderer owns

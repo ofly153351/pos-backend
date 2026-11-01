@@ -7,6 +7,26 @@ import (
 	"pos-backend/internal/platform/dochtml"
 )
 
+func TestResolveDocumentTemplatePreviewOverride(t *testing.T) {
+	for _, tc := range []struct{ saved, preview, want string }{
+		{"classic", "standard", "standard"},
+		{"standard", "classic", "classic"},
+		{"standard", "template3", "template3"},
+		{"template3", "standard", "standard"},
+		{"template3", "", "template3"},
+		{"classic", "", "classic"},
+		{"", "", "standard"},
+	} {
+		got, err := resolveDocumentTemplate(tc.saved, tc.preview)
+		if err != nil || got != tc.want {
+			t.Fatalf("saved=%q preview=%q: got %q, %v; want %q", tc.saved, tc.preview, got, err, tc.want)
+		}
+	}
+	if _, err := resolveDocumentTemplate("standard", "unknown"); err == nil {
+		t.Fatal("unknown preview template must be rejected without changing saved settings")
+	}
+}
+
 func TestNormalizeDocumentDesignLegacySettings(t *testing.T) {
 	raw := json.RawMessage(`{"primary_color":"#1a1a1a","font_size":11,"alignment":"left","margin_mm":12}`)
 	var design dochtml.DocumentDesign

@@ -2,9 +2,23 @@ package document
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"pos-backend/internal/platform/dochtml"
 )
+
+func resolveDocumentTemplate(saved, preview string) (string, error) {
+	if preview != "" {
+		if preview != "standard" && preview != "classic" && preview != "template3" {
+			return "", fmt.Errorf("unknown document template: %w", ErrInvalidInput)
+		}
+		return preview, nil
+	}
+	if saved == "classic" || saved == "template3" {
+		return saved, nil
+	}
+	return "standard", nil
+}
 
 // normalizeDocumentDesignForPrint fills fields omitted by older persisted JSONB
 // settings while preserving explicitly stored values (including false booleans).
