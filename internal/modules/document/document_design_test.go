@@ -44,6 +44,25 @@ func TestNormalizeDocumentDesignLegacySettings(t *testing.T) {
 	}
 }
 
+func TestNormalizeDocumentDesignEmptyPersistedFontFamily(t *testing.T) {
+	raw := json.RawMessage(`{"spacing":"standard","alignment":"left","font_size":11,"margin_mm":12,"show_logo":true,"font_family":"","primary_color":"#1a1a1a","show_store_info":true}`)
+	var design dochtml.DocumentDesign
+	if err := json.Unmarshal(raw, &design); err != nil {
+		t.Fatal(err)
+	}
+	if err := normalizeDocumentDesignForPrint(raw, &design); err != nil {
+		t.Fatal(err)
+	}
+	if design.FontFamily != "Sarabun" {
+		t.Fatalf("empty persisted font family normalized to %q, want Sarabun", design.FontFamily)
+	}
+	for _, key := range []string{"standard", "classic", "template3"} {
+		if _, err := dochtml.ApplyDocumentTemplateDesign("<html></html>", key, design); err != nil {
+			t.Errorf("template %s rejected legacy design: %v", key, err)
+		}
+	}
+}
+
 func TestNormalizeDocumentDesignPreservesExplicitFalse(t *testing.T) {
 	raw := json.RawMessage(`{"primary_color":"#1a1a1a","font_size":11,"alignment":"left","margin_mm":12,"show_logo":false,"show_store_info":false}`)
 	var design dochtml.DocumentDesign

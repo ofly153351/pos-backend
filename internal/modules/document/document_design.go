@@ -48,7 +48,7 @@ func normalizeDocumentDesignForPrint(raw json.RawMessage, design *dochtml.Docume
 	if _, ok := fields["spacing"]; !ok {
 		design.Spacing = "standard"
 	}
-	if _, ok := fields["font_family"]; !ok {
+	if _, ok := fields["font_family"]; !ok || design.FontFamily == "" {
 		design.FontFamily = "Sarabun"
 	}
 	return nil
