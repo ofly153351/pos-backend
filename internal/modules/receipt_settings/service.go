@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"math"
+	"strings"
 	"time"
 
 	"pos-backend/internal/modules/auth"
@@ -138,10 +139,18 @@ func validDocumentTemplateKey(key string) bool {
 }
 
 func (s Service) PreviewDocumentHTML(ctx context.Context, actor auth.Claims, storeID string, input UpdateReceiptSettingsRequest) ([]byte, error) {
-	settings, err := s.Get(ctx, actor, storeID)
-	if err != nil {
+	// Preview reads the current store identity and design only. Customer, items
+	// and document fields are fixture-only; missing settings must not create rows.
+	settings, err := s.repo.GetByStoreID(ctx, storeID)
+	if err == ErrNotFound {
+		settings = ReceiptSettings{
+			DocumentTemplateKey: "standard",
+			DocumentDesign:      DocumentDesign{PrimaryColor: "#1a1a1a", FontSize: 11, Alignment: "left", MarginMM: 12, ShowLogo: true, ShowStoreInfo: true, Spacing: "standard", FontFamily: "Sarabun"},
+		}
+	} else if err != nil {
 		return nil, err
 	}
+	normalizeDocumentDesign(&settings.DocumentDesign)
 	applyUpdate(&settings, input)
 	if !validDocumentTemplateKey(settings.DocumentTemplateKey) || !validHexColor(settings.DocumentDesign.PrimaryColor) || settings.DocumentDesign.FontSize < 8 || settings.DocumentDesign.FontSize > 16 || (settings.DocumentDesign.Spacing != "compact" && settings.DocumentDesign.Spacing != "standard" && settings.DocumentDesign.Spacing != "comfortable") || (settings.DocumentDesign.FontFamily != "Sarabun" && settings.DocumentDesign.FontFamily != "Tahoma" && settings.DocumentDesign.FontFamily != "Arial") || (settings.DocumentDesign.Alignment != "left" && settings.DocumentDesign.Alignment != "center" && settings.DocumentDesign.Alignment != "right") || settings.DocumentDesign.MarginMM < 5 || settings.DocumentDesign.MarginMM > 30 {
 		return nil, ErrInvalidInput
@@ -150,21 +159,30 @@ func (s Service) PreviewDocumentHTML(ctx context.Context, actor auth.Claims, sto
 	if err != nil {
 		return nil, err
 	}
-	customerTaxID := "1234567890123"
-	doc := dochtml.DocData{
-		Type: "QUOTATION", DocumentNo: "QUO-PREVIEW", DocumentNoFull: "QUO-PREVIEW", DocumentDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC),
-		CustomerName: "ตัวอย่างลูกค้า", CustomerAddress: "กรุงเทพมหานคร", CustomerPhone: "02-000-0000", CustomerTaxID: &customerTaxID,
-		StaffName: "พนักงานตัวอย่าง", Items: []dochtml.DocItem{{Description: "สินค้าตัวอย่าง A", SKU: "SAMPLE-01", Unit: "ชิ้น", Quantity: 2, UnitPrice: 500, Amount: 1000}, {Description: "สินค้าตัวอย่าง B", SKU: "SAMPLE-02", Unit: "ชิ้น", Quantity: 1, UnitPrice: 1000, Amount: 1000}},
-		Subtotal: 2000, VatRate: 7, VatAmount: 140, TotalAmount: 2140,
+	var contact []string
+	if storeRecord.Email != "" {
+		contact = append(contact, "Email: "+storeRecord.Email)
 	}
-	storeInfo := dochtml.StoreInfo{Name: storeRecord.Name, Address: storeRecord.Address, Phone: storeRecord.Phone, TaxID: storeRecord.TaxID, LogoURL: storeRecord.LogoURL}
+	if storeRecord.Fax != "" {
+		contact = append(contact, "Fax: "+storeRecord.Fax)
+	}
+	if storeRecord.Website != "" {
+		contact = append(contact, "Web: "+storeRecord.Website)
+	}
+	storeInfo := dochtml.StoreInfo{
+		Name: storeRecord.Name, Address: storeRecord.Address, Phone: storeRecord.Phone,
+		Fax: storeRecord.Fax, Email: storeRecord.Email, Website: storeRecord.Website,
+		TaxID: storeRecord.TaxID, LogoURL: previewStoreLogo(ctx, storeRecord.LogoURL),
+		PreviewContact: strings.Join(contact, " · "),
+	}
+	doc := documentPreviewFixture()
 	var html string
 	if settings.DocumentTemplateKey == "classic" {
-		html, err = dochtml.RenderReferenceDocumentHTML(doc, storeInfo)
+		html, err = dochtml.RenderReferenceDocumentCopies(doc, storeInfo, 0)
 	} else if settings.DocumentTemplateKey == "template3" {
-		html, err = dochtml.RenderTemplate3DocumentHTML(doc, storeInfo)
+		html, err = dochtml.RenderTemplate3DocumentCopies(doc, storeInfo, 0)
 	} else {
-		html, err = dochtml.RenderUnifiedDocumentHTML(doc, storeInfo)
+		html, err = dochtml.RenderUnifiedDocumentCopies(doc, storeInfo, 0)
 	}
 	if err != nil {
 		return nil, err

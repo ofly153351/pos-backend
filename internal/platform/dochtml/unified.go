@@ -136,7 +136,7 @@ type billRowView struct {
 
 type renderView struct {
 	// ร้าน
-	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch string
+	StoreName, StoreAddr, StoreTaxID, StorePhone, StoreBranch, StorePreviewContact string
 	// LogoURL is template.URL so a base64 data: URI (embedded logo) is not stripped
 	// to #ZgotmplZ by html/template's URL sanitizer.
 	LogoURL template.URL
@@ -350,7 +350,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	}
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
-		StorePhone: store.Phone, StoreBranch: store.Branch, LogoURL: template.URL(store.LogoURL),
+		StorePhone: store.Phone, StoreBranch: store.Branch, StorePreviewContact: store.PreviewContact, LogoURL: template.URL(store.LogoURL),
 
 		TitleTH: p.TitleTH, TitleEN: p.TitleEN, Badge: p.Badge,
 		// Single-render default: signatures shown (copy renderer overrides per variant).
@@ -697,6 +697,7 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
         {{if $root.StoreAddr}}<div class="store-meta">{{$root.StoreAddr}}</div>{{end}}
         {{if $root.StoreTaxID}}<div class="store-meta">เลขประจำตัวผู้เสียภาษี {{$root.StoreTaxID}}</div>{{end}}
         {{if $root.StorePhone}}<div class="store-meta">โทร. {{$root.StorePhone}}</div>{{end}}
+        {{if $root.StorePreviewContact}}<div class="store-meta">{{$root.StorePreviewContact}}</div>{{end}}
         {{if $root.StoreBranch}}<div class="store-meta">สาขา {{$root.StoreBranch}}</div>{{end}}
       </div>
     </div>

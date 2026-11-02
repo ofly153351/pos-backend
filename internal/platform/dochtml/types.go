@@ -95,17 +95,18 @@ type BankAccountInfo struct {
 }
 
 type StoreInfo struct {
-	Name         string
-	Address      string
-	Phone        string
-	Fax          string
-	Email        string
-	Website      string
-	TaxID        string
-	LogoURL      string
-	Branch       string
-	PromptPayID  string
-	BankAccounts []BankAccountInfo
+	Name           string
+	Address        string
+	Phone          string
+	Fax            string
+	Email          string
+	Website        string
+	TaxID          string
+	LogoURL        string
+	Branch         string
+	PreviewContact string // Settings preview only; empty for real document printing.
+	PromptPayID    string
+	BankAccounts   []BankAccountInfo
 }
 
 // DocItem is a single line item for HTML rendering.

@@ -30,7 +30,7 @@ var pagedPolyfill []byte
 
 func PreparePreview(html string) string {
 	prepared := withPagedJS(html)
-	previewScript := `<script>window.__posPagedReady=(async()=>{const imgs=Array.from(document.images);await Promise.all(imgs.map((img)=>img.complete?Promise.resolve():new Promise((resolve)=>{img.addEventListener("load",resolve,{once:true});img.addEventListener("error",resolve,{once:true});})));if(document.fonts?.ready)await document.fonts.ready;return window.PagedPolyfill.preview();})();</script>`
+	previewScript := `<script>window.__posPagedReady=(async()=>{const imgs=Array.from(document.images);await Promise.race([Promise.all(imgs.map((img)=>img.complete?Promise.resolve():new Promise((resolve)=>{img.addEventListener("load",resolve,{once:true});img.addEventListener("error",resolve,{once:true});}))),new Promise((resolve)=>setTimeout(resolve,5000))]);if(document.fonts?.ready)await document.fonts.ready;return window.PagedPolyfill.preview();})();</script>`
 	if strings.Contains(prepared, "</body>") {
 		return strings.Replace(prepared, "</body>", previewScript+"</body>", 1)
 	}
