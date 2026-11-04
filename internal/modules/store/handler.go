@@ -180,7 +180,18 @@ func parseUpdateStoreRequest(c *fiber.Ctx) (UpdateStoreRequest, error) {
 	if value := c.FormValue("address"); value != "" {
 		request.Address = &value
 	}
-	if value := c.FormValue("tax_id"); value != "" {
+	// An explicit empty tax_id clears the value; an omitted field preserves it.
+	if strings.HasPrefix(c.Get(fiber.HeaderContentType), fiber.MIMEMultipartForm) {
+		form, err := c.MultipartForm()
+		if err != nil {
+			return UpdateStoreRequest{}, err
+		}
+		if values, present := form.Value["tax_id"]; present && len(values) > 0 {
+			value := values[0]
+			request.TaxID = &value
+		}
+	} else if c.Request().PostArgs().Has("tax_id") {
+		value := c.FormValue("tax_id")
 		request.TaxID = &value
 	}
 	if value := c.FormValue("promptpay_id"); value != "" {
