@@ -75,9 +75,9 @@ func (s Service) Save(ctx context.Context, actor auth.Claims, storeID, sessionID
 	if strings.TrimSpace(session.CreatedAt) == "" {
 		session.CreatedAt = now
 	}
-	if strings.TrimSpace(session.CreatedBy) == "" {
-		session.CreatedBy = actor.UserID
-	}
+	// B19: the creator always comes from the session, never from the request
+	// body (only used when the row is first inserted; updates keep it).
+	session.CreatedBy = actor.UserID
 	if session.Items == nil {
 		session.Items = []CountItem{}
 	}

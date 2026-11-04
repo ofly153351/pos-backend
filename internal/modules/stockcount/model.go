@@ -34,23 +34,27 @@ type CountSession struct {
 	Name    string `json:"name" gorm:"column:name"`
 	// LocationID is the single storage location this session counts. Nullable for legacy
 	// sessions created before location-scoping; a NULL-location session cannot be applied.
-	LocationID    *string     `json:"locationId" gorm:"column:location_id"`
-	WarehouseName *string     `json:"warehouseName" gorm:"column:warehouse_name"`
-	Zone          *string     `json:"zone" gorm:"column:zone"`
-	CategoryID    *string     `json:"categoryId" gorm:"column:category_id"`
-	CategoryName  *string     `json:"categoryName" gorm:"column:category_name"`
-	Staff         string      `json:"staff" gorm:"column:staff"`
-	Note          string      `json:"note" gorm:"column:note"`
-	Status        string      `json:"status" gorm:"column:status"`
-	CountType     string      `json:"countType" gorm:"column:count_type"`
-	CycleRule     string      `json:"cycleRule" gorm:"column:cycle_rule"`
-	BlindCount    bool        `json:"blindCount" gorm:"column:blind_count"`
-	CreatedBy     string      `json:"createdBy" gorm:"column:created_by"`
-	CompletedBy   string      `json:"completedBy" gorm:"column:completed_by"`
-	CompletedAt   *string     `json:"completedAt" gorm:"column:completed_at"`
-	CreatedAt     string      `json:"createdAt" gorm:"column:created_at"`
-	UpdatedAt     string      `json:"updatedAt" gorm:"column:updated_at"`
-	Items         []CountItem `json:"items" gorm:"-"`
+	LocationID    *string `json:"locationId" gorm:"column:location_id"`
+	WarehouseName *string `json:"warehouseName" gorm:"column:warehouse_name"`
+	Zone          *string `json:"zone" gorm:"column:zone"`
+	CategoryID    *string `json:"categoryId" gorm:"column:category_id"`
+	CategoryName  *string `json:"categoryName" gorm:"column:category_name"`
+	Staff         string  `json:"staff" gorm:"column:staff"`
+	Note          string  `json:"note" gorm:"column:note"`
+	Status        string  `json:"status" gorm:"column:status"`
+	CountType     string  `json:"countType" gorm:"column:count_type"`
+	CycleRule     string  `json:"cycleRule" gorm:"column:cycle_rule"`
+	BlindCount    bool    `json:"blindCount" gorm:"column:blind_count"`
+	CreatedBy     string  `json:"createdBy" gorm:"column:created_by"`
+	// B19: display names resolved from users; empty when the stored value is
+	// not a user (historical rows) — never invented.
+	CreatedByName   string      `json:"createdByName" gorm:"column:created_by_name;->"`
+	CompletedByName string      `json:"completedByName" gorm:"column:completed_by_name;->"`
+	CompletedBy     string      `json:"completedBy" gorm:"column:completed_by"`
+	CompletedAt     *string     `json:"completedAt" gorm:"column:completed_at"`
+	CreatedAt       string      `json:"createdAt" gorm:"column:created_at"`
+	UpdatedAt       string      `json:"updatedAt" gorm:"column:updated_at"`
+	Items           []CountItem `json:"items" gorm:"-"`
 }
 
 // ApplyItem is one correction to commit: set the product's on-hand to CountedQty.

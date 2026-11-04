@@ -46,8 +46,11 @@ func (r PostgresRepository) List(ctx context.Context, storeID string) ([]CountSe
 	var sessions []CountSession
 	err := r.db.WithContext(ctx).
 		Table("stock_count_sessions").
-		Where("store_id = ?", storeID).
-		Order("created_at DESC").
+		Select("stock_count_sessions.*, COALESCE(cu.full_name, '') AS created_by_name, COALESCE(du.full_name, '') AS completed_by_name").
+		Joins("LEFT JOIN users cu ON cu.id = stock_count_sessions.created_by").
+		Joins("LEFT JOIN users du ON du.id = stock_count_sessions.completed_by").
+		Where("stock_count_sessions.store_id = ?", storeID).
+		Order("stock_count_sessions.created_at DESC").
 		Find(&sessions).Error
 	if err != nil {
 		return nil, err
@@ -74,7 +77,10 @@ func (r PostgresRepository) Get(ctx context.Context, storeID, sessionID string) 
 	var s CountSession
 	err := r.db.WithContext(ctx).
 		Table("stock_count_sessions").
-		Where("store_id = ? AND id = ?", storeID, sessionID).
+		Select("stock_count_sessions.*, COALESCE(cu.full_name, '') AS created_by_name, COALESCE(du.full_name, '') AS completed_by_name").
+		Joins("LEFT JOIN users cu ON cu.id = stock_count_sessions.created_by").
+		Joins("LEFT JOIN users du ON du.id = stock_count_sessions.completed_by").
+		Where("stock_count_sessions.store_id = ? AND stock_count_sessions.id = ?", storeID, sessionID).
 		Take(&s).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -110,7 +116,6 @@ func sessionHeader(s CountSession) map[string]any {
 		"count_type":     s.CountType,
 		"cycle_rule":     s.CycleRule,
 		"blind_count":    s.BlindCount,
-		"completed_by":   s.CompletedBy,
 		"completed_at":   s.CompletedAt,
 		"updated_at":     s.UpdatedAt,
 	}
