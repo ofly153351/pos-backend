@@ -371,31 +371,45 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CreatedBy:            actor.UserID,
 	}
 
-	created, err := s.assignNumberAndInsert(doc)
-	if err != nil {
+	if len(req.SourceDocumentIDs) == 0 {
+		return s.assignNumberAndInsert(doc)
+	}
+	// B07: validate, number, insert and link inside one transaction with the
+	// delivery orders locked, so a cancelled or already-billed DO can never be
+	// billed and a failure leaves no partial bill behind.
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ids, err := s.lockBillableDeliveryOrdersTx(tx, storeID, doc, req.SourceDocumentIDs)
+		if err != nil {
+			return err
+		}
+		if err := insertNumberedTx(tx, doc); err != nil {
+			return err
+		}
+		for _, deliveryOrderID := range ids {
+			if err := tx.Create(&BillDeliveryOrderLink{BillDocumentID: doc.ID, DeliveryOrderID: deliveryOrderID}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	if err := s.linkBillDeliveryOrders(ctx, storeID, created, req.SourceDocumentIDs); err != nil {
-		_ = s.repo.Delete(created.ID)
-		return nil, err
-	}
-	return created, nil
+	return doc, nil
 }
 
-func (s Service) linkBillDeliveryOrders(ctx context.Context, storeID string, bill *Document, sourceIDs []string) error {
-	if len(sourceIDs) == 0 {
-		return nil
-	}
+// lockBillableDeliveryOrdersTx locks the requested delivery orders and checks
+// they exist, belong to the bill's customer, are not cancelled, and are not
+// already on another active bill. It returns the de-duplicated ids.
+func (s Service) lockBillableDeliveryOrdersTx(tx *gorm.DB, storeID string, bill *Document, sourceIDs []string) ([]string, error) {
 	if bill.Type != TypeBill {
-		return fmt.Errorf("source_document_ids are only valid for BILL: %w", ErrInvalidInput)
+		return nil, fmt.Errorf("source_document_ids are only valid for BILL: %w", ErrInvalidInput)
 	}
-
 	unique := make(map[string]struct{}, len(sourceIDs))
 	ids := make([]string, 0, len(sourceIDs))
 	for _, id := range sourceIDs {
 		id = strings.TrimSpace(id)
 		if id == "" {
-			return fmt.Errorf("source_document_ids contains an empty id: %w", ErrInvalidInput)
+			return nil, fmt.Errorf("source_document_ids contains an empty id: %w", ErrInvalidInput)
 		}
 		if _, exists := unique[id]; exists {
 			continue
@@ -403,33 +417,31 @@ func (s Service) linkBillDeliveryOrders(ctx context.Context, storeID string, bil
 		unique[id] = struct{}{}
 		ids = append(ids, id)
 	}
-
 	var deliveryOrders []Document
-	if err := s.db.WithContext(ctx).
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("store_id = ? AND type = ? AND id IN ?", storeID, TypeDeliveryOrder, ids).
-		Find(&deliveryOrders).Error; err != nil {
-		return err
+		Order("id").Find(&deliveryOrders).Error; err != nil {
+		return nil, err
 	}
 	if len(deliveryOrders) != len(ids) {
-		return fmt.Errorf("one or more delivery orders were not found: %w", ErrInvalidInput)
+		return nil, fmt.Errorf("one or more delivery orders were not found: %w", ErrInvalidInput)
 	}
 	for _, deliveryOrder := range deliveryOrders {
 		if deliveryOrder.CustomerID != bill.CustomerID {
-			return fmt.Errorf("delivery order customer does not match BILL customer: %w", ErrInvalidInput)
+			return nil, fmt.Errorf("delivery order customer does not match BILL customer: %w", ErrInvalidInput)
+		}
+		if !CanBeSource(deliveryOrder.Status) {
+			return nil, sourceNotEligible(deliveryOrder)
+		}
+		existing, err := activeChildTx(tx, deliveryOrder.ID, TypeBill)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return nil, &AlreadyConvertedError{DocumentNo: existing.DocumentNoFull}
 		}
 	}
-
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, deliveryOrderID := range ids {
-			if err := tx.Create(&BillDeliveryOrderLink{
-				BillDocumentID:  bill.ID,
-				DeliveryOrderID: deliveryOrderID,
-			}).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	return ids, nil
 }
 
 // assignNumberAndInsert stamps doc with the next per-store/per-type document number
@@ -438,26 +450,10 @@ func (s Service) linkBillDeliveryOrders(ctx context.Context, storeID string, bil
 // again rather than 500-ing. Shared by CreateDocument and CreateFromSale so both speak
 // the same numbering scheme.
 func (s Service) assignNumberAndInsert(doc *Document) (*Document, error) {
-	prefix := typePrefix(doc.Type)
-	now := bizdate.Local(time.Now())
-	buddhistYear := now.Year() + 543
-
-	const maxDocNoAttempts = 6
-	var createErr error
-	for attempt := 0; attempt < maxDocNoAttempts; attempt++ {
-		seq, _ := s.repo.NextSeq(doc.StoreID, doc.Type)
-		seq += int64(attempt)
-		doc.DocumentNo = fmt.Sprintf("%s%d%02d-%04d", prefix, buddhistYear, int(now.Month()), seq)
-		doc.DocumentNoFull = fmt.Sprintf("%s%d%02d-%04d", prefix, buddhistYear, int(now.Month()), seq)
-		createErr = s.repo.Create(doc)
-		if createErr == nil {
-			return doc, nil
-		}
-		if !isDuplicateDocNo(createErr) {
-			return nil, createErr
-		}
+	if err := s.db.Transaction(func(tx *gorm.DB) error { return insertNumberedTx(tx, doc) }); err != nil {
+		return nil, err
 	}
-	return nil, createErr
+	return doc, nil
 }
 
 // isDuplicateDocNo reports whether err is a Postgres unique-violation (SQLSTATE
@@ -951,7 +947,81 @@ func (s Service) UpdateDocumentStatus(ctx context.Context, actor auth.Claims, st
 	if _, err := s.GetDocument(ctx, actor, storeID, id); err != nil {
 		return err
 	}
-	return s.repo.UpdateStatus(id, req.Status)
+	// B06: lock the row and apply the shared transition rules inside one
+	// transaction so a concurrent change cannot slip past the check.
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var doc Document
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "type", "status").
+			First(&doc, "id = ? AND store_id = ?", id, storeID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if err := CheckTransition(doc.Type, doc.Status, req.Status); err != nil {
+			return err
+		}
+		if doc.Status == req.Status {
+			return nil
+		}
+		return tx.Model(&Document{}).Where("id = ? AND store_id = ?", id, storeID).
+			Updates(map[string]any{"status": req.Status, "updated_at": time.Now()}).Error
+	})
+}
+
+// BulkStatusResult reports per-document outcomes of a bulk status change (B06).
+type BulkStatusResult struct {
+	Updated []string            `json:"updated"`
+	Skipped []BulkStatusSkipped `json:"skipped"`
+}
+
+type BulkStatusSkipped struct {
+	ID         string         `json:"id"`
+	DocumentNo string         `json:"document_no,omitempty"`
+	From       DocumentStatus `json:"from,omitempty"`
+	Reason     string         `json:"reason"` // invalid_transition | not_found
+}
+
+// bulkSetStatus applies the same transition rules as single updates: allowed
+// documents change, the rest are skipped with a reason; nothing is silent.
+func (s Service) bulkSetStatus(ctx context.Context, storeID string, ids []string, to DocumentStatus) (BulkStatusResult, error) {
+	result := BulkStatusResult{Updated: []string{}, Skipped: []BulkStatusSkipped{}}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var docs []Document
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "type", "status", "document_no_full").
+			Where("store_id = ? AND id IN ?", storeID, ids).
+			Order("id").Find(&docs).Error; err != nil {
+			return err
+		}
+		found := make(map[string]Document, len(docs))
+		for _, d := range docs {
+			found[d.ID] = d
+		}
+		var allowed []string
+		for _, id := range ids {
+			d, ok := found[id]
+			switch {
+			case !ok:
+				result.Skipped = append(result.Skipped, BulkStatusSkipped{ID: id, Reason: "not_found"})
+			case !CanTransition(d.Type, d.Status, to):
+				result.Skipped = append(result.Skipped, BulkStatusSkipped{ID: id, DocumentNo: d.DocumentNoFull, From: d.Status, Reason: "invalid_transition"})
+			default:
+				allowed = append(allowed, id)
+			}
+		}
+		if len(allowed) == 0 {
+			return nil
+		}
+		if err := tx.Model(&Document{}).Where("store_id = ? AND id IN ?", storeID, allowed).
+			Updates(map[string]any{"status": to, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
+		result.Updated = allowed
+		return nil
+	})
+	return result, err
 }
 
 // UpdatePaymentStatus sets the manual payment flag (paid/unpaid/partial) on a
@@ -1281,20 +1351,24 @@ func (s Service) RelatedDocuments(ctx context.Context, actor auth.Claims, storeI
 	return out, nil
 }
 
-func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) error {
+func (s Service) BulkAction(ctx context.Context, actor auth.Claims, storeID string, req BulkActionRequest) (*BulkStatusResult, error) {
 	if len(req.IDs) == 0 {
-		return ErrInvalidInput
+		return nil, ErrInvalidInput
 	}
 	switch req.Action {
 	case "DELETE":
-		return s.repo.BulkDelete(storeID, req.IDs)
+		return nil, s.repo.BulkDelete(storeID, req.IDs)
 	case "SET_STATUS":
 		if req.Status == nil {
-			return ErrInvalidInput
+			return nil, ErrInvalidInput
 		}
-		return s.repo.BulkSetStatus(storeID, req.IDs, *req.Status)
+		result, err := s.bulkSetStatus(ctx, storeID, req.IDs, *req.Status)
+		if err != nil {
+			return nil, err
+		}
+		return &result, nil
 	default:
-		return ErrBadAction
+		return nil, ErrBadAction
 	}
 }
 
@@ -1455,10 +1529,13 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	if !canConvert(src.Type, target) {
 		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
-	if existing, err := s.repo.FindBySourceAndType(src.ID, target); err != nil {
+	if existing, err := activeChildTx(s.db.WithContext(ctx), src.ID, target); err != nil {
 		return nil, err
 	} else if existing != nil {
-		return nil, fmt.Errorf("%w: %s", ErrAlreadyConverted, existing.DocumentNoFull)
+		return nil, &AlreadyConvertedError{DocumentNo: existing.DocumentNoFull}
+	}
+	if !CanBeSource(src.Status) {
+		return nil, sourceNotEligible(*src)
 	}
 
 	// buildConversionRequest + applyCustomerShipping resolve only the NON-money fields
@@ -1563,7 +1640,37 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		Items:            items,
 		CreatedBy:        actor.UserID,
 	}
-	return s.assignNumberAndInsert(doc)
+	// B12/B07: re-check the source under a row lock and create the target plus
+	// the source's state change in one transaction. Concurrent conversions
+	// serialize on the lock, so only one target is ever created.
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		locked, err := lockDocumentTx(tx, storeID, src.ID)
+		if err != nil {
+			return err
+		}
+		// Report an existing target first so a repeat names the created document.
+		existing, err := activeChildTx(tx, locked.ID, target)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			return &AlreadyConvertedError{DocumentNo: existing.DocumentNoFull}
+		}
+		if !CanBeSource(locked.Status) {
+			return sourceNotEligible(locked)
+		}
+		if err := insertNumberedTx(tx, doc); err != nil {
+			return err
+		}
+		if locked.Type == TypeQuotation {
+			return tx.Model(&Document{}).Where("id = ? AND store_id = ?", locked.ID, storeID).
+				Updates(map[string]any{"status": StatusConverted, "updated_at": time.Now()}).Error
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
 
 // ConvertReceiptFromBills creates one receipt for multiple billing notices. Each

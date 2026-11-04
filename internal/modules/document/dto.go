@@ -106,6 +106,9 @@ type ListQuery struct {
 	StaffID       string
 	DateFrom      string
 	DateTo        string
+	// Billable keeps only delivery orders that may still be billed (B07):
+	// not closed and not linked to an active bill.
+	Billable bool
 }
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────

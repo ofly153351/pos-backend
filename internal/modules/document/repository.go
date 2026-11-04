@@ -64,6 +64,12 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 		base = base.Where(bizdate.SQLDate("document_date")+" <= ?::date", q.DateTo)
 	}
 
+	if q.Billable {
+		base = base.Where("type = ? AND status NOT IN ?", TypeDeliveryOrder, []DocumentStatus{StatusCancelled, StatusRejected, StatusExpired, StatusConverted}).
+			Where(`NOT EXISTS (SELECT 1 FROM documents b WHERE b.type = 'BILL' AND b.status <> 'CANCELLED'
+				AND (b.source_document_id = documents.id OR b.id IN (SELECT l.bill_document_id FROM bill_delivery_order_links l WHERE l.delivery_order_id = documents.id)))`)
+	}
+
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, DocumentStats{}, err

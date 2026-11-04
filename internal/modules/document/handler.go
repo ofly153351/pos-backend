@@ -28,6 +28,7 @@ func (h Handler) ListDocuments(c *fiber.Ctx) error {
 		StaffID:       c.Query("staff_id"),
 		DateFrom:      c.Query("date_from"),
 		DateTo:        c.Query("date_to"),
+		Billable:      c.QueryBool("billable", false),
 		Page:          c.QueryInt("page", 1),
 		Limit:         c.QueryInt("limit", 20),
 	}
@@ -356,10 +357,11 @@ func (h Handler) BulkAction(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
 	}
-	if err := h.service.BulkAction(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req); err != nil {
+	result, err := h.service.BulkAction(c.UserContext(), middleware.ClaimsFromContext(c), storeID, req)
+	if err != nil {
 		return writeError(c, err)
 	}
-	return httpx.Success(c, fiber.StatusOK, "bulk action completed", nil)
+	return httpx.Success(c, fiber.StatusOK, "bulk action completed", result)
 }
 
 func writeError(c *fiber.Ctx, err error) error {
@@ -378,8 +380,27 @@ func writeError(c *fiber.Ctx, err error) error {
 		return httpx.Error(c, fiber.StatusNotFound, "not found", err.Error())
 	case errors.Is(err, ErrForbidden):
 		return httpx.Error(c, fiber.StatusForbidden, "forbidden", err.Error())
+	case errors.Is(err, ErrInvalidTransition):
+		var te *TransitionError
+		details := fiber.Map{"reason": "invalid_transition"}
+		if errors.As(err, &te) {
+			details["from"], details["to"] = te.From, te.To
+		}
+		return httpx.ErrConflictDetails(c, err.Error(), details)
+	case errors.Is(err, ErrSourceNotEligible):
+		details := fiber.Map{"reason": "source_not_eligible"}
+		var se *SourceNotEligibleError
+		if errors.As(err, &se) {
+			details["document_no"], details["from"] = se.DocumentNo, se.Status
+		}
+		return httpx.ErrConflictDetails(c, err.Error(), details)
 	case errors.Is(err, ErrAlreadyConverted):
-		return httpx.Error(c, fiber.StatusConflict, "document already exists", err.Error())
+		details := fiber.Map{"reason": "already_converted"}
+		var ac *AlreadyConvertedError
+		if errors.As(err, &ac) {
+			details["document_no"] = ac.DocumentNo
+		}
+		return httpx.ErrConflictDetails(c, err.Error(), details)
 	case errors.Is(err, ErrDocumentReferenced):
 		return httpx.Error(c, fiber.StatusConflict, "document cannot be deleted because it is referenced", err.Error())
 	case errors.Is(err, ErrDocumentNotEditable):
