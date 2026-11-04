@@ -58,6 +58,33 @@ Subscription is modeled at the store level because POS access is tenant-oriented
 - Product type ownership is store-scoped. Do not attach product categories to `user_id`; use `store_id`.
 - New write flows should be transaction-safe and should validate role access before mutating store data.
 
+## Owner-Approved Business Rules (P1, 2026-11-04)
+Follow these when touching documents, money or reports; ask the owner before changing them.
+
+- **Business dates:** a business date is the Asia/Bangkok calendar day. Use `internal/platform/bizdate` for defaults, filters (`bizdate.SQLDate(col)`) and rendering. Never format a stored instant in UTC or server time.
+- **Validation:** use `internal/platform/fieldcheck`. Thai TIN is 13 digits with a mod-11 check digit, for individuals and companies; an empty value is allowed. Phone numbers need 9–15 digits. Updates validate only changed values so legacy data never blocks unrelated edits. Return coded field errors via `httpx.FieldErrorResponse` / `Err422Code`; the frontend translates `code`.
+- **Below cost:** selling below cost is allowed (UI warns). Never block it in the backend.
+- **Document status (`document/transitions.go`):**
+  - DRAFT can move to PENDING or CANCELLED. PENDING can move to OVERDUE, COMPLETED or CANCELLED. OVERDUE can move to COMPLETED or CANCELLED.
+  - Quotations may also use SENT, ACCEPTED, REJECTED and EXPIRED.
+  - COMPLETED, CANCELLED, CONVERTED, REJECTED and EXPIRED are terminal. CONVERTED is set only by conversion.
+  - Bulk updates use the same table and report skipped documents.
+- **Conversion and billing:** lock the source row and create the target plus the source state change in one transaction (`chain.go`). Number documents under the advisory lock (`insertNumberedTx`). A cancelled or closed source cannot be converted or billed. A delivery order is billed at most once.
+- **Tax invoice:** requires the seller's valid tax ID and address plus the buyer's name. The buyer's tax ID must be valid when given. A juristic buyer (TIN starting with 0) also needs a branch. Snapshot buyer tax ID and branch on the document.
+- **Credit note:** must reference an INVOICE, RECEIPT or TAX_INVOICE and give a reason. Cumulative credit cannot exceed the original total (checked under a lock). Credit notes never move stock.
+- **Debt and payments:**
+  - Payments are stored in `invoice_payments` (`document_id`). Do not add a second ledger.
+  - A debt belongs to its payable root: the INVOICE ancestor, otherwise the document itself. A BILL with linked delivery orders settles their roots.
+  - Remaining = total − payments − credit notes. Partial payment is allowed, overpayment is rejected, and payments are idempotent via `Idempotency-Key`.
+  - Statements and pending summaries use `document/outstanding.go`, which must mirror `payments.go`.
+- **Loans:** `credit_sales.type='loan'` is goods, not money. Exclude loans from receivables, statements and revenue. A goods return is not a payment (`kind=return`).
+- **Reports (`internal/platform/reportcalc`):**
+  - Revenue comes from sales only (documents are paperwork). Recognise it at `sold_at`, pre-VAT, net of the pre-VAT share of refunds, excluding voided sales and loans.
+  - COGS uses the sale-time `unit_cost` only. Report missing costs; never fall back to current cost.
+  - Inventory value = positive stock × current cost.
+- **Previews (B29):** HTML previews contain text that store members type, so templates must escape it. Fields rendered as `template.URL` must go through `safeImageURL`.
+- **Tests:** add a failing regression test first. Use the disposable PostgreSQL harness in `internal/tests/p0postgres` (see its README) for transactional, concurrency and SQL behaviour.
+
 ## Local Development
 - Run the API with `go run ./cmd/api.go`
 - Run tests with `GOCACHE=$(pwd)/.cache/go-build GOMODCACHE=$(pwd)/.cache/go-mod go test ./...`
