@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 
@@ -438,7 +439,7 @@ func (s Service) linkBillDeliveryOrders(ctx context.Context, storeID string, bil
 // the same numbering scheme.
 func (s Service) assignNumberAndInsert(doc *Document) (*Document, error) {
 	prefix := typePrefix(doc.Type)
-	now := time.Now()
+	now := bizdate.Local(time.Now())
 	buddhistYear := now.Year() + 543
 
 	const maxDocNoAttempts = 6
@@ -602,6 +603,9 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 	if docDate.IsZero() {
 		docDate = time.Now()
 	}
+	// B02: a sale at 00:30 Bangkok is 17:30 UTC on the previous day; store the
+	// Bangkok business day so lists, edits and PDFs agree.
+	docDate = bizdate.FromInstant(docDate)
 
 	customerName := strings.TrimSpace(sr.CustomerName)
 	if customerName == "" {
@@ -1505,7 +1509,7 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 
 	docDate, derr := time.Parse("2006-01-02", req.DocumentDate)
 	if derr != nil {
-		docDate = time.Now()
+		docDate = bizdate.Today()
 	}
 	var dueDate *time.Time
 	if req.DueDate != nil && *req.DueDate != "" {
@@ -1649,7 +1653,7 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 		CustomerPhone:    primary.CustomerPhone,
 		StaffID:          actor.UserID,
 		StaffName:        actor.Name,
-		DocumentDate:     time.Now(),
+		DocumentDate:     bizdate.Today(),
 		InvoiceRefNo:     primary.DocumentNoFull,
 		SourceDocumentID: &primary.ID,
 		BankAccountID:    primary.BankAccountID,
@@ -1700,7 +1704,7 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 
 	receiptItems := receipt.Items
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := time.Now()
+		now := bizdate.Local(time.Now())
 		prefix := fmt.Sprintf("RCT%d%02d", now.Year()+543, now.Month())
 		var seq int64
 		if err := tx.Model(&Document{}).
@@ -1816,7 +1820,7 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		CustomerNameOverride:    src.CustomerName,
 		CustomerAddressOverride: src.CustomerAddress,
 		CustomerPhoneOverride:   src.CustomerPhone,
-		DocumentDate:            time.Now().Format("2006-01-02"),
+		DocumentDate:            bizdate.Format(time.Now()),
 		VatRate:                 src.VatRate,
 		Notes:                   src.Notes,
 		SourceDocumentID:        &srcID,
@@ -1826,7 +1830,7 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 	req.PriceValidityDays = src.PriceValidityDays
 	req.DeliveryLeadTimeDays = src.DeliveryLeadTimeDays
 	if src.POReceivedDate != nil {
-		d := src.POReceivedDate.Format("2006-01-02")
+		d := bizdate.Format(*src.POReceivedDate)
 		req.POReceivedDate = &d
 	}
 	if target == TypeDeliveryOrder {
@@ -1835,7 +1839,7 @@ func buildConversionRequest(src *Document, target DocumentType, deliveryDate ...
 		req.DeliveryContact = src.CustomerName
 		req.DeliveryPhone = src.CustomerPhone
 		if src.DueDate != nil {
-			d := src.DueDate.Format("2006-01-02")
+			d := bizdate.Format(*src.DueDate)
 			req.DueDate = &d
 		}
 		if len(deliveryDate) > 0 {

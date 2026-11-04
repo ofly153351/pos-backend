@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 
@@ -290,7 +291,7 @@ func parseDateOnly(v string) time.Time {
 
 func shortDate(v string) string {
 	if t := parseTimestamp(v); !t.IsZero() {
-		return t.Format("02/01/2006")
+		return bizdate.Local(t).Format("02/01/2006")
 	}
 	return v
 }

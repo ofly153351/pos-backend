@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 
@@ -214,8 +215,8 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 	var docs []Document
 	err := s.db.
 		Preload("Items").
-		Where("store_id = ? AND customer_id = ? AND document_date BETWEEN ? AND ?",
-			storeID, customerID, opts.PeriodStart, opts.PeriodEnd).
+		Where("store_id = ? AND customer_id = ? AND "+bizdate.SQLDate("document_date")+" BETWEEN ?::date AND ?::date",
+			storeID, customerID, bizdate.Format(opts.PeriodStart), bizdate.Format(opts.PeriodEnd)).
 		Where("payment_status != ?", string(PaymentPaid)).
 		Order("document_date ASC").
 		Find(&docs).Error
@@ -225,11 +226,11 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 
 	// Seq number for this statement
 	seq, _ := s.repo.NextSeq(storeID, TypeBill) // reuse bill sequence for statements
-	now := time.Now()
+	now := bizdate.Local(time.Now())
 	buddhistYear := now.Year() + 543
 	stmtNo := fmt.Sprintf("STMT/%d/%02d/%04d", buddhistYear, int(now.Month()), seq)
 
-	today := now.Truncate(24 * time.Hour)
+	today := bizdate.Today()
 	var rows []docpdf.StatementInvoiceRow
 	for _, d := range docs {
 		balance := d.TotalAmount // simplified: no partial payment tracking in doc module
@@ -238,7 +239,7 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 			due = *d.DueDate
 		}
 		status := "outstanding"
-		if due.Before(today) && balance > 0 {
+		if bizdate.FromInstant(due).Before(today) && balance > 0 {
 			status = "overdue"
 		}
 		rows = append(rows, docpdf.StatementInvoiceRow{

@@ -2,6 +2,7 @@ package dochtml
 
 import (
 	"fmt"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 )
@@ -44,6 +45,8 @@ func formatMoney(f float64) string {
 }
 
 func fmtThaiDate(t time.Time) string {
+	// B02: render the business (Bangkok) calendar day, never the UTC day.
+	t = bizdate.Local(t)
 	months := [...]string{
 		"", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
 		"กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",

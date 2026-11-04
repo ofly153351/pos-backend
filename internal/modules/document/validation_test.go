@@ -56,8 +56,8 @@ func TestValidateCreateLines_RejectsInvalidLines(t *testing.T) {
 			name: "multiple bad lines report each index",
 			req: CreateDocumentRequest{
 				Items: []CreateDocumentItemInput{
-					{Description: "", Quantity: 1, UnitPrice: 0},          // items[0].description
-					{Description: "ok", Quantity: 0, UnitPrice: -1},       // items[1].quantity + unit_price
+					{Description: "", Quantity: 1, UnitPrice: 0},    // items[0].description
+					{Description: "ok", Quantity: 0, UnitPrice: -1}, // items[1].quantity + unit_price
 				},
 			},
 			wantErr: true,

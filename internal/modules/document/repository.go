@@ -3,6 +3,7 @@ package document
 import (
 	"errors"
 	"fmt"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 
@@ -55,10 +56,12 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 		base = base.Where("staff_id = ?", q.StaffID)
 	}
 	if q.DateFrom != "" {
-		base = base.Where("document_date >= ?", q.DateFrom)
+		// B02: compare Bangkok business days, not instants (a 23:00 document is
+		// still on its day and legacy sale-time instants keep their local day).
+		base = base.Where(bizdate.SQLDate("document_date")+" >= ?::date", q.DateFrom)
 	}
 	if q.DateTo != "" {
-		base = base.Where("document_date <= ?", q.DateTo)
+		base = base.Where(bizdate.SQLDate("document_date")+" <= ?::date", q.DateTo)
 	}
 
 	var total int64
@@ -243,7 +246,7 @@ func (r *repository) BulkSetStatus(storeID string, ids []string, status Document
 // document_no that still exists, violating the unique index (DOC-1). MAX+1 keeps
 // numbering monotonic across deletes.
 func (r *repository) NextSeq(storeID string, docType DocumentType) (int64, error) {
-	now := time.Now()
+	now := bizdate.Local(time.Now())
 	prefix := fmt.Sprintf("%s%d%02d", typePrefix(docType), now.Year()+543, now.Month())
 	var maxSeq int64
 	r.db.Model(&Document{}).

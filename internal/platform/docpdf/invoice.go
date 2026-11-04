@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"pos-backend/internal/platform/bizdate"
 	"time"
 
 	"github.com/jung-kurt/gofpdf"
@@ -423,6 +424,8 @@ func money(v float64) string {
 }
 
 func thaiDate(t time.Time) string {
+	// B02: render the business (Bangkok) calendar day, never the UTC day.
+	t = bizdate.Local(t)
 	return fmt.Sprintf("%02d/%02d/%d", t.Day(), int(t.Month()), t.Year()+543)
 }
 

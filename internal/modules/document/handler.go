@@ -2,6 +2,7 @@ package document
 
 import (
 	"errors"
+	"pos-backend/internal/platform/bizdate"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -210,15 +211,15 @@ func (h Handler) GetStatementPDF(c *fiber.Ctx) error {
 		if v == "" {
 			return def
 		}
-		t, err := time.Parse("2006-01-02", v)
+		t, err := bizdate.Parse(v)
 		if err != nil {
 			return def
 		}
 		return t
 	}
-	now := time.Now()
-	periodStart := parseDateQ("period_start", time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()))
-	periodEnd := parseDateQ("period_end", now)
+	today := bizdate.Today()
+	periodStart := parseDateQ("period_start", time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC))
+	periodEnd := parseDateQ("period_end", today)
 
 	opts := StatementPDFOptions{
 		PeriodStart:   periodStart,

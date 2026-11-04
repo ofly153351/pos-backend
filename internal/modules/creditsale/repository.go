@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
 
@@ -630,7 +631,7 @@ func (r PostgresRepository) ReturnGoods(ctx context.Context, storeID, creditSale
 
 func (r PostgresRepository) Summary(ctx context.Context, storeID string) (DebtSummary, error) {
 	var s DebtSummary
-	today := time.Now().Format("2006-01-02")
+	today := bizdate.Format(time.Now())
 	err := r.db.WithContext(ctx).
 		Table("credit_sales").
 		Select(`
@@ -656,10 +657,10 @@ func (r PostgresRepository) Aging(ctx context.Context, storeID string) (AgingSum
 			SELECT remaining_amount,
 			CASE
 				WHEN NULLIF(due_date, '') IS NULL THEN 'current'
-				WHEN due_date::date >= CURRENT_DATE THEN 'current'
-				WHEN CURRENT_DATE - due_date::date BETWEEN 1 AND 30 THEN '1_30'
-				WHEN CURRENT_DATE - due_date::date BETWEEN 31 AND 60 THEN '31_60'
-				WHEN CURRENT_DATE - due_date::date BETWEEN 61 AND 90 THEN '61_90'
+				WHEN due_date::date >= (now() AT TIME ZONE 'Asia/Bangkok')::date THEN 'current'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - due_date::date BETWEEN 1 AND 30 THEN '1_30'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - due_date::date BETWEEN 31 AND 60 THEN '31_60'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - due_date::date BETWEEN 61 AND 90 THEN '61_90'
 				ELSE '90_plus'
 			END AS label
 			FROM credit_sales
@@ -682,16 +683,16 @@ func (r PostgresRepository) Aging(ctx context.Context, storeID string) (AgingSum
 			SUM(cs.remaining_amount) AS outstanding,
 			MAX(CASE
 				WHEN NULLIF(cs.due_date, '') IS NULL THEN 'current'
-				WHEN cs.due_date::date >= CURRENT_DATE THEN 'current'
-				WHEN CURRENT_DATE - cs.due_date::date > 90 THEN '90_plus'
-				WHEN CURRENT_DATE - cs.due_date::date > 60 THEN '61_90'
-				WHEN CURRENT_DATE - cs.due_date::date > 30 THEN '31_60'
-				WHEN CURRENT_DATE - cs.due_date::date >= 1 THEN '1_30'
+				WHEN cs.due_date::date >= (now() AT TIME ZONE 'Asia/Bangkok')::date THEN 'current'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - cs.due_date::date > 90 THEN '90_plus'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - cs.due_date::date > 60 THEN '61_90'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - cs.due_date::date > 30 THEN '31_60'
+				WHEN (now() AT TIME ZONE 'Asia/Bangkok')::date - cs.due_date::date >= 1 THEN '1_30'
 				ELSE 'current'
 			END) AS oldest_bucket,
 			COALESCE(MAX(CASE
-				WHEN NULLIF(cs.due_date, '') IS NOT NULL AND cs.due_date::date < CURRENT_DATE
-				THEN CURRENT_DATE - cs.due_date::date
+				WHEN NULLIF(cs.due_date, '') IS NOT NULL AND cs.due_date::date < (now() AT TIME ZONE 'Asia/Bangkok')::date
+				THEN (now() AT TIME ZONE 'Asia/Bangkok')::date - cs.due_date::date
 				ELSE 0
 			END), 0) AS days_overdue
 		FROM credit_sales cs
@@ -797,7 +798,7 @@ func displayStatus(cs CreditSale) string {
 	if cs.Status == StatusCancelled || cs.Status == StatusCompleted {
 		return cs.Status
 	}
-	if cs.RemainingAmount > 0 && cs.DueDate != "" && cs.DueDate < time.Now().Format("2006-01-02") {
+	if cs.RemainingAmount > 0 && cs.DueDate != "" && cs.DueDate < bizdate.Format(time.Now()) {
 		return StatusOverdue
 	}
 	return cs.Status
