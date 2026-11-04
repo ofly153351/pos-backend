@@ -1486,8 +1486,16 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	if src.Type != TypeInvoice {
 		return nil, fmt.Errorf("document is not an invoice: %w", ErrInvalidInput)
 	}
-	if err := s.repo.MarkPaid(id); err != nil {
+	// B05: settle through the payment ledger (remaining balance only, under
+	// lock) instead of flipping flags; a cancelled invoice is rejected.
+	summary, err := s.PaymentSummary(ctx, actor, storeID, id)
+	if err != nil {
 		return nil, err
+	}
+	if summary.Remaining > 0 {
+		if _, err := s.RecordPayment(ctx, actor, storeID, id, RecordPaymentRequest{Amount: summary.Remaining, Method: "cash"}, ""); err != nil {
+			return nil, err
+		}
 	}
 
 	// ถ้ามี DO ที่สร้างจาก invoice นี้อยู่แล้ว → ไม่สร้าง TAX_INVOICE ซ้ำ
@@ -1496,12 +1504,7 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 		Where("source_document_id = ? AND type = ?", id, TypeDeliveryOrder).
 		Count(&doCount)
 	if doCount > 0 {
-		if err := s.markRelatedDocumentsPaid(ctx, storeID, id); err != nil {
-			return nil, err
-		}
-		src.Status = StatusCompleted
-		src.PaymentStatus = PaymentPaid
-		return src, nil
+		return s.GetDocument(ctx, actor, storeID, id)
 	}
 
 	taxDoc, err := s.createTaxInvoiceFrom(ctx, actor, storeID, src)
@@ -1513,9 +1516,6 @@ func (s Service) PayInvoice(ctx context.Context, actor auth.Claims, storeID, id 
 	}
 	taxDoc.Status = StatusCompleted
 	taxDoc.PaymentStatus = PaymentPaid
-	if err := s.markRelatedDocumentsPaid(ctx, storeID, id); err != nil {
-		return nil, err
-	}
 	return taxDoc, nil
 }
 

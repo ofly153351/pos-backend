@@ -274,6 +274,33 @@ func (h Handler) PayInvoice(c *fiber.Ctx) error {
 	return httpx.Success(c, fiber.StatusCreated, "invoice paid and tax invoice created", taxDoc)
 }
 
+// GetPayments returns the balances and payments of the debt a document carries (B05).
+func (h Handler) GetPayments(c *fiber.Ctx) error {
+	summary, err := h.service.PaymentSummary(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("docID"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	return httpx.Success(c, fiber.StatusOK, "payments fetched", summary)
+}
+
+// RecordPayment records a confirmed (partial) payment (B05). The
+// Idempotency-Key header makes retries of the same submission safe.
+func (h Handler) RecordPayment(c *fiber.Ctx) error {
+	var req RecordPaymentRequest
+	if err := c.BodyParser(&req); err != nil {
+		return httpx.Error(c, fiber.StatusBadRequest, "invalid request body", err.Error())
+	}
+	summary, err := h.service.RecordPayment(c.UserContext(), middleware.ClaimsFromContext(c), c.Params("storeID"), c.Params("docID"), req, c.Get("Idempotency-Key"))
+	if err != nil {
+		return writeError(c, err)
+	}
+	status := fiber.StatusCreated
+	if summary.Replayed {
+		status = fiber.StatusOK
+	}
+	return httpx.Success(c, status, "payment recorded", summary)
+}
+
 func (h Handler) ConvertToTaxInvoice(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
 	id := c.Params("docID")
@@ -399,6 +426,13 @@ func writeError(c *fiber.Ctx, err error) error {
 		var se *SourceNotEligibleError
 		if errors.As(err, &se) {
 			details["document_no"], details["from"] = se.DocumentNo, se.Status
+		}
+		return httpx.ErrConflictDetails(c, err.Error(), details)
+	case errors.Is(err, ErrOverpayment):
+		details := fiber.Map{"reason": "overpayment"}
+		var oe *OverpaymentError
+		if errors.As(err, &oe) {
+			details["remaining"] = oe.Remaining
 		}
 		return httpx.ErrConflictDetails(c, err.Error(), details)
 	case errors.Is(err, ErrCreditExceedsOriginal):
