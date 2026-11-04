@@ -38,13 +38,14 @@ func NewPostgresRepository(db *gorm.DB) PostgresRepository {
 
 // ── Read ────────────────────────────────────────────────────────────────────
 
-const creditSaleSelect = "cs.*, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone"
+const creditSaleSelect = "cs.*, COALESCE(c.full_name, '') AS customer_name, COALESCE(c.phone, '') AS customer_phone, COALESCE(NULLIF(u.full_name, ''), cs.created_by) AS created_by_name"
 
 func (r PostgresRepository) baseQuery(ctx context.Context, storeID string) *gorm.DB {
 	return r.db.WithContext(ctx).
 		Table("credit_sales cs").
 		Select(creditSaleSelect).
 		Joins("LEFT JOIN customers c ON c.id = cs.customer_id").
+		Joins("LEFT JOIN users u ON u.id = cs.created_by").
 		Where("cs.store_id = ?", storeID)
 }
 
@@ -133,16 +134,21 @@ func (r PostgresRepository) hydrate(ctx context.Context, sales []CreditSale) err
 
 	var payments []CreditPayment
 	err = r.db.WithContext(ctx).
-		Table("credit_payments").
-		Select("id, credit_sale_id, amount, method, note, paid_at").
-		Where("credit_sale_id IN ?", creditIDs).
-		Order("paid_at ASC").
+		Table("credit_payments p").
+		Select("p.id, p.credit_sale_id, p.amount, p.method, p.note, p.paid_at, COALESCE(NULLIF(u.full_name, ''), p.created_by) AS created_by_name").
+		Joins("LEFT JOIN users u ON u.id = p.created_by").
+		Where("p.credit_sale_id IN ?", creditIDs).
+		Order("p.paid_at ASC").
 		Find(&payments).Error
 	if err != nil {
 		return err
 	}
 	paymentsByCredit := make(map[string][]CreditPayment)
 	for _, p := range payments {
+		p.Kind = "payment"
+		if p.Method == "return" {
+			p.Kind = "return"
+		}
 		paymentsByCredit[p.CreditSaleID] = append(paymentsByCredit[p.CreditSaleID], p)
 	}
 
@@ -186,8 +192,33 @@ func (r PostgresRepository) hydrate(ctx context.Context, sales []CreditSale) err
 		} else {
 			sales[i].Payments = []CreditPayment{}
 		}
+		splitMoneyAndGoods(&sales[i])
 	}
 	return nil
+}
+
+// splitMoneyAndGoods (B15) derives what is owed in money versus goods. Goods
+// returned on a loan are not payments: they reduce unreturned goods value,
+// while cash paid on either type is collected money.
+func splitMoneyAndGoods(cs *CreditSale) {
+	cs.CollectedAmount, cs.ReturnedValue = 0, 0
+	for _, p := range cs.Payments {
+		if p.Kind == "return" {
+			cs.ReturnedValue += p.Amount
+		} else {
+			cs.CollectedAmount += p.Amount
+		}
+	}
+	cs.CollectedAmount, cs.ReturnedValue = roundMoney(cs.CollectedAmount), roundMoney(cs.ReturnedValue)
+	cs.ReceivableAmount, cs.UnreturnedGoodsValue = 0, 0
+	if cs.Status == StatusCancelled {
+		return
+	}
+	if cs.Type == typeLoan {
+		cs.UnreturnedGoodsValue = cs.RemainingAmount
+	} else {
+		cs.ReceivableAmount = cs.RemainingAmount
+	}
 }
 
 // ── Create ──────────────────────────────────────────────────────────────────
@@ -644,6 +675,20 @@ func (r PostgresRepository) Summary(ctx context.Context, storeID string) (DebtSu
 		// outstanding/overdue totals so the "ยอดค้างชำระ" KPI reflects only real AR.
 		Where("store_id = ? AND type <> ?", storeID, typeLoan).
 		Take(&s).Error
+	if err != nil {
+		return s, err
+	}
+	// B15: unreturned goods are reported on their own, never as money owed.
+	var loans struct {
+		LoanOpenCount       int64
+		LoanUnreturnedValue float64
+	}
+	err = r.db.WithContext(ctx).Table("credit_sales").
+		Select(`COUNT(*) FILTER (WHERE status <> 'cancelled' AND remaining_amount > 0) AS loan_open_count,
+			COALESCE(SUM(remaining_amount) FILTER (WHERE status <> 'cancelled' AND remaining_amount > 0), 0) AS loan_unreturned_value`).
+		Where("store_id = ? AND type = ?", storeID, typeLoan).
+		Scan(&loans).Error
+	s.LoanOpenCount, s.LoanUnreturnedValue = loans.LoanOpenCount, loans.LoanUnreturnedValue
 	return s, err
 }
 
@@ -749,7 +794,8 @@ func (r PostgresRepository) StatementContext(ctx context.Context, storeID, credi
 
 	var sales []CreditSale
 	if err := r.baseQuery(ctx, storeID).
-		Where("cs.customer_id = ? AND cs.status <> ?", trigger.CustomerID, StatusCancelled).
+		// B15: a money statement never lists borrowed goods (and vice versa).
+		Where("cs.customer_id = ? AND cs.status <> ? AND cs.type = ?", trigger.CustomerID, StatusCancelled, trigger.Type).
 		Order("cs.created_at ASC").
 		Find(&sales).Error; err != nil {
 		return StatementContext{}, err

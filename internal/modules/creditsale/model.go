@@ -41,6 +41,9 @@ type CreditPayment struct {
 	Note         string  `json:"note" gorm:"column:note"`
 	PaidAt       string  `json:"paid_at" gorm:"column:paid_at"`
 	CreatedBy    string  `json:"-" gorm:"column:created_by"`
+	// B15: "return" rows record goods coming back on a loan — not money.
+	Kind          string `json:"kind" gorm:"-"`
+	CreatedByName string `json:"created_by_name" gorm:"column:created_by_name"`
 }
 
 // CreditSale is the receivable header + joined customer + items + payments.
@@ -60,8 +63,16 @@ type CreditSale struct {
 	DueDate         string  `json:"due_date" gorm:"column:due_date"`
 	Note            string  `json:"note" gorm:"column:note"`
 	CreatedBy       string  `json:"created_by" gorm:"column:created_by"`
-	CreatedAt       string  `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt       string  `json:"updated_at" gorm:"column:updated_at"`
+	// B15: who recorded it, resolved from the session user (never typed in).
+	CreatedByName string `json:"created_by_name" gorm:"column:created_by_name"`
+	// B15: money and goods are kept apart. A credit sale is a monetary
+	// receivable; a loan is unreturned goods valued at its sale price.
+	ReceivableAmount     float64 `json:"receivable_amount" gorm:"-"`
+	CollectedAmount      float64 `json:"collected_amount" gorm:"-"`
+	ReturnedValue        float64 `json:"returned_value" gorm:"-"`
+	UnreturnedGoodsValue float64 `json:"unreturned_goods_value" gorm:"-"`
+	CreatedAt            string  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt            string  `json:"updated_at" gorm:"column:updated_at"`
 
 	Items    []CreditSaleItem `json:"items" gorm:"-"`
 	Payments []CreditPayment  `json:"payments" gorm:"-"`
@@ -123,6 +134,9 @@ type DebtSummary struct {
 	OpenCount        int64   `json:"open_count"`
 	OverdueCount     int64   `json:"overdue_count"`
 	OverdueAmount    float64 `json:"overdue_amount"`
+	// B15: unreturned borrowed goods, reported separately from money owed.
+	LoanOpenCount       int64   `json:"loan_open_count"`
+	LoanUnreturnedValue float64 `json:"loan_unreturned_value"`
 }
 
 // AgingBucket is one row of the aging report: how many receivables fall in a given
