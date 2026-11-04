@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
 	"pos-backend/internal/platform/bizdate"
+	"sort"
 	"strings"
 	"time"
 
@@ -212,46 +214,20 @@ func (s Service) GenerateStatementPDF(ctx context.Context, actor auth.Claims, st
 	).Scan(&cust)
 
 	// Fetch documents for customer in period that are not fully paid
-	var docs []Document
-	err := s.db.
-		Preload("Items").
-		Where("store_id = ? AND customer_id = ? AND "+bizdate.SQLDate("document_date")+" BETWEEN ?::date AND ?::date",
-			storeID, customerID, bizdate.Format(opts.PeriodStart), bizdate.Format(opts.PeriodEnd)).
-		Where("payment_status != ?", string(PaymentPaid)).
-		Order("document_date ASC").
-		Find(&docs).Error
+	// B09: the statement lists every open obligation of the customer under the
+	// shared debt rule — document debts per payable root (an invoice and its
+	// delivery order/bill/tax invoice appear once, with payments and credit
+	// notes applied) plus open credit-sale receivables. Borrowed goods (loans)
+	// are not money and are excluded.
+	rows, err := s.StatementRows(ctx, storeID, customerID, opts.PeriodStart, opts.PeriodEnd)
 	if err != nil {
 		return nil, "", err
 	}
 
-	// Seq number for this statement
 	seq, _ := s.repo.NextSeq(storeID, TypeBill) // reuse bill sequence for statements
 	now := bizdate.Local(time.Now())
 	buddhistYear := now.Year() + 543
 	stmtNo := fmt.Sprintf("STMT/%d/%02d/%04d", buddhistYear, int(now.Month()), seq)
-
-	today := bizdate.Today()
-	var rows []docpdf.StatementInvoiceRow
-	for _, d := range docs {
-		balance := d.TotalAmount // simplified: no partial payment tracking in doc module
-		due := d.DocumentDate
-		if d.DueDate != nil {
-			due = *d.DueDate
-		}
-		status := "outstanding"
-		if bizdate.FromInstant(due).Before(today) && balance > 0 {
-			status = "overdue"
-		}
-		rows = append(rows, docpdf.StatementInvoiceRow{
-			InvoiceNo: d.DocumentNoFull,
-			IssueDate: d.DocumentDate,
-			DueDate:   due,
-			Amount:    d.TotalAmount,
-			Paid:      0,
-			Balance:   balance,
-			Status:    status,
-		})
-	}
 
 	in := docpdf.StatementPDFInput{
 		SellerName:    store.Name,
@@ -361,4 +337,96 @@ func fetchLogo(rawURL string) (data []byte, ext string) {
 		}
 	}
 	return data, ext
+}
+
+// openCreditReceivables returns the customer's open credit-sale receivables
+// (type credit, not cancelled, remaining > 0) issued within the period, as
+// statement rows (B09). Loans are excluded: they owe goods, not money.
+func (s Service) openCreditReceivables(ctx context.Context, storeID, customerID string, from, to time.Time) ([]docpdf.StatementInvoiceRow, error) {
+	var credits []struct {
+		DocumentNumber  string
+		CreatedAt       string
+		DueDate         string
+		TotalAmount     float64
+		RemainingAmount float64
+	}
+	if err := s.db.WithContext(ctx).Raw(`SELECT document_number, created_at, COALESCE(due_date,'') AS due_date, total_amount, remaining_amount
+		FROM credit_sales
+		WHERE store_id = ? AND customer_id = ? AND type = 'credit' AND status <> 'cancelled' AND remaining_amount > 0`,
+		storeID, customerID).Scan(&credits).Error; err != nil {
+		return nil, err
+	}
+	fromDay, toDay := bizdate.Format(from), bizdate.Format(to)
+	rows := make([]docpdf.StatementInvoiceRow, 0, len(credits))
+	for _, c := range credits {
+		issued, err := time.Parse(time.RFC3339, c.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if day := bizdate.Format(issued); day < fromDay || day > toDay {
+			continue
+		}
+		due := bizdate.FromInstant(issued)
+		if d, err := bizdate.Parse(strings.TrimSpace(c.DueDate)); err == nil {
+			due = d
+		}
+		rows = append(rows, docpdf.StatementInvoiceRow{
+			InvoiceNo: c.DocumentNumber,
+			IssueDate: issued,
+			DueDate:   due,
+			Amount:    c.TotalAmount,
+			Paid:      math.Round((c.TotalAmount-c.RemainingAmount)*100) / 100,
+			Balance:   c.RemainingAmount,
+		})
+	}
+	return rows, nil
+}
+
+// StatementRows builds the customer statement rows (B09): open document debts
+// per payable root plus open credit-sale receivables, oldest first.
+func (s Service) StatementRows(ctx context.Context, storeID, customerID string, periodStart, periodEnd time.Time) ([]docpdf.StatementInvoiceRow, error) {
+	debts, err := outstandingDebts(ctx, s.db, storeID, OutstandingFilter{
+		CustomerID: customerID,
+		DateFrom:   bizdate.Format(periodStart),
+		DateTo:     bizdate.Format(periodEnd),
+	})
+	if err != nil {
+		return nil, err
+	}
+	credits, err := s.openCreditReceivables(ctx, storeID, customerID, periodStart, periodEnd)
+	if err != nil {
+		return nil, err
+	}
+
+	today := bizdate.Today()
+	rowStatus := func(due time.Time) string {
+		if bizdate.FromInstant(due).Before(today) {
+			return "overdue"
+		}
+		return "outstanding"
+	}
+	rows := make([]docpdf.StatementInvoiceRow, 0, len(debts)+len(credits))
+	for _, d := range debts {
+		due := d.DocumentDate
+		if d.DueDate != nil {
+			due = *d.DueDate
+		}
+		rows = append(rows, docpdf.StatementInvoiceRow{
+			InvoiceNo: d.DocumentNoFull,
+			IssueDate: d.DocumentDate,
+			DueDate:   due,
+			Amount:    d.Total,
+			Paid:      math.Round((d.Total-d.Remaining)*100) / 100,
+			Balance:   d.Remaining,
+			Status:    rowStatus(due),
+		})
+	}
+	rows = append(rows, credits...)
+	for i := range rows {
+		if rows[i].Status == "" {
+			rows[i].Status = rowStatus(rows[i].DueDate)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].IssueDate.Before(rows[j].IssueDate) })
+	return rows, nil
 }

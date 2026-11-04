@@ -121,10 +121,14 @@ type ListQuery struct {
 // ── Response DTOs ─────────────────────────────────────────────────────────────
 
 type DocumentStats struct {
-	Total          int64 `json:"total"`
-	PendingPayment int64 `json:"pending_payment"`
-	Overdue        int64 `json:"overdue"`
-	Paid           int64 `json:"paid"`
+	Total int64 `json:"total"`
+	// B11: pending/overdue follow the shared debt rule — one obligation per
+	// payable root (never per derived document), with a remaining balance.
+	PendingPayment int64   `json:"pending_payment"`
+	PendingAmount  float64 `json:"pending_amount"`
+	Overdue        int64   `json:"overdue"`
+	OverdueAmount  float64 `json:"overdue_amount"`
+	Paid           int64   `json:"paid"`
 }
 
 type DocumentListItem struct {

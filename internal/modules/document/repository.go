@@ -1,8 +1,10 @@
 package document
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
 	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
@@ -79,12 +81,31 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 	var stats DocumentStats
 	if err := base.Select(`
 		COUNT(*) AS total,
-		COUNT(*) FILTER (WHERE status IN ('PENDING','OVERDUE') AND payment_status != 'PAID') AS pending_payment,
-		COUNT(*) FILTER (WHERE status = 'OVERDUE') AS overdue,
 		COUNT(*) FILTER (WHERE payment_status = 'PAID') AS paid
 	`).Scan(&stats).Error; err != nil {
 		return nil, 0, DocumentStats{}, err
 	}
+	// B11: pending/overdue come from the shared outstanding-debt query, so an
+	// invoice and the delivery order/bill/tax invoice derived from it count once.
+	debts, err := outstandingDebts(context.Background(), r.db, q.StoreID, OutstandingFilter{CustomerID: q.CustomerID, DateFrom: q.DateFrom, DateTo: q.DateTo})
+	if err != nil {
+		return nil, 0, DocumentStats{}, err
+	}
+	today := bizdate.Today()
+	for _, debt := range debts {
+		stats.PendingPayment++
+		stats.PendingAmount += debt.Remaining
+		due := debt.DocumentDate
+		if debt.DueDate != nil {
+			due = *debt.DueDate
+		}
+		if bizdate.FromInstant(due).Before(today) {
+			stats.Overdue++
+			stats.OverdueAmount += debt.Remaining
+		}
+	}
+	stats.PendingAmount = math.Round(stats.PendingAmount*100) / 100
+	stats.OverdueAmount = math.Round(stats.OverdueAmount*100) / 100
 
 	page := q.Page
 	if page < 1 {
@@ -103,7 +124,7 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 	offset := (page - 1) * limit
 
 	var rows []DocumentListItem
-	err := base.
+	err = base.
 		Select("id, document_no, document_no_full, type, status, payment_status, customer_id, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
 		// The document list is a creation feed: newest added records first.
 		// document_date is only a deterministic tie-breaker for equal timestamps.
