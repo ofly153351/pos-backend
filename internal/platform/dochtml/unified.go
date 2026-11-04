@@ -359,7 +359,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		PriceValidity: priceValidity, PaymentTerms: paymentTerms, DeliveryLeadTime: deliveryLeadTime,
 		SpecialLabel: p.SpecialLabel, SpecialValue: specialValue(d, d.Type),
 
-		CustomerName: d.CustomerName, CustomerTaxID: derefStr(d.CustomerTaxID),
+		CustomerName: d.CustomerName, CustomerTaxID: buyerTaxLine(d),
 		CustomerAddr: d.CustomerAddress, CustomerPhone: d.CustomerPhone,
 		QuotationSummary: strings.TrimSpace(d.QuotationSummary),
 		StaffName:        d.StaffName, SalespersonName: d.SalespersonName, RefNo: d.InvoiceRefNo,
@@ -874,3 +874,16 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
 </div>
 {{end}}
 </body></html>`
+
+// buyerTaxLine renders the buyer tax ID with its branch (B03, §86/4), e.g.
+// "0105536000313 สาขา สำนักงานใหญ่". Every template prints this one field.
+func buyerTaxLine(d DocData) string {
+	taxID := strings.TrimSpace(derefStr(d.CustomerTaxID))
+	if taxID == "" {
+		return ""
+	}
+	if branch := strings.TrimSpace(derefStr(d.CustomerBranch)); branch != "" {
+		return taxID + " สาขา " + branch
+	}
+	return taxID
+}

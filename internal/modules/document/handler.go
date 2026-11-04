@@ -365,6 +365,9 @@ func (h Handler) BulkAction(c *fiber.Ctx) error {
 }
 
 func writeError(c *fiber.Ctx, err error) error {
+	if handled, resp := httpx.FieldErrorResponse(c, err); handled {
+		return resp
+	}
 	// Field-level validation (H-03): answer 422 with indexed fields such as
 	// items[0].unit_price so the client can surface per-line errors.
 	var fieldErr *fieldValidationError

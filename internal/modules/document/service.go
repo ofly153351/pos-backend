@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"pos-backend/internal/platform/bizdate"
+	"pos-backend/internal/platform/fieldcheck"
 	"strings"
 	"time"
 
@@ -209,10 +210,12 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		FullName string
 		Address  string
 		Phone    string
+		TaxID    string
+		Branch   string
 	}
 	if req.CustomerID != "" {
 		if err := s.db.Raw(
-			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
+			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(tax_id,'') AS tax_id, COALESCE(branch,'') AS branch FROM customers WHERE id = ? AND store_id = ?",
 			req.CustomerID, storeID,
 		).Scan(&cust).Error; err != nil || cust.FullName == "" {
 			return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
@@ -222,6 +225,8 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		cust.FullName = req.CustomerNameOverride
 		cust.Address = req.CustomerAddressOverride
 		cust.Phone = req.CustomerPhoneOverride
+		cust.TaxID = req.CustomerTaxIDOverride
+		cust.Branch = req.CustomerBranchOverride
 	} else {
 		return nil, fmt.Errorf("customer not found: %w", ErrInvalidInput)
 	}
@@ -340,6 +345,8 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CustomerName:         cust.FullName,
 		CustomerAddress:      cust.Address,
 		CustomerPhone:        cust.Phone,
+		CustomerTaxID:        optionalString(fieldcheck.NormalizeTaxID(cust.TaxID)),
+		CustomerBranch:       optionalString(cust.Branch),
 		StaffID:              actor.UserID,
 		StaffName:            actor.Name,
 		DocumentDate:         docDate,
@@ -371,6 +378,11 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 		CreatedBy:            actor.UserID,
 	}
 
+	if doc.Type == TypeTaxInvoice {
+		if err := validateTaxInvoice(s.db.WithContext(ctx), storeID, doc); err != nil {
+			return nil, err
+		}
+	}
 	if len(req.SourceDocumentIDs) == 0 {
 		return s.assignNumberAndInsert(doc)
 	}
@@ -610,18 +622,25 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 	// Enrich the buyer block from the customer master when the sale is tied to one
 	// (the sale snapshot has no address); fall back to the sale snapshot otherwise.
 	customerAddress := ""
+	customerBranch := ""
 	if strings.TrimSpace(sr.CustomerID) != "" {
 		var cust struct {
 			FullName string `gorm:"column:full_name"`
 			Address  string `gorm:"column:address"`
 			Phone    string `gorm:"column:phone"`
+			TaxID    string `gorm:"column:tax_id"`
+			Branch   string `gorm:"column:branch"`
 		}
 		if err := s.db.Raw(
-			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone FROM customers WHERE id = ? AND store_id = ?",
+			"SELECT full_name, COALESCE(address,'') AS address, COALESCE(phone,'') AS phone, COALESCE(tax_id,'') AS tax_id, COALESCE(branch,'') AS branch FROM customers WHERE id = ? AND store_id = ?",
 			sr.CustomerID, storeID,
 		).Scan(&cust).Error; err == nil && cust.FullName != "" {
 			customerName = cust.FullName
 			customerAddress = cust.Address
+			customerBranch = cust.Branch
+			if strings.TrimSpace(sr.CustomerTaxID) == "" {
+				sr.CustomerTaxID = cust.TaxID
+			}
 			if strings.TrimSpace(sr.CustomerPhone) == "" {
 				sr.CustomerPhone = cust.Phone
 			}
@@ -648,6 +667,7 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 		CustomerID:      sr.CustomerID,
 		CustomerName:    customerName,
 		CustomerTaxID:   customerTaxID,
+		CustomerBranch:  optionalString(customerBranch),
 		CustomerAddress: customerAddress,
 		CustomerPhone:   sr.CustomerPhone,
 		StaffID:         actor.UserID,
@@ -665,6 +685,11 @@ func (s Service) CreateFromSale(ctx context.Context, actor auth.Claims, storeID,
 		CreatedBy:    actor.UserID,
 	}
 
+	if doc.Type == TypeTaxInvoice {
+		if err := validateTaxInvoice(s.db.WithContext(ctx), storeID, doc); err != nil {
+			return nil, err
+		}
+	}
 	return s.assignNumberAndInsert(doc)
 }
 
@@ -1610,6 +1635,7 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		CustomerID:           src.CustomerID,
 		CustomerName:         src.CustomerName,
 		CustomerTaxID:        src.CustomerTaxID,
+		CustomerBranch:       src.CustomerBranch,
 		CustomerAddress:      src.CustomerAddress,
 		CustomerPhone:        src.CustomerPhone,
 		StaffID:              actor.UserID,
@@ -1639,6 +1665,11 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		QuotationSummary: src.QuotationSummary,
 		Items:            items,
 		CreatedBy:        actor.UserID,
+	}
+	if target == TypeTaxInvoice {
+		if err := validateTaxInvoice(s.db.WithContext(ctx), storeID, doc); err != nil {
+			return nil, err
+		}
 	}
 	// B12/B07: re-check the source under a row lock and create the target plus
 	// the source's state change in one transaction. Concurrent conversions
@@ -1756,6 +1787,7 @@ func (s Service) ConvertReceiptFromBills(ctx context.Context, actor auth.Claims,
 		CustomerID:       primary.CustomerID,
 		CustomerName:     primary.CustomerName,
 		CustomerTaxID:    primary.CustomerTaxID,
+		CustomerBranch:   primary.CustomerBranch,
 		CustomerAddress:  primary.CustomerAddress,
 		CustomerPhone:    primary.CustomerPhone,
 		StaffID:          actor.UserID,
@@ -2153,6 +2185,7 @@ func toDocData(doc *Document) dochtml.DocData {
 		CustomerAddress:   doc.CustomerAddress,
 		CustomerPhone:     doc.CustomerPhone,
 		CustomerTaxID:     doc.CustomerTaxID,
+		CustomerBranch:    doc.CustomerBranch,
 		StaffName:         doc.StaffName,
 		Items:             items,
 		BillRows:          billRows,
@@ -2179,4 +2212,13 @@ func toDocData(doc *Document) dochtml.DocData {
 		ShippingFee:          doc.ShippingFee,
 		CreditTermDays:       doc.CreditTermDays,
 	}
+}
+
+// optionalString returns nil for blank values so empty snapshots stay NULL.
+func optionalString(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
