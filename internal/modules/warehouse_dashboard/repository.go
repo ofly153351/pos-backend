@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"pos-backend/internal/platform/reportcalc"
 	"time"
 
 	"gorm.io/gorm"
@@ -36,10 +37,7 @@ func (r PostgresRepository) GetKPI(ctx context.Context, storeID string) (KPI, er
 		StockValue float64 `gorm:"column:stock_value"`
 	}
 	if err := r.db.WithContext(ctx).Raw(`
-		SELECT COALESCE(SUM(p.cost_price * s.quantity), 0) AS stock_value
-		FROM stocks s
-		JOIN products p ON p.id = s.product_id
-		WHERE s.store_id = ? AND p.deleted_at IS NULL
+		SELECT inventory_value AS stock_value FROM (`+reportcalc.InventoryValueSQL+`) v
 	`, storeID).Scan(&stockRow).Error; err != nil {
 		return kpi, err
 	}

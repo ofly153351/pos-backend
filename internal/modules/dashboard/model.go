@@ -34,6 +34,9 @@ type Summary struct {
 	AverageTicket  float64 `json:"average_ticket"`
 	DiscountAmount float64 `json:"discount_amount"`
 	VATAmount      float64 `json:"vat_amount"`
+	// B14: recognised revenue — pre-VAT sales minus pre-VAT refunds (same
+	// definition as the finance P&L).
+	NetSales float64 `json:"net_sales"`
 }
 
 type PaymentMethodStat struct {

@@ -25,6 +25,9 @@ type Revenue struct {
 	DiscountAmount float64 `json:"discount_amount"`
 	VATAmount      float64 `json:"vat_amount"`
 	Refunds        float64 `json:"refunds"`
+	// B14: pre-VAT revenue and refunds — the recognised revenue basis.
+	NetSales      float64 `json:"net_sales"`
+	RefundsPreVAT float64 `json:"refunds_pre_vat"`
 }
 
 // COGS = SUM(sale_item.quantity * COALESCE(unit_cost, product.cost_price, 0)) over

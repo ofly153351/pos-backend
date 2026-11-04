@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"pos-backend/internal/platform/reportcalc"
 	"time"
 
 	"gorm.io/gorm"
@@ -18,7 +19,7 @@ const saleVoidedStatus = "voided"
 // restocks them without voiding the sale, so loans would otherwise inflate the dashboard
 // revenue/payment-mix/recent-sales. Real credit sales (credit_sales.type='credit') stay.
 // Mirrors finance/repository.go. Correlates on the sales alias `s`.
-const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
+const notLoanSaleSQL = reportcalc.NotLoanSale
 
 type Repository interface {
 	GetSummary(ctx context.Context, storeID string, from, to time.Time) (Summary, error)
@@ -46,10 +47,21 @@ func (r PostgresRepository) GetSummary(ctx context.Context, storeID string, from
 			COALESCE(SUM(s.total_items), 0) AS total_items,
 			COALESCE(ROUND(AVG(s.total_amount)::numeric, 2), 0) AS average_ticket,
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
-			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
+			COALESCE(SUM(s.vat_amount), 0) AS vat_amount,
+			COALESCE(SUM(`+reportcalc.NetSales+`), 0) AS net_sales
 		`).
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
+	if err != nil {
+		return result, err
+	}
+	var refunds float64
+	err = r.db.WithContext(ctx).Table("sale_returns sr").
+		Joins("JOIN sales s ON s.id = sr.sale_id").
+		Select("COALESCE(SUM("+reportcalc.RefundPreVAT+"), 0)").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ? AND "+notLoanSaleSQL, storeID, from, to).
+		Scan(&refunds).Error
+	result.NetSales -= refunds
 	return result, err
 }
 

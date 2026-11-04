@@ -2,6 +2,7 @@ package finance
 
 import (
 	"context"
+	"pos-backend/internal/platform/reportcalc"
 	"time"
 
 	"gorm.io/gorm"
@@ -21,7 +22,7 @@ const saleVoidedStatus = "voided"
 // goods (ReturnGoods) restocks them WITHOUT voiding that sale — so loans would otherwise
 // inflate revenue/COGS/payment-mix. Real credit sales (credit_sales.type='credit') stay
 // counted. Correlate on the sales alias `s`; every aggregate below aliases sales as s.
-const notLoanSaleSQL = `NOT EXISTS (SELECT 1 FROM credit_sales cs WHERE cs.sale_id = s.id AND cs.type = 'loan')`
+const notLoanSaleSQL = reportcalc.NotLoanSale
 
 type Repository interface {
 	GetRevenue(ctx context.Context, storeID string, from, to time.Time) (Revenue, error)
@@ -62,7 +63,8 @@ func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from
 			COUNT(*) AS sales_count,
 			COALESCE(SUM(s.total_amount), 0) AS gross_revenue,
 			COALESCE(SUM(s.discount_amount), 0) AS discount_amount,
-			COALESCE(SUM(s.vat_amount), 0) AS vat_amount
+			COALESCE(SUM(s.vat_amount), 0) AS vat_amount,
+			COALESCE(SUM(`+reportcalc.NetSales+`), 0) AS net_sales
 		`).
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
@@ -70,15 +72,20 @@ func (r PostgresRepository) GetRevenue(ctx context.Context, storeID string, from
 		return result, err
 	}
 
-	var refunds float64
+	var refunds struct {
+		Refunds       float64
+		RefundsPreVAT float64
+	}
 	if err := r.db.WithContext(ctx).
 		Table("sale_returns sr").
-		Select("COALESCE(SUM(sr.refund_amount), 0)").
-		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ?", storeID, from, to).
+		Joins("JOIN sales s ON s.id = sr.sale_id").
+		Select("COALESCE(SUM(sr.refund_amount), 0) AS refunds, COALESCE(SUM("+reportcalc.RefundPreVAT+"), 0) AS refunds_pre_vat").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ? AND "+notLoanSaleSQL, storeID, from, to).
 		Scan(&refunds).Error; err != nil {
 		return result, err
 	}
-	result.Refunds = refunds
+	result.Refunds = refunds.Refunds
+	result.RefundsPreVAT = refunds.RefundsPreVAT
 	return result, nil
 }
 
@@ -91,13 +98,26 @@ func (r PostgresRepository) GetCOGS(ctx context.Context, storeID string, from, t
 	err := r.db.WithContext(ctx).
 		Table("sale_items si").
 		Select(`
-			COALESCE(SUM(si.quantity * COALESCE(si.unit_cost, p.cost_price, 0)), 0) AS total,
-			COALESCE(SUM(CASE WHEN COALESCE(si.unit_cost, p.cost_price, 0) <= 0 THEN 1 ELSE 0 END), 0) AS missing_cost_lines
+			COALESCE(SUM(`+reportcalc.LineCOGS+`), 0) AS total,
+			COALESCE(SUM(`+reportcalc.LineMissingCost+`), 0) AS missing_cost_lines
 		`).
 		Joins("JOIN sales s ON s.id = si.sale_id").
-		Joins("LEFT JOIN products p ON p.id = si.product_id").
 		Where("s.store_id = ? AND s.sold_at >= ? AND s.sold_at < ? AND s.status <> ? AND "+notLoanSaleSQL, storeID, from, to, saleVoidedStatus).
 		Scan(&result).Error
+	if err != nil {
+		return result, err
+	}
+	// B14: returned quantities reverse their sale-time cost in the return window.
+	var returned float64
+	err = r.db.WithContext(ctx).
+		Table("sale_return_items sri").
+		Joins("JOIN sale_returns sr ON sr.id = sri.return_id").
+		Joins("JOIN sale_items si ON si.id = sri.sale_item_id").
+		Joins("JOIN sales s ON s.id = sr.sale_id").
+		Select("COALESCE(SUM("+reportcalc.ReturnedCOGS+"), 0)").
+		Where("sr.store_id = ? AND sr.created_at >= ? AND sr.created_at < ? AND "+notLoanSaleSQL, storeID, from, to).
+		Scan(&returned).Error
+	result.Total -= returned
 	return result, err
 }
 
@@ -188,7 +208,7 @@ func (r PostgresRepository) GetInventorySnapshot(ctx context.Context, storeID st
 	err := r.db.WithContext(ctx).
 		Table("product_view").
 		Select(`
-			COALESCE(SUM(CASE WHEN total_stock > 0 THEN cost_price * total_stock ELSE 0 END), 0) AS inventory_value,
+			0 AS inventory_value,
 			COALESCE(SUM(CASE WHEN total_stock > 0 THEN base_price * total_stock ELSE 0 END), 0) AS retail_value,
 			COALESCE(SUM(total_stock), 0) AS total_units,
 			COUNT(*) AS active_sku_count,
@@ -200,6 +220,13 @@ func (r PostgresRepository) GetInventorySnapshot(ctx context.Context, storeID st
 		`).
 		Where("store_id = ? AND is_active = TRUE AND deleted_at IS NULL", storeID).
 		Scan(&snap).Error
+	if err != nil {
+		return snap, err
+	}
+	// B14: inventory value uses the shared definition (same as warehouse).
+	var inv struct{ InventoryValue float64 }
+	err = r.db.WithContext(ctx).Raw(reportcalc.InventoryValueSQL, storeID).Scan(&inv).Error
+	snap.InventoryValue = inv.InventoryValue
 	return snap, err
 }
 

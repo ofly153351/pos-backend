@@ -126,8 +126,9 @@ func (s Service) GetSummary(ctx context.Context, actor auth.Claims, storeID stri
 		return ExecutiveSummary{}, err
 	}
 
-	netRevenue := revenue.GrossRevenue - revenue.Refunds
-	prevNetRevenue := prevRevenue.GrossRevenue - prevRevenue.Refunds
+	// B14: recognised revenue is pre-VAT sales minus pre-VAT refunds.
+	netRevenue := revenue.NetSales - revenue.RefundsPreVAT
+	prevNetRevenue := prevRevenue.NetSales - prevRevenue.RefundsPreVAT
 	grossProfit := netRevenue - cogs.Total
 	netProfit := grossProfit - expenses
 	var aov float64
