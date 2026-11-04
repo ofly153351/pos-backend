@@ -8,7 +8,7 @@ import (
 )
 
 type Repository interface {
-	List(ctx context.Context, storeID string) ([]CountSession, error)
+	List(ctx context.Context, storeID string, withItems bool) ([]CountSession, error)
 	Get(ctx context.Context, storeID, sessionID string) (CountSession, error)
 	Upsert(ctx context.Context, session CountSession) error
 	Delete(ctx context.Context, storeID, sessionID string) (int64, error)
@@ -42,7 +42,7 @@ func (r PostgresRepository) loadItems(ctx context.Context, sessionIDs []string) 
 	return out, nil
 }
 
-func (r PostgresRepository) List(ctx context.Context, storeID string) ([]CountSession, error) {
+func (r PostgresRepository) List(ctx context.Context, storeID string, withItems bool) ([]CountSession, error) {
 	var sessions []CountSession
 	err := r.db.WithContext(ctx).
 		Table("stock_count_sessions").
@@ -54,6 +54,13 @@ func (r PostgresRepository) List(ctx context.Context, storeID string) ([]CountSe
 		Find(&sessions).Error
 	if err != nil {
 		return nil, err
+	}
+	if !withItems {
+		// B28: headers only (badge counts) — items stay empty, never nil.
+		for i := range sessions {
+			sessions[i].Items = []CountItem{}
+		}
+		return sessions, nil
 	}
 	ids := make([]string, len(sessions))
 	for i, s := range sessions {

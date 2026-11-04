@@ -21,7 +21,7 @@ func NewHandler(service Service) Handler {
 
 func (h Handler) List(c *fiber.Ctx) error {
 	storeID := c.Params("storeID")
-	result, err := h.service.List(c.UserContext(), middleware.ClaimsFromContext(c), storeID)
+	result, err := h.service.List(c.UserContext(), middleware.ClaimsFromContext(c), storeID, c.Query("summary") != "1")
 	if err != nil {
 		return writeError(c, err)
 	}

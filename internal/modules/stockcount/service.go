@@ -42,8 +42,8 @@ func (s Service) validateCountLocation(ctx context.Context, storeID, locationID 
 	return nil
 }
 
-func (s Service) List(ctx context.Context, actor auth.Claims, storeID string) ([]CountSession, error) {
-	return s.repo.List(ctx, storeID)
+func (s Service) List(ctx context.Context, actor auth.Claims, storeID string, withItems bool) ([]CountSession, error) {
+	return s.repo.List(ctx, storeID, withItems)
 }
 
 func (s Service) Get(ctx context.Context, actor auth.Claims, storeID, sessionID string) (CountSession, error) {
