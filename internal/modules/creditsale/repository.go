@@ -26,6 +26,7 @@ type Repository interface {
 	Summary(ctx context.Context, storeID string) (DebtSummary, error)
 	Aging(ctx context.Context, storeID string) (AgingSummary, error)
 	StatementContext(ctx context.Context, storeID, creditSaleID string) (StatementContext, error)
+	SaleVATAmounts(ctx context.Context, storeID string, saleIDs []string) (map[string]float64, error)
 }
 
 type PostgresRepository struct {
@@ -848,4 +849,25 @@ func displayStatus(cs CreditSale) string {
 		return StatusOverdue
 	}
 	return cs.Status
+}
+
+// SaleVATAmounts returns the stored VAT of each underlying sale (B08), so a
+// bill's pre-tax / VAT / total come from the same records as its rows.
+func (r PostgresRepository) SaleVATAmounts(ctx context.Context, storeID string, saleIDs []string) (map[string]float64, error) {
+	out := make(map[string]float64, len(saleIDs))
+	if len(saleIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID        string  `gorm:"column:id"`
+		VATAmount float64 `gorm:"column:vat_amount"`
+	}
+	if err := r.db.WithContext(ctx).Table("sales").Select("id, COALESCE(vat_amount, 0) AS vat_amount").
+		Where("store_id = ? AND id IN ?", storeID, saleIDs).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ID] = row.VATAmount
+	}
+	return out, nil
 }

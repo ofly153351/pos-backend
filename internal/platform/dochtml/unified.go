@@ -132,6 +132,7 @@ type bankView struct{ Name, No, Holder string }
 type billRowView struct {
 	No                                     int
 	DocumentNo, IssueDate, DueDate, Amount string
+	Paid, Remaining                        string
 }
 
 type renderView struct {
@@ -170,6 +171,9 @@ type renderView struct {
 	Banks                                        []bankView
 	QRURL                                        template.URL
 	BillRows                                     []billRowView
+	BillHeading, BillPrefix                      string
+	BillShowBalance                              bool
+	BillTotal, BillPaid, BillRemaining           string
 	SigLeftTH, SigLeftEN, SigRightTH, SigRightEN string
 	// pages
 	Pages     []pageView
@@ -335,6 +339,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 		deliveryLeadTime = ""
 	}
 	billRows := make([]billRowView, 0, len(d.BillRows))
+	var billTotal, billPaid, billRemaining float64
 	for _, row := range d.BillRows {
 		due := "_"
 		if row.DueDate != nil {
@@ -346,7 +351,19 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 			IssueDate:  thaiDate(row.IssueDate),
 			DueDate:    due,
 			Amount:     money(row.Amount),
+			Paid:       money(row.Paid),
+			Remaining:  money(row.Remaining),
 		})
+		billTotal += row.Amount
+		billPaid += row.Paid
+		billRemaining += row.Remaining
+	}
+	billHeading, billPrefix := "ใบส่งสินค้า (DO)", "ใบส่งสินค้าเลขที่"
+	if d.BillSourceHeading != "" {
+		billHeading = d.BillSourceHeading
+	}
+	if d.BillRowPrefix != "" {
+		billPrefix = d.BillRowPrefix
 	}
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
@@ -397,6 +414,8 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 
 		Summary: summary, Notes: derefStr(d.Notes),
 		Banks: banks, QRURL: d.QRPaymentURL, BillRows: billRows,
+		BillHeading: billHeading, BillPrefix: billPrefix, BillShowBalance: d.BillShowBalance,
+		BillTotal: money(billTotal), BillPaid: money(billPaid), BillRemaining: money(billRemaining),
 		SigLeftTH: p.SigLeftTH, SigLeftEN: p.SigLeftEN,
 		SigRightTH: p.SigRightTH, SigRightEN: p.SigRightEN,
 
@@ -753,14 +772,18 @@ table[data-split-from] thead th{ display:table-cell; visibility:visible !importa
     <table class="bill-items">
       <thead><tr>
         <th class="bill-col-no">ลำดับ</th>
-        <th class="left">ใบส่งสินค้า (DO)</th>
+        <th class="left">{{$root.BillHeading}}</th>
         <th class="bill-col-date">วันที่ออกเอกสาร</th>
         <th class="bill-col-due">วันครบกำหนด</th>
         <th class="bill-col-amount">จำนวนเงิน</th>
+        {{if $root.BillShowBalance}}<th class="bill-col-amount">ชำระแล้ว</th><th class="bill-col-amount">คงค้าง</th>{{end}}
       </tr></thead>
       <tbody>
       {{range $row := $root.BillRows}}
-        <tr><td>{{$row.No}}</td><td class="left">ใบส่งสินค้าเลขที่ {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td></tr>
+        <tr><td>{{$row.No}}</td><td class="left">{{$root.BillPrefix}} {{$row.DocumentNo}}</td><td>{{$row.IssueDate}}</td><td>{{$row.DueDate}}</td><td class="num">{{$row.Amount}}</td>{{if $root.BillShowBalance}}<td class="num">{{$row.Paid}}</td><td class="num">{{$row.Remaining}}</td>{{end}}</tr>
+      {{end}}
+      {{if $root.BillShowBalance}}
+        <tr class="bill-total"><td></td><td class="left"><b>รวม</b></td><td></td><td></td><td class="num"><b>{{$root.BillTotal}}</b></td><td class="num"><b>{{$root.BillPaid}}</b></td><td class="num"><b>{{$root.BillRemaining}}</b></td></tr>
       {{end}}
       </tbody>
     </table>

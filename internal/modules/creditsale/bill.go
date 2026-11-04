@@ -3,6 +3,7 @@ package creditsale
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -39,30 +40,41 @@ func (s Service) BillHTML(ctx context.Context, actor auth.Claims, storeID, credi
 	}
 
 	in := mapCreditSaleToSaleInput(cs)
-	if store.PromptPayID != "" {
-		// The notice asks for the outstanding balance — encode that into the QR.
-		in.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(store.PromptPayID, cs.RemainingAmount)
-	}
 
 	doc := dochtml.BuildCreditSaleBillDocData(in, store)
-	// BILL shows document-level DO rows; product lines belong to the source DO,
-	// so suppress them here to keep the notice focused and one-row-per-DO.
+	// BILL shows one row per receivable; product lines belong to the sale.
 	doc.Items = nil
-	// A billing notice is a register of delivery orders for this customer, not
-	// the product lines of one receivable. Reuse the repository's customer-scoped
-	// statement query so every non-cancelled credit sale contributes one DO row.
+
+	// B08: one source for every amount on the bill — the customer's open
+	// credit receivables. Rows show original / paid / remaining, the totals box
+	// is the sum of the same rows (pre-tax, VAT from the stored sales), and the
+	// QR asks for the remaining balance (owner rule: bills request the balance).
 	statement, err := s.repo.StatementContext(ctx, storeID, creditSaleID)
 	if err != nil {
 		return "", err
 	}
-	doc.BillRows = make([]dochtml.BillRow, 0, len(statement.Sales))
+	open := make([]CreditSale, 0, len(statement.Sales))
+	saleIDs := make([]string, 0, len(statement.Sales))
 	for _, sale := range statement.Sales {
-		if sale.Type != typeCredit {
+		if sale.Type != typeCredit || sale.Status == StatusCancelled || sale.RemainingAmount <= 0 {
 			continue
 		}
+		open = append(open, sale)
+		saleIDs = append(saleIDs, sale.SaleID)
+	}
+	vatBySale, err := s.repo.SaleVATAmounts(ctx, storeID, saleIDs)
+	if err != nil {
+		return "", err
+	}
+	doc.BillSourceHeading = "เอกสารขายเชื่อ (Credit sale)"
+	doc.BillRowPrefix = "เลขที่"
+	doc.BillShowBalance = true
+	doc.BillRows = make([]dochtml.BillRow, 0, len(open))
+	var total, vat, remaining float64
+	for _, sale := range open {
 		issue := parseTimestamp(sale.CreatedAt)
 		if issue.IsZero() {
-			continue
+			issue = time.Now()
 		}
 		var due *time.Time
 		if parsed := parseDateOnly(sale.DueDate); !parsed.IsZero() {
@@ -73,7 +85,27 @@ func (s Service) BillHTML(ctx context.Context, actor auth.Claims, storeID, credi
 			IssueDate:  issue,
 			DueDate:    due,
 			Amount:     sale.TotalAmount,
+			Paid:       sale.PaidAmount,
+			Remaining:  sale.RemainingAmount,
 		})
+		total += sale.TotalAmount
+		vat += vatBySale[sale.SaleID]
+		remaining += sale.RemainingAmount
+	}
+	total, vat, remaining = roundMoney(total), roundMoney(vat), roundMoney(remaining)
+	doc.TotalAmount = total
+	doc.VatAmount = vat
+	doc.Subtotal = roundMoney(total - vat)
+	doc.PreVatAmount = doc.Subtotal
+	doc.TotalDiscount = 0
+	if total > 0 && vat > 0 {
+		doc.VatRate = math.Round(vat/(total-vat)*10000) / 100
+	} else {
+		doc.VatRate = 0
+	}
+	doc.QRPaymentURL = ""
+	if store.PromptPayID != "" && remaining > 0 {
+		doc.QRPaymentURL = dochtml.BuildPromptPayQRDataURI(store.PromptPayID, remaining)
 	}
 	return dochtml.RenderUnifiedDocumentHTML(doc, store)
 }

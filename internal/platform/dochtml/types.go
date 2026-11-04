@@ -176,6 +176,11 @@ type DocData struct {
 	ReceiptSettlements []ReceiptSettlementRow
 	// BillRows is the delivery-order register printed inside a BILL document.
 	BillRows []BillRow
+	// B08: source-appropriate labels (default: delivery orders) and optional
+	// paid/remaining columns with a totals row, so the bill reads from one source.
+	BillSourceHeading string // column heading, e.g. "เอกสารขายเชื่อ"
+	BillRowPrefix     string // row prefix, e.g. "เลขที่"
+	BillShowBalance   bool
 }
 
 type ReceiptSettlementRow struct {
@@ -189,6 +194,9 @@ type BillRow struct {
 	IssueDate  time.Time
 	DueDate    *time.Time
 	Amount     float64
+	// Paid/Remaining are printed when DocData.BillShowBalance is set (B08).
+	Paid      float64
+	Remaining float64
 }
 
 // WHTCertData holds all data needed to render a WHT certificate (ภ.ง.ด.3/53).
