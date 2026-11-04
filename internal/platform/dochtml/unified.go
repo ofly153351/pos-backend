@@ -367,7 +367,7 @@ func BuildDocumentView(d DocData, store StoreInfo) renderView {
 	}
 	return renderView{
 		StoreName: store.Name, StoreAddr: store.Address, StoreTaxID: store.TaxID,
-		StorePhone: store.Phone, StoreBranch: store.Branch, StorePreviewContact: store.PreviewContact, LogoURL: template.URL(store.LogoURL),
+		StorePhone: store.Phone, StoreBranch: store.Branch, StorePreviewContact: store.PreviewContact, LogoURL: safeImageURL(store.LogoURL),
 
 		TitleTH: p.TitleTH, TitleEN: p.TitleEN, Badge: p.Badge,
 		// Single-render default: signatures shown (copy renderer overrides per variant).

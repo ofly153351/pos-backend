@@ -2,6 +2,7 @@ package dochtml
 
 import (
 	"fmt"
+	"html/template"
 	"pos-backend/internal/platform/bizdate"
 	"strings"
 	"time"
@@ -78,3 +79,22 @@ func titleEN(docType string) string { return docTitleEN[docType] }
 // Short aliases used by the unified template builder.
 func money(f float64) string      { return formatMoney(f) }
 func thaiDate(t time.Time) string { return fmtThaiDate(t) }
+
+// safeImageURL (B29) allows only http(s) URLs and base64 image data URIs for
+// values rendered as template.URL (which bypasses html/template's URL
+// sanitizer). Anything else — javascript:, data:text/html, quotes — renders
+// as no image.
+func safeImageURL(raw string) template.URL {
+	v := strings.TrimSpace(raw)
+	lower := strings.ToLower(v)
+	switch {
+	case strings.ContainsAny(v, "\"'<>` \t\r\n"):
+		return ""
+	case strings.HasPrefix(lower, "https://"), strings.HasPrefix(lower, "http://"), strings.HasPrefix(v, "/"):
+		return template.URL(v)
+	case strings.HasPrefix(lower, "data:image/png;base64,"), strings.HasPrefix(lower, "data:image/jpeg;base64,"),
+		strings.HasPrefix(lower, "data:image/gif;base64,"), strings.HasPrefix(lower, "data:image/webp;base64,"):
+		return template.URL(v)
+	}
+	return ""
+}
