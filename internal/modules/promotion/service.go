@@ -30,8 +30,16 @@ func (s Service) List(ctx context.Context, actor auth.Claims, storeID string) ([
 // default status. Returns the stored campaign (with the server id) as raw JSON.
 func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, body []byte) (json.RawMessage, error) {
 	obj := map[string]any{}
-	if err := json.Unmarshal(body, &obj); err != nil {
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return nil, ErrInvalidBody
+	}
+	promoType, _ := obj["type"].(string)
+	status, _ := obj["status"].(string)
+	if strings.TrimSpace(status) == "" {
+		status = "draft"
+	}
+	if err := validateDiscountParameters(promoType, body, status); err != nil {
+		return nil, err
 	}
 	id := newPromotionID()
 	obj["id"] = id
@@ -67,8 +75,16 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, id stri
 		return nil, ErrIDRequired
 	}
 	obj := map[string]any{}
-	if err := json.Unmarshal(body, &obj); err != nil {
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
 		return nil, ErrInvalidBody
+	}
+	promoType, _ := obj["type"].(string)
+	status, _ := obj["status"].(string)
+	if strings.TrimSpace(status) == "" {
+		status = "draft"
+	}
+	if err := validateDiscountParameters(promoType, body, status); err != nil {
+		return nil, err
 	}
 	obj["id"] = id
 	data, err := json.Marshal(obj)

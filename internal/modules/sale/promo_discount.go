@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"math"
 	"time"
+
+	"pos-backend/internal/modules/promotion"
 )
 
 // promoData holds the numeric/schedule fields parsed out of a promotion's `data`
@@ -36,8 +38,13 @@ type promoData struct {
 //
 // Field map (keys inside `data`) confirmed against promotion-engine.ts.
 func promoCeiling(promoType, data string, subtotal float64, totalQty int) float64 {
+	if badMoney(subtotal) || subtotal < 0 || totalQty <= 0 || promotion.ValidateDiscountParameters(promoType, []byte(data)) != nil {
+		return 0
+	}
 	var d promoData
-	_ = json.Unmarshal([]byte(data), &d)
+	if err := json.Unmarshal([]byte(data), &d); err != nil {
+		return 0
+	}
 
 	clamp := func(v float64) float64 {
 		if v < 0 || math.IsNaN(v) {

@@ -49,6 +49,24 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	}
 	defer tx.Rollback()
 
+	// Serialize the same store/key before checking mutable stock or pricing. A
+	// sibling may have committed after the service precheck and exhausted stock;
+	// it must still replay that sale, not fail a second stock validation. Hash
+	// collisions only serialize unrelated keys; the exact lookup decides identity.
+	if sale.IdempotencyKey != "" {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?), hashtext(?))", sale.StoreID, sale.IdempotencyKey).Error; err != nil {
+			return Sale{}, err
+		}
+		var count int64
+		if err := tx.Table("sales").Where("store_id = ? AND idempotency_key = ?", sale.StoreID, sale.IdempotencyKey).Count(&count).Error; err != nil {
+			return Sale{}, err
+		}
+		if count > 0 {
+			// The service re-reads the winner and compares the exact fingerprint.
+			return Sale{}, ErrSaleIdempotencyConflict
+		}
+	}
+
 	// Phase W4B: resolve + validate + LOCK the single effective sale-point location inside the
 	// tx (authoritative): the explicit request location, else the store default sale location.
 	saleLocationID, err := r.resolveAndLockSaleLocation(ctx, tx, sale.StoreID, sale.LocationID, discount.IsElevated)
@@ -129,6 +147,9 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	sale.BillDiscountAmount = billDiscount
 	sale.DiscountAmount = roundMoney(itemDiscountAmount + sale.BillDiscountAmount)
 	afterDiscount := roundMoney(payableBeforeBillDiscount - sale.BillDiscountAmount)
+	if badMoney(afterDiscount) || afterDiscount < 0 {
+		return Sale{}, ErrInvalidBillDiscount
+	}
 	if sale.VATPercent < 0 {
 		sale.VATPercent = 0
 	}
@@ -136,6 +157,11 @@ func (r PostgresRepository) Create(ctx context.Context, sale Sale, discount Disc
 	// preview (internal/platform/taxcalc). afterDiscount is the taxable base; the grand
 	// total is rounded to whole baht just below for whole-baht cash collection.
 	sale.VATAmount, sale.TotalAmount = taxcalc.ComputeVAT(afterDiscount, sale.VATPercent, sale.VATIncluded)
+	// Fail before stock/payment writes even if legacy pricing or tax settings are
+	// corrupt. Rounding must never hide a negative/non-finite payable amount.
+	if badMoney(sale.TotalAmount) || sale.TotalAmount < 0 || badMoney(sale.VATAmount) || sale.VATAmount < 0 {
+		return Sale{}, ErrInvalidBillDiscount
+	}
 	// Round the final bill total to whole baht. The POS displays and collects integer
 	// totals — the cashier's "ยอดสุทธิ" and the customer's paid amount are both whole
 	// baht — so the payable is rounded half-up here, the single source of truth. This
@@ -950,6 +976,9 @@ func (r PostgresRepository) GetStoreBankAccounts(ctx context.Context, storeID st
 // for cashiers, remaining subtotal for owner/manager) and an over-cap manual is
 // REJECTED with an explicit error (never silently reduced). Final never exceeds subtotal.
 func (r PostgresRepository) resolveBillDiscount(ctx context.Context, tx *gorm.DB, storeID string, subtotal float64, totalQty int, in DiscountInput) (float64, appliedPromoResult, error) {
+	if badMoney(subtotal) || subtotal < 0 {
+		return 0, appliedPromoResult{}, ErrInvalidBillDiscount
+	}
 	var manualReq, promoReq float64
 	var promoIDs []string
 	if in.ManualDiscount == nil && in.PromoDiscount == nil && len(in.PromotionIDs) == 0 {
@@ -1046,7 +1075,11 @@ func (r PostgresRepository) sumPromoCeilings(ctx context.Context, tx *gorm.DB, s
 		if !promoWithinWindow(p.Data, now) {
 			continue
 		}
-		total += promoCeiling(p.Type, p.Data, subtotal, totalQty)
+		ceiling := promoCeiling(p.Type, p.Data, subtotal, totalQty)
+		if ceiling <= 0 {
+			continue
+		}
+		total += ceiling
 		valid = append(valid, p.ID)
 	}
 	return total, valid, nil
@@ -1127,6 +1160,9 @@ func (r PostgresRepository) lockProductForSale(ctx context.Context, tx *gorm.DB,
 }
 
 func calculateDiscount(discountType string, discountValue *float64, unitPrice float64) (float64, error) {
+	if badMoney(unitPrice) || unitPrice < 0 {
+		return 0, ErrInvalidSaleItem
+	}
 	normalizedType := normalizeDiscountType(discountType)
 	if normalizedType == "" {
 		if discountValue != nil {
