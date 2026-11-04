@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"pos-backend/internal/platform/fieldcheck"
 	"strings"
 	"time"
 
@@ -31,6 +32,13 @@ func (s Service) CreateSupplier(ctx context.Context, actor auth.Claims, storeID 
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		return Supplier{}, ErrSupplierNameRequired
+	}
+	input.TaxID = fieldcheck.NormalizeTaxID(input.TaxID)
+	if err := fieldcheck.First(
+		fieldcheck.Phone("phone", input.Phone),
+		fieldcheck.TaxID("tax_id", input.TaxID),
+	); err != nil {
+		return Supplier{}, err
 	}
 
 	isActive := true
@@ -92,6 +100,17 @@ func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID,
 	if strings.TrimSpace(existing.Name) == "" {
 		return Supplier{}, ErrSupplierNameRequired
 	}
+	// B16: validate only changed values; explicit empty clears the field.
+	if input.TaxID != nil {
+		normalized := fieldcheck.NormalizeTaxID(*input.TaxID)
+		input.TaxID = &normalized
+	}
+	if err := fieldcheck.First(
+		fieldcheck.IfChanged("phone", trimmedPtr(input.Phone), existing.Phone, fieldcheck.Phone),
+		fieldcheck.IfChanged("tax_id", input.TaxID, existing.TaxID, fieldcheck.TaxID),
+	); err != nil {
+		return Supplier{}, err
+	}
 	if input.Phone != nil {
 		existing.Phone = strings.TrimSpace(*input.Phone)
 	}
@@ -99,7 +118,7 @@ func (s Service) UpdateSupplier(ctx context.Context, actor auth.Claims, storeID,
 		existing.Address = strings.TrimSpace(*input.Address)
 	}
 	if input.TaxID != nil {
-		existing.TaxID = strings.TrimSpace(*input.TaxID)
+		existing.TaxID = *input.TaxID
 	}
 	if input.ContactPerson != nil {
 		existing.ContactPerson = strings.TrimSpace(*input.ContactPerson)
@@ -630,3 +649,12 @@ func (s Service) CreateSupplierProductAndLink(ctx context.Context, actor auth.Cl
 // suppliers, supplier-product links, and purchase orders): only owner/manager
 // (or platform_admin) pass. `forbidden` is the domain-specific 403 error to
 // return so supplier vs PO call sites surface the right message.
+
+// trimmedPtr returns a trimmed copy of an optional string (nil stays nil).
+func trimmedPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*v)
+	return &t
+}

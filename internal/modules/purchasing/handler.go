@@ -209,6 +209,9 @@ func (h Handler) CreateSupplierProductWithNewProduct(c *fiber.Ctx) error {
 }
 
 func writePurchasingError(c *fiber.Ctx, err error) error {
+	if handled, resp := httpx.FieldErrorResponse(c, err); handled {
+		return resp
+	}
 	switch {
 	case errors.Is(err, ErrSupplierNameRequired):
 		return httpx.Err422(c, "name", err.Error())

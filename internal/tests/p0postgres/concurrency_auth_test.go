@@ -333,7 +333,7 @@ func TestPostgresP0RealAuthMembership(t *testing.T) {
 			if err := db.Raw("SELECT tax_id FROM stores WHERE id='a'").Scan(&oldTax).Error; err != nil {
 				t.Fatal(err)
 			}
-			tax := fmt.Sprintf("%013d", len(tc.name))
+			tax := validTaxID(fmt.Sprintf("%012d", len(tc.name)))
 			requireStatus(t, securedRequest(app, "PUT", "/stores/a", token, "", `{"tax_id":"`+tax+`"}`), want)
 			var got string
 			if err := db.Raw("SELECT tax_id FROM stores WHERE id='a'").Scan(&got).Error; err != nil {
@@ -349,7 +349,7 @@ func TestPostgresP0RealAuthMembership(t *testing.T) {
 			// Membership in A never authorizes B, even with a global owner token.
 			before = snapshot(t, db)
 			requireStatus(t, securedRequest(app, "POST", "/stores/b/sales", token, "", `{"items":[{"product_id":"product-b","quantity":1}],"payment_method":"cash","paid_amount":100}`), 403)
-			requireStatus(t, securedRequest(app, "PUT", "/stores/b", token, "", `{"tax_id":"9999999999999"}`), 403)
+			requireStatus(t, securedRequest(app, "PUT", "/stores/b", token, "", `{"tax_id":"9999999999994"}`), 403)
 			if snapshot(t, db) != before {
 				t.Fatal("cross-store denial mutated state")
 			}
@@ -364,7 +364,7 @@ func TestPostgresP0RealAuthMembership(t *testing.T) {
 	}
 	t.Run("token_version_revocation", func(t *testing.T) {
 		token := issue(t, tokens, repo, "owner@example.invalid")
-		body := `{"tax_id":"5555555555555"}`
+		body := `{"tax_id":"5555555555551"}`
 		requireStatus(t, securedRequest(app, "PUT", "/stores/a", token, "", body), 200)
 		if err := repo.IncrementTokenVersion(context.Background(), "owner"); err != nil {
 			t.Fatal(err)
@@ -375,7 +375,7 @@ func TestPostgresP0RealAuthMembership(t *testing.T) {
 		}
 		before := snapshot(t, db)
 		for _, bad := range []string{token, "", token + "tampered"} {
-			requireStatus(t, securedRequest(app, "PUT", "/stores/a", bad, "", `{"tax_id":"9999999999999"}`), 401)
+			requireStatus(t, securedRequest(app, "PUT", "/stores/a", bad, "", `{"tax_id":"9999999999994"}`), 401)
 			requireStatus(t, securedRequest(app, "POST", "/stores/a/sales", bad, "revoked", stressBody), 401)
 		}
 		if snapshot(t, db) != before {
@@ -385,10 +385,20 @@ func TestPostgresP0RealAuthMembership(t *testing.T) {
 		if err := db.Raw("SELECT tax_id FROM stores WHERE id='a'").Scan(&tax).Error; err != nil {
 			t.Fatal(err)
 		}
-		if tax != "5555555555555" {
+		if tax != "5555555555551" {
 			t.Fatal("unauthorized update persisted")
 		}
 		fresh := issue(t, tokens, repo, "owner@example.invalid")
 		requireStatus(t, securedRequest(app, "PUT", "/stores/a", fresh, "", body), 200)
 	})
+}
+
+// validTaxID appends the Thai TIN mod-11 check digit to a 12-digit prefix so
+// fixtures satisfy B10 validation while staying unique per case.
+func validTaxID(prefix string) string {
+	sum := 0
+	for i := 0; i < 12; i++ {
+		sum += int(prefix[i]-'0') * (13 - i)
+	}
+	return fmt.Sprintf("%s%d", prefix, (11-sum%11)%10)
 }

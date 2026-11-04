@@ -3,6 +3,7 @@ package product
 import (
 	"errors"
 	"log"
+	"pos-backend/internal/platform/fieldcheck"
 	"strconv"
 	"strings"
 	"time"
@@ -95,23 +96,25 @@ func writeProductError(c *fiber.Ctx, err error) error {
 	}
 	switch {
 	case errors.Is(err, ErrInvalidProductName):
-		return httpx.Err422(c, "name", err.Error())
+		return httpx.Err422Code(c, "name", fieldcheck.CodeRequired, err.Error())
+	case errors.Is(err, ErrInvalidCostPrice):
+		return httpx.Err422Code(c, "cost_price", fieldcheck.CodeNegative, err.Error())
 	case errors.Is(err, ErrInvalidBasePrice):
-		return httpx.Err422(c, "base_price", err.Error())
+		return httpx.Err422Code(c, "base_price", fieldcheck.CodeNegative, err.Error())
 	case errors.Is(err, ErrInvalidMinStock):
-		return httpx.Err422(c, "min_stock", err.Error())
+		return httpx.Err422Code(c, "min_stock", fieldcheck.CodeNegative, err.Error())
 	case errors.Is(err, ErrInvalidMaxStock):
-		return httpx.Err422(c, "max_stock", err.Error())
+		return httpx.Err422Code(c, "max_stock", "max_below_min", err.Error())
 	case errors.Is(err, ErrInvalidSpecialPrice):
-		return httpx.Err422(c, "special_price", err.Error())
+		return httpx.Err422Code(c, "special_price", fieldcheck.CodeGreaterThan, err.Error())
 	case errors.Is(err, ErrInvalidSpecialPriceDate):
-		return httpx.Err422(c, "special_price_end", err.Error())
+		return httpx.Err422Code(c, "special_price_end", "end_before_start", err.Error())
 	case errors.Is(err, ErrInvalidProductTypeID):
-		return httpx.Err422(c, "product_type_id", err.Error())
+		return httpx.Err422Code(c, "product_type_id", "not_in_store", err.Error())
 	case errors.Is(err, ErrInvalidProductUnitID):
-		return httpx.Err422(c, "product_unit_id", err.Error())
+		return httpx.Err422Code(c, "product_unit_id", "not_in_store", err.Error())
 	case errors.Is(err, ErrInvalidBrandID):
-		return httpx.Err422(c, "brand_id", err.Error())
+		return httpx.Err422Code(c, "brand_id", "not_in_store", err.Error())
 	case errors.Is(err, ErrInvalidDefaultLocation):
 		return httpx.Err422(c, "default_location_id", err.Error())
 	case errors.Is(err, ErrNoStoreDefaultSaleLocation):

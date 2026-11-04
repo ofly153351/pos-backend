@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"log/slog"
+	"pos-backend/internal/platform/fieldcheck"
 	"strings"
 	"time"
 
@@ -34,6 +35,12 @@ func (s Service) CreateStore(ctx context.Context, actor auth.Claims, input Creat
 
 	if strings.TrimSpace(input.SubscriptionPlanCode) == "" {
 		return Store{}, ErrInvalidSubscriptionPlan
+	}
+	if err := fieldcheck.First(
+		fieldcheck.Phone("phone", input.Phone),
+		fieldcheck.Phone("fax", input.Fax),
+	); err != nil {
+		return Store{}, err
 	}
 
 	logoURL, err := s.storage.SaveStoreLogo(input.LogoFile)
@@ -94,6 +101,20 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 		return Store{}, ErrInvalidStoreName
 	}
 
+	// B16: validate phone/fax/tax ID only when the value changes, so legacy
+	// data never blocks an unrelated edit; an explicit empty value clears.
+	if input.TaxID != nil {
+		normalized := fieldcheck.NormalizeTaxID(*input.TaxID)
+		input.TaxID = &normalized
+	}
+	if err := fieldcheck.First(
+		fieldcheck.IfChanged("phone", trimmed(input.Phone), current.Phone, fieldcheck.Phone),
+		fieldcheck.IfChanged("fax", trimmed(input.Fax), current.Fax, fieldcheck.Phone),
+		fieldcheck.IfChanged("tax_id", input.TaxID, current.TaxID, fieldcheck.TaxID),
+	); err != nil {
+		return Store{}, err
+	}
+
 	if input.Phone != nil {
 		current.Phone = strings.TrimSpace(*input.Phone)
 	}
@@ -113,7 +134,7 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID string, 
 		current.PromptPayID = strings.TrimSpace(*input.PromptPayID)
 	}
 	if input.TaxID != nil {
-		current.TaxID = strings.TrimSpace(*input.TaxID)
+		current.TaxID = *input.TaxID
 	}
 
 	if input.CurrencyCode != nil {
@@ -206,4 +227,13 @@ func (s Service) UpdateBankAccount(ctx context.Context, actor auth.Claims, store
 
 func (s Service) DeleteBankAccount(ctx context.Context, actor auth.Claims, storeID, id string) error {
 	return s.repo.DeleteBankAccount(ctx, storeID, id)
+}
+
+// trimmed returns a trimmed copy of an optional string (nil stays nil).
+func trimmed(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*v)
+	return &t
 }

@@ -3,6 +3,7 @@ package customer
 import (
 	"errors"
 	"log"
+	"pos-backend/internal/platform/fieldcheck"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
@@ -164,15 +165,18 @@ func (h Handler) DeleteShippingAddress(c *fiber.Ctx) error {
 }
 
 func writeCustomerError(c *fiber.Ctx, err error) error {
+	if handled, resp := httpx.FieldErrorResponse(c, err); handled {
+		return resp
+	}
 	switch {
 	case errors.Is(err, ErrInvalidCustomerName):
-		return httpx.Err422(c, "full_name", err.Error())
+		return httpx.Err422Code(c, "full_name", fieldcheck.CodeRequired, err.Error())
 	case errors.Is(err, ErrInvalidCustomerEmail):
-		return httpx.Err422(c, "email", err.Error())
+		return httpx.Err422Code(c, "email", "email_invalid", err.Error())
 	case errors.Is(err, ErrInvalidLevel):
-		return httpx.Err422(c, "level", err.Error())
+		return httpx.Err422Code(c, "level", "level_invalid", err.Error())
 	case errors.Is(err, ErrInvalidDiscountPercent):
-		return httpx.Err422(c, "discount_percent", err.Error())
+		return httpx.Err422Code(c, "discount_percent", fieldcheck.CodePercentRange, err.Error())
 	case errors.Is(err, ErrCustomerStoreIDRequired):
 		return httpx.ErrBadRequest(c, err.Error())
 	case errors.Is(err, ErrCustomerForbidden):

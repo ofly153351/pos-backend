@@ -3,6 +3,7 @@ package customer
 import (
 	"context"
 	"net/mail"
+	"pos-backend/internal/platform/fieldcheck"
 	"strings"
 	"time"
 
@@ -28,6 +29,14 @@ func (s Service) Create(ctx context.Context, actor auth.Claims, storeID string, 
 	}
 	if strings.TrimSpace(input.FullName) == "" {
 		return Customer{}, ErrInvalidCustomerName
+	}
+	input.TaxID = fieldcheck.NormalizeTaxID(input.TaxID)
+	if err := fieldcheck.First(
+		fieldcheck.Phone("phone", input.Phone),
+		fieldcheck.Phone("shipping_phone", input.ShippingPhone),
+		fieldcheck.TaxID("tax_id", input.TaxID),
+	); err != nil {
+		return Customer{}, err
 	}
 
 	isActive := true
@@ -96,6 +105,18 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, custome
 		return Customer{}, ErrInvalidLevel
 	}
 
+	// B16: validate only changed values; explicit empty clears the field.
+	if input.TaxID != nil {
+		normalized := fieldcheck.NormalizeTaxID(*input.TaxID)
+		input.TaxID = &normalized
+	}
+	if err := fieldcheck.First(
+		fieldcheck.IfChanged("phone", trimmedPtr(input.Phone), existing.Phone, fieldcheck.Phone),
+		fieldcheck.IfChanged("shipping_phone", trimmedPtr(input.ShippingPhone), existing.ShippingPhone, fieldcheck.Phone),
+		fieldcheck.IfChanged("tax_id", input.TaxID, existing.TaxID, fieldcheck.TaxID),
+	); err != nil {
+		return Customer{}, err
+	}
 	if input.Phone != nil {
 		existing.Phone = strings.TrimSpace(*input.Phone)
 	}
@@ -113,7 +134,7 @@ func (s Service) Update(ctx context.Context, actor auth.Claims, storeID, custome
 		existing.Note = strings.TrimSpace(*input.Note)
 	}
 	if input.TaxID != nil {
-		existing.TaxID = strings.TrimSpace(*input.TaxID)
+		existing.TaxID = *input.TaxID
 	}
 	if input.Branch != nil {
 		existing.Branch = strings.TrimSpace(*input.Branch)
@@ -191,6 +212,9 @@ func (s Service) ListShippingAddresses(ctx context.Context, actor auth.Claims, s
 
 func (s Service) CreateShippingAddress(ctx context.Context, actor auth.Claims, storeID, customerID string, req ShippingAddressRequest) (CustomerShippingAddress, error) {
 	if _, err := s.repo.GetByID(ctx, storeID, customerID); err != nil {
+		return CustomerShippingAddress{}, err
+	}
+	if err := fieldcheck.Phone("recipient_phone", req.RecipientPhone); err != nil {
 		return CustomerShippingAddress{}, err
 	}
 	now := time.Now().UTC()
@@ -287,4 +311,13 @@ func (r SaleBenefitResolver) Resolve(ctx context.Context, storeID, customerID st
 		return 0, 0, err
 	}
 	return level, percent, nil
+}
+
+// trimmedPtr returns a trimmed copy of an optional string (nil stays nil).
+func trimmedPtr(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	t := strings.TrimSpace(*v)
+	return &t
 }

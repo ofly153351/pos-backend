@@ -170,14 +170,14 @@ func TestPostgresB10TaxIDRoundTrip(t *testing.T) {
 	db := openFixture(t)
 	app := appFor(db)
 	cases := []struct{ name, ct, body, want string }{
-		{"json_set", fiber.MIMEApplicationJSON, `{"tax_id":" 9876543210123 "}`, "9876543210123"},
-		{"json_omitted", fiber.MIMEApplicationJSON, `{"phone":"555"}`, "9876543210123"},
+		{"json_set", fiber.MIMEApplicationJSON, `{"tax_id":" 9876543210121 "}`, "9876543210121"},
+		{"json_omitted", fiber.MIMEApplicationJSON, `{"phone":"021234555"}`, "9876543210121"},
 		{"json_empty", fiber.MIMEApplicationJSON, `{"tax_id":""}`, ""},
-		{"form_set", fiber.MIMEApplicationForm, "tax_id=1111111111111", "1111111111111"},
-		{"form_omitted", fiber.MIMEApplicationForm, "phone=666", "1111111111111"},
+		{"form_set", fiber.MIMEApplicationForm, "tax_id=1111111111119", "1111111111119"},
+		{"form_omitted", fiber.MIMEApplicationForm, "phone=021234666", "1111111111119"},
 		{"form_empty", fiber.MIMEApplicationForm, "tax_id=", ""},
-		{"multipart_set", "multipart", "2222222222222", "2222222222222"},
-		{"multipart_omitted", "multipart-omit", "", "2222222222222"},
+		{"multipart_set", "multipart", "2222222222227", "2222222222227"},
+		{"multipart_omitted", "multipart-omit", "", "2222222222227"},
 		{"multipart_empty", "multipart", "", ""},
 	}
 	for _, tc := range cases {
@@ -191,7 +191,7 @@ func TestPostgresB10TaxIDRoundTrip(t *testing.T) {
 						t.Fatal(err)
 					}
 				} else {
-					if err := w.WriteField("phone", "777"); err != nil {
+					if err := w.WriteField("phone", "021234777"); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"pos-backend/internal/platform/fieldcheck"
 )
 
 // ── Envelope ──────────────────────────────────────────────────────────────────
@@ -32,6 +33,9 @@ const (
 type FieldError struct {
 	Field   string `json:"field"`
 	Message string `json:"message"`
+	// Code is a stable machine code (see platform/fieldcheck) the frontend
+	// translates via th.json/en.json; Message stays as the traceable fallback.
+	Code string `json:"code,omitempty"`
 }
 
 // APIError is the structured error object placed in envelope.Error.
@@ -76,6 +80,21 @@ func ValidationError(c *fiber.Ctx, fields ...FieldError) error {
 // Err422 shorthand: single field validation failure.
 func Err422(c *fiber.Ctx, field, message string) error {
 	return ValidationError(c, FieldError{Field: field, Message: message})
+}
+
+// Err422Code is Err422 with a stable machine code for localized messages (B23).
+func Err422Code(c *fiber.Ctx, field, code, message string) error {
+	return ValidationError(c, FieldError{Field: field, Message: message, Code: code})
+}
+
+// FieldErrorResponse writes err as a coded 422 when it carries a
+// fieldcheck.Error and reports whether it did.
+func FieldErrorResponse(c *fiber.Ctx, err error) (bool, error) {
+	fe, ok := fieldcheck.As(err)
+	if !ok {
+		return false, nil
+	}
+	return true, Err422Code(c, fe.Field, fe.Code, fe.Message)
 }
 
 // ErrCode responses

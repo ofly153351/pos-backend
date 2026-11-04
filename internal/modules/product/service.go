@@ -482,6 +482,7 @@ func validateCreate(input CreateProductRequest) error {
 		Name:                strings.TrimSpace(input.Name),
 		ProductUnitID:       strings.TrimSpace(input.ProductUnitID),
 		BasePrice:           input.BasePrice,
+		CostPrice:           input.CostPrice,
 		SpecialPrice:        input.SpecialPrice,
 		SpecialPriceStartAt: input.SpecialPriceStartAt,
 		SpecialPriceEndAt:   input.SpecialPriceEndAt,
@@ -502,8 +503,13 @@ func validateExisting(product Product) error {
 	if product.MaxStock != nil && *product.MaxStock < product.MinStock {
 		return ErrInvalidMaxStock
 	}
-	if product.BasePrice < 0 {
+	if product.BasePrice < 0 || math.IsNaN(product.BasePrice) || math.IsInf(product.BasePrice, 0) {
 		return ErrInvalidBasePrice
+	}
+	// B16: below-cost prices are allowed (owner policy: warn in the UI, never
+	// block), but a negative or non-finite cost is never valid.
+	if product.CostPrice < 0 || math.IsNaN(product.CostPrice) || math.IsInf(product.CostPrice, 0) {
+		return ErrInvalidCostPrice
 	}
 	if product.SpecialPrice != nil && *product.SpecialPrice > product.BasePrice {
 		return ErrInvalidSpecialPrice

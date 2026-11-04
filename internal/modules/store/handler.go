@@ -129,6 +129,9 @@ func (h Handler) DeleteBankAccount(c *fiber.Ctx) error {
 }
 
 func writeStoreError(c *fiber.Ctx, err error) error {
+	if handled, resp := httpx.FieldErrorResponse(c, err); handled {
+		return resp
+	}
 	switch {
 	case errors.Is(err, ErrInvalidStoreName), errors.Is(err, ErrInvalidCurrencyCode), errors.Is(err, ErrInvalidSubscriptionPlan):
 		return httpx.Error(c, fiber.StatusBadRequest, err.Error(), nil)
