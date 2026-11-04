@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"pos-backend/internal/platform/bizdate"
 	"pos-backend/internal/platform/reportcalc"
 	"time"
 
@@ -380,6 +381,7 @@ func (r PostgresRepository) GetRecentActivity(ctx context.Context, storeID strin
 		ProductName      string    `gorm:"column:product_name"`
 		Unit             string    `gorm:"column:unit"`
 		ReferenceID      *string   `gorm:"column:reference_id"`
+		ReferenceNo      string    `gorm:"column:reference_no"`
 		Note             string    `gorm:"column:note"`
 		CreatedAt        time.Time `gorm:"column:created_at"`
 		LocationName     string    `gorm:"column:location_name"`
@@ -394,6 +396,9 @@ func (r PostgresRepository) GetRecentActivity(ctx context.Context, storeID strin
 			p.name                          AS product_name,
 			COALESCE(pu.name, '')           AS unit,
 			sm.reference_id,
+			-- B26: a readable reference (sale/receipt/credit-sale/count number)
+			-- instead of an internal id.
+			COALESCE(rs.sale_number, wr.document_no, crs.document_number, sc.name, '') AS reference_no,
 			sm.note,
 			sm.created_at,
 			COALESCE(l.name,  '')           AS location_name,
@@ -403,6 +408,10 @@ func (r PostgresRepository) GetRecentActivity(ctx context.Context, storeID strin
 		LEFT JOIN product_units pu ON pu.id = p.product_unit_id
 		LEFT JOIN locations l      ON l.id  = sm.location_id
 		LEFT JOIN locations dl     ON dl.id = sm.destination_location_id
+		LEFT JOIN sales rs              ON rs.id  = sm.reference_id
+		LEFT JOIN warehouse_receipts wr ON wr.id  = sm.reference_id
+		LEFT JOIN credit_sales crs      ON crs.id = sm.reference_id
+		LEFT JOIN stock_count_sessions sc ON sc.id = sm.reference_id
 		WHERE sm.store_id = ?
 		ORDER BY sm.created_at DESC
 		LIMIT ?
@@ -421,7 +430,8 @@ func (r PostgresRepository) GetRecentActivity(ctx context.Context, storeID strin
 			Type:                row.Type,
 			Description:         formatDescription(row.Type, row.ProductName, row.Unit, row.QuantityChange, row.DestLocationName),
 			ReferenceID:         refID,
-			Time:                row.CreatedAt.Format("15:04"),
+			ReferenceNo:         row.ReferenceNo,
+			Time:                bizdate.Local(row.CreatedAt).Format("15:04"),
 			CreatedAt:           row.CreatedAt,
 			ProductName:         row.ProductName,
 			Unit:                row.Unit,

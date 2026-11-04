@@ -83,6 +83,7 @@ type RecentActivity struct {
 	Type                string    `json:"type"`        // IN | OUT | SALE | TRANSFER | ADJUST | RETURN
 	Description         string    `json:"description"` // legacy human-readable Thai string
 	ReferenceID         string    `json:"reference_id"`
+	ReferenceNo         string    `json:"reference_no"`
 	Time                string    `json:"time"` // "HH:MM"
 	CreatedAt           time.Time `json:"created_at"`
 	ProductName         string    `json:"product_name"`
