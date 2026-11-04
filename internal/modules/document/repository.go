@@ -128,7 +128,7 @@ func (r *repository) List(q ListQuery) ([]DocumentListItem, int64, DocumentStats
 		Select("id, document_no, document_no_full, type, status, payment_status, customer_id, customer_name, staff_name, document_date, due_date, total_amount, source_document_id").
 		// The document list is a creation feed: newest added records first.
 		// document_date is only a deterministic tie-breaker for equal timestamps.
-		Order("created_at DESC, document_date DESC").
+		Order("created_at DESC, document_date DESC, id DESC").
 		Limit(limit).Offset(offset).
 		Scan(&rows).Error
 
