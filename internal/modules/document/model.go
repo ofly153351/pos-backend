@@ -43,6 +43,7 @@ type Document struct {
 	CustomerName      string         `gorm:"not null" json:"customer_name"`
 	CustomerTaxID     *string        `json:"customer_tax_id,omitempty"`
 	CustomerBranch    *string        `json:"customer_branch,omitempty"`
+	CreditReason      *string        `json:"credit_reason,omitempty"`
 	CustomerAddress   string         `gorm:"not null;default:''" json:"customer_address"`
 	CustomerPhone     string         `gorm:"not null;default:''" json:"customer_phone"`
 	StaffID           string         `gorm:"not null" json:"staff_id"`

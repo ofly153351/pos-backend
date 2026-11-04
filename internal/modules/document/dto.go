@@ -11,32 +11,34 @@ type CreateDocumentRequest struct {
 	CustomerAddressOverride string       `json:"customer_address,omitempty"`
 	CustomerPhoneOverride   string       `json:"customer_phone,omitempty"`
 	// Walk-in buyer tax identity for tax invoices (B03); ignored when CustomerID is set.
-	CustomerTaxIDOverride  string                    `json:"customer_tax_id,omitempty"`
-	CustomerBranchOverride string                    `json:"customer_branch,omitempty"`
-	DocumentDate           string                    `json:"document_date"` // YYYY-MM-DD
-	DueDate                *string                   `json:"due_date,omitempty"`
-	ValidUntil             *string                   `json:"valid_until,omitempty"`
-	PriceValidityDays      *int                      `json:"price_validity_days,omitempty"`
-	DeliveryDate           *string                   `json:"delivery_date,omitempty"` // YYYY-MM-DD
-	DeliveryLeadTimeDays   *int                      `json:"delivery_lead_time_days,omitempty"`
-	POReceivedDate         *string                   `json:"po_received_date,omitempty"`       // YYYY-MM-DD
-	ExpectedDeliveryDate   *string                   `json:"expected_delivery_date,omitempty"` // YYYY-MM-DD
-	DeliveryAddress        string                    `json:"delivery_address"`
-	DeliveryContact        string                    `json:"delivery_contact"`
-	DeliveryPhone          string                    `json:"delivery_phone"`
-	SalesZone              string                    `json:"sales_zone"`
-	SalespersonName        string                    `json:"salesperson_name"`
-	InvoiceRefNo           string                    `json:"invoice_ref_no"`
-	SourceDocumentID       *string                   `json:"source_document_id,omitempty"`
-	SourceDocumentIDs      []string                  `json:"source_document_ids,omitempty"`
-	BankAccountID          *string                   `json:"bank_account_id,omitempty"`
-	PORefNo                string                    `json:"po_ref_no"`
-	ShippingFee            float64                   `json:"shipping_fee"`
-	CreditTermDays         int                       `json:"credit_term_days"`
-	Items                  []CreateDocumentItemInput `json:"items"`
-	VatRate                float64                   `json:"vat_rate"`
-	Notes                  *string                   `json:"notes,omitempty"`
-	QuotationSummary       *string                   `json:"quotation_summary,omitempty"`
+	CustomerTaxIDOverride  string `json:"customer_tax_id,omitempty"`
+	CustomerBranchOverride string `json:"customer_branch,omitempty"`
+	// Reason is required for CREDIT_NOTE (B13).
+	Reason               string                    `json:"reason,omitempty"`
+	DocumentDate         string                    `json:"document_date"` // YYYY-MM-DD
+	DueDate              *string                   `json:"due_date,omitempty"`
+	ValidUntil           *string                   `json:"valid_until,omitempty"`
+	PriceValidityDays    *int                      `json:"price_validity_days,omitempty"`
+	DeliveryDate         *string                   `json:"delivery_date,omitempty"` // YYYY-MM-DD
+	DeliveryLeadTimeDays *int                      `json:"delivery_lead_time_days,omitempty"`
+	POReceivedDate       *string                   `json:"po_received_date,omitempty"`       // YYYY-MM-DD
+	ExpectedDeliveryDate *string                   `json:"expected_delivery_date,omitempty"` // YYYY-MM-DD
+	DeliveryAddress      string                    `json:"delivery_address"`
+	DeliveryContact      string                    `json:"delivery_contact"`
+	DeliveryPhone        string                    `json:"delivery_phone"`
+	SalesZone            string                    `json:"sales_zone"`
+	SalespersonName      string                    `json:"salesperson_name"`
+	InvoiceRefNo         string                    `json:"invoice_ref_no"`
+	SourceDocumentID     *string                   `json:"source_document_id,omitempty"`
+	SourceDocumentIDs    []string                  `json:"source_document_ids,omitempty"`
+	BankAccountID        *string                   `json:"bank_account_id,omitempty"`
+	PORefNo              string                    `json:"po_ref_no"`
+	ShippingFee          float64                   `json:"shipping_fee"`
+	CreditTermDays       int                       `json:"credit_term_days"`
+	Items                []CreateDocumentItemInput `json:"items"`
+	VatRate              float64                   `json:"vat_rate"`
+	Notes                *string                   `json:"notes,omitempty"`
+	QuotationSummary     *string                   `json:"quotation_summary,omitempty"`
 }
 
 type CreateDocumentItemInput struct {
@@ -75,6 +77,8 @@ type ConvertRequest struct {
 	ReceiptTemplate   int          `json:"receipt_template,omitempty"`
 	BankAccountID     *string      `json:"bank_account_id,omitempty"`
 	SourceDocumentIDs []string     `json:"source_document_ids,omitempty"`
+	// Reason is required when TargetType is CREDIT_NOTE (B13).
+	Reason string `json:"reason,omitempty"`
 }
 
 // RelatedDoc is a lightweight projection of a document in the same conversion

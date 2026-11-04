@@ -383,6 +383,9 @@ func (s Service) CreateDocument(ctx context.Context, actor auth.Claims, storeID 
 			return nil, err
 		}
 	}
+	if doc.Type == TypeCreditNote {
+		return s.insertCreditNote(ctx, storeID, doc, req.SourceDocumentID, req.Reason)
+	}
 	if len(req.SourceDocumentIDs) == 0 {
 		return s.assignNumberAndInsert(doc)
 	}
@@ -1554,10 +1557,12 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 	if !canConvert(src.Type, target) {
 		return nil, fmt.Errorf("cannot convert %s to %s: %w", src.Type, target, ErrInvalidConversion)
 	}
-	if existing, err := activeChildTx(s.db.WithContext(ctx), src.ID, target); err != nil {
-		return nil, err
-	} else if existing != nil {
-		return nil, &AlreadyConvertedError{DocumentNo: existing.DocumentNoFull}
+	if target != TypeCreditNote {
+		if existing, err := activeChildTx(s.db.WithContext(ctx), src.ID, target); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, &AlreadyConvertedError{DocumentNo: existing.DocumentNoFull}
+		}
 	}
 	if !CanBeSource(src.Status) {
 		return nil, sourceNotEligible(*src)
@@ -1678,6 +1683,12 @@ func (s Service) Convert(ctx context.Context, actor auth.Claims, storeID, id str
 		locked, err := lockDocumentTx(tx, storeID, src.ID)
 		if err != nil {
 			return err
+		}
+		if target == TypeCreditNote {
+			if err := checkCreditNoteTx(tx, locked, doc, creditReasonFrom(ctx)); err != nil {
+				return err
+			}
+			return insertNumberedTx(tx, doc)
 		}
 		// Report an existing target first so a repeat names the created document.
 		existing, err := activeChildTx(tx, locked.ID, target)
@@ -2221,4 +2232,35 @@ func optionalString(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+// ConvertCreditNote issues a full-amount credit note for an original document
+// with the required reason (B13).
+func (s Service) ConvertCreditNote(ctx context.Context, actor auth.Claims, storeID, id, reason string) (*Document, error) {
+	return s.Convert(withCreditReason(ctx, reason), actor, storeID, id, TypeCreditNote, nil)
+}
+
+// insertCreditNote creates a (possibly partial) credit note against a locked
+// original inside one transaction (B13).
+func (s Service) insertCreditNote(ctx context.Context, storeID string, doc *Document, sourceID *string, reason string) (*Document, error) {
+	if sourceID == nil || strings.TrimSpace(*sourceID) == "" {
+		return nil, fieldcheck.New("source_document_id", fieldcheck.CodeRequired, "a credit note must reference the original document")
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		original, err := lockDocumentTx(tx, storeID, strings.TrimSpace(*sourceID))
+		if errors.Is(err, ErrNotFound) {
+			return fieldcheck.New("source_document_id", "not_in_store", "original document not found in this store")
+		}
+		if err != nil {
+			return err
+		}
+		doc.SourceDocumentID = &original.ID
+		if err := checkCreditNoteTx(tx, original, doc, strings.TrimSpace(reason)); err != nil {
+			return err
+		}
+		return insertNumberedTx(tx, doc)
+	}); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }

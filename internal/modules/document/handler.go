@@ -327,7 +327,11 @@ func (h Handler) Convert(c *fiber.Ctx) error {
 	if req.TargetType == TypeReceipt && len(req.SourceDocumentIDs) > 0 {
 		doc, err = h.service.ConvertReceiptFromBills(c.UserContext(), claims, storeID, req.SourceDocumentIDs, req.ReceiptTemplate)
 	} else {
-		doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType, req.BankAccountID)
+		if req.TargetType == TypeCreditNote {
+			doc, err = h.service.ConvertCreditNote(c.UserContext(), claims, storeID, id, req.Reason)
+		} else {
+			doc, err = h.service.Convert(c.UserContext(), claims, storeID, id, req.TargetType, req.BankAccountID)
+		}
 	}
 	if err != nil {
 		return writeError(c, err)
@@ -395,6 +399,13 @@ func writeError(c *fiber.Ctx, err error) error {
 		var se *SourceNotEligibleError
 		if errors.As(err, &se) {
 			details["document_no"], details["from"] = se.DocumentNo, se.Status
+		}
+		return httpx.ErrConflictDetails(c, err.Error(), details)
+	case errors.Is(err, ErrCreditExceedsOriginal):
+		details := fiber.Map{"reason": "credit_exceeds_original"}
+		var ce *CreditExceedsError
+		if errors.As(err, &ce) {
+			details["document_no"], details["remaining"] = ce.DocumentNo, ce.Remaining
 		}
 		return httpx.ErrConflictDetails(c, err.Error(), details)
 	case errors.Is(err, ErrAlreadyConverted):
